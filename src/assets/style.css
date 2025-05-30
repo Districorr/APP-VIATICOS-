@@ -1,0 +1,57 @@
+/* src/assets/style.css */
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  body {
+    @apply font-sans text-districorr-text-dark bg-districorr-bg-light antialiased;
+  }
+
+  /* Estilos base para inputs para que se vean consistentes */
+  input[type="text"],
+  input[type="email"],
+  input[type="password"],
+  input[type="number"],
+  input[type="date"],
+  select,
+  textarea {
+    @apply block w-full px-3 py-2.5 border border-gray-300 rounded-md shadow-sm placeholder-gray-400 
+           focus:outline-none focus:ring-districorr-accent focus:border-districorr-accent 
+           sm:text-sm transition-colors duration-150 ease-in-out;
+  }
+  input[type="checkbox"] {
+    @apply h-4 w-4 text-districorr-accent border-gray-300 rounded focus:ring-districorr-accent;
+  }
+
+  /* Estilos para botones primarios y secundarios */
+  .btn {
+    @apply py-2.5 px-5 text-sm font-semibold rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-offset-2 transition duration-150 ease-in-out disabled:opacity-50 disabled:cursor-not-allowed;
+  }
+  .btn-primary {
+    @apply bg-districorr-primary text-white hover:bg-opacity-80 focus:ring-districorr-primary;
+  }
+  .btn-accent {
+    @apply bg-districorr-accent text-white hover:bg-opacity-80 focus:ring-districorr-accent;
+  }
+  .btn-secondary {
+    @apply bg-white text-gray-700 border border-gray-300 hover:bg-gray-50 focus:ring-indigo-500;
+  }
+  .btn-danger {
+    @apply bg-red-600 text-white hover:bg-red-700 focus:ring-red-500;
+  }
+  .btn-success {
+     @apply bg-green-500 text-white hover:bg-green-600 focus:ring-green-500;
+  }
+}
+
+/* Transiciones de página para Vue Router */
+.fade-enter-active,
+.fade-leave-active {
+  transition: opacity 0.2s ease-out;
+}
+
+.fade-enter-from,
+.fade-leave-to {
+  opacity: 0;
+}
