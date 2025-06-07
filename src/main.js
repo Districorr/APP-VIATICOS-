@@ -1,14 +1,15 @@
-// src/main.js
 import { createApp } from 'vue'
-import App from './App.vue'         // Tu componente raíz
-import router from './router'     // Tu configuración de Vue Router (asegúrate que src/router/index.js exista)
-import './assets/style.css';      // Tu archivo CSS principal con las directivas de Tailwind
+import App from './App.vue'
+import router from './router' // Asume que es src/router/index.js
+import './assets/style.css';
 
-// Creamos la instancia de la aplicación Vue
+console.log('main.js: Instancia de Router importada:', router); // NUEVO LOG
+console.log('main.js: Rutas definidas en el router:', router.getRoutes()); // NUEVO LOG
+
 const app = createApp(App);
 
-// Le decimos a Vue que use el router que configuramos
 app.use(router);
+console.log('main.js: app.use(router) ejecutado.'); // NUEVO LOG
 
-// Montamos la aplicación en el elemento con id="app" en tu index.html
 app.mount('#app');
+console.log('main.js: app.mount("#app") ejecutado.'); // NUEVO LOG

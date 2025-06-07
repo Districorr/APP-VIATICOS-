@@ -1,10 +1,8 @@
 <script setup>
-import { ref, onMounted, computed, inject } from 'vue';
-import { supabase } from '../supabaseClient.js'; // Ajusta la ruta si es necesario
+import { ref, onMounted, computed, inject, watch } from 'vue';
+import { supabase } from '../supabaseClient.js'; 
 import { useRouter } from 'vue-router';
-
-// Para el gráfico con Chart.js y vue-chartjs
-import { Bar } from 'vue-chartjs';
+import { Bar as BarChart } from 'vue-chartjs'; // Renombrado para evitar conflicto con 'BarElement'
 import { 
   Chart as ChartJS, 
   Title, 
@@ -15,29 +13,40 @@ import {
   LinearScale,
   Filler 
 } from 'chart.js';
+import { formatCurrency, formatDate } from '../utils/formatters.js'; 
+
+console.log("DashboardView.vue (Mejorado): Script setup INICIADO");
 
 ChartJS.register(Title, Tooltip, Legend, BarElement, CategoryScale, LinearScale, Filler);
 
 const router = useRouter();
-const userProfile = inject('userProfile', ref(null));
 
-const userName = ref(''); 
-const stats = ref({
+// --- Inyección de Dependencias de App.vue ---
+// Usar valores por defecto (refs que contienen null) para mayor resiliencia
+const userProfileInjected = inject('userProfile', ref(null));
+const currentUserSessionInjected = inject('currentUserSession', ref(null));
+const appLoading = inject('loadingAuthSession', ref(true)); // Loader principal de sesión de App.vue
+const appProfileLoading = inject('loadingUserProfile', ref(false)); // Loader de perfil de App.vue
+const appInitialAuthCheckDone = inject('initialAuthCheckDone', ref(false));
+
+// --- Estado Reactivo Local del Componente ---
+const userNameForGreeting = ref(''); 
+const dashboardStats = ref({
   viajesCount: 0,
   gastosCount: 0,
+  // Podrías añadir más estadísticas aquí si las necesitas
 });
-const ultimosGastos = ref([]); // Para la lista de los 3 más recientes
+const ultimosGastosMostrados = ref([]); // Para la lista de los N más recientes
 
-// Estados de carga individuales
-const loadingStats = ref(true);
-const loadingGastosRecientes = ref(true); 
-const loadingChartData = ref(true); 
+// Estados de carga específicos para las secciones de este dashboard
+const isLoadingDashboardKPIs = ref(true);
+const isLoadingGastosRecientes = ref(true);
+const isLoadingChartData = ref(true);
+const dashboardErrorMessage = ref(''); // Un único mensaje de error para el dashboard
 
-const errorMessage = ref('');
-
-// Para el gráfico
-const chartData = ref(null); 
-const chartOptions = ref({
+// Para el gráfico de barras
+const barChartData = ref(null); 
+const barChartOptions = ref({
   responsive: true,
   maintainAspectRatio: false,
   indexAxis: 'x', 
@@ -46,41 +55,40 @@ const chartOptions = ref({
       beginAtZero: true,
       ticks: { 
         color: '#4b5563', 
-        font: { family: 'Inter, system-ui, sans-serif' },
+        font: { family: 'Inter, system-ui, sans-serif' }, // Asegúrate que esta fuente esté cargada
         callback: function(value) { 
-          return '$' + value.toLocaleString('es-AR', {minimumFractionDigits: 0, maximumFractionDigits: 0});
+          return formatCurrency(value, 'ARS', 0); // Usar formatter
         }
       },
       grid: { color: '#e5e7eb', drawBorder: false }
     },
     x: {
       ticks: { color: '#4b5563', font: { family: 'Inter, system-ui, sans-serif' }},
-      grid: { display: false }
+      grid: { display: false } // Ocultar líneas de la cuadrícula X para un look más limpio
     }
   },
   plugins: {
-    legend: { display: false }, 
+    legend: { display: false }, // Usualmente no necesaria para un solo dataset
     title: {
       display: true,
-      text: 'Últimos 5 Gastos Registrados', 
+      text: 'Últimos 5 Gastos Registrados (ARS)', 
       padding: { top: 10, bottom: 25 },
       color: '#1f2937',
       font: { size: 16, weight: '600', family: 'Inter, system-ui, sans-serif' }
     },
     tooltip: {
       enabled: true,
-      backgroundColor: 'rgba(0,0,0,0.75)',
-      titleFont: { family: 'Inter, system-ui, sans-serif', weight: 'bold' },
-      bodyFont: { family: 'Inter, system-ui, sans-serif' },
-      padding: 12,
-      boxPadding: 4,
-      cornerRadius: 4,
+      backgroundColor: 'rgba(0,0,0,0.8)', // Ligeramente más opaco
+      titleFont: { family: 'Inter, system-ui, sans-serif', weight: 'bold', size: 13 },
+      bodyFont: { family: 'Inter, system-ui, sans-serif', size: 12 },
+      padding: 10, // Ajustar padding
+      boxPadding: 3,
+      cornerRadius: 6, // Bordes más redondeados
       callbacks: {
         label: function(context) {
-          let label = context.dataset.label || '';
-          if (label) { label += ': '; }
+          let label = context.dataset.label || 'Monto';
           if (context.parsed.y !== null) {
-            label += new Intl.NumberFormat('es-AR', { style: 'currency', currency: 'ARS' }).format(context.parsed.y);
+            label += `: ${formatCurrency(context.parsed.y, 'ARS')}`;
           }
           return label;
         }
@@ -89,364 +97,437 @@ const chartOptions = ref({
   },
   elements: {
     bar: {
-      backgroundColor: 'rgba(59, 130, 246, 0.7)', 
+      backgroundColor: 'rgba(59, 130, 246, 0.6)', // Ligeramente más transparente
       borderColor: 'rgba(59, 130, 246, 1)',     
       borderWidth: 1,
-      hoverBackgroundColor: 'rgba(37, 99, 235, 0.9)', 
+      hoverBackgroundColor: 'rgba(37, 99, 235, 0.8)', 
       hoverBorderColor: 'rgba(37, 99, 235, 1)',
-      borderRadius: { topLeft: 6, topRight: 6 },
-      borderSkipped: false,
+      borderRadius: 5, // Aplicar a todas las esquinas
+      // borderSkipped: false, // Puede ser útil si quieres bordes en todos lados
     }
   }
 });
 
-const isLoadingDashboard = computed(() => {
-  // Verdadero si CUALQUIERA de las cargas principales está activa
-  return loadingStats.value || loadingGastosRecientes.value || loadingChartData.value;
+// --- Propiedades Computadas ---
+
+// Loader general para el contenido de este dashboard (KPIs, gastos recientes, gráfico)
+const isLoadingDashboardContentOverall = computed(() => {
+  return isLoadingDashboardKPIs.value || isLoadingGastosRecientes.value || isLoadingChartData.value;
 });
 
-const nombreCompletoUsuario = computed(() => {
-  return userName.value || userProfile.value?.nombre_completo || userProfile.value?.email || 'Estimado Usuario';
+// Nombre a mostrar en el saludo, con fallbacks
+const greetingName = computed(() => {
+  if (userNameForGreeting.value) return userNameForGreeting.value;
+  if (userProfileInjected.value?.nombre_completo) return userProfileInjected.value.nombre_completo.split(' ')[0]; // Primer nombre
+  if (currentUserSessionInjected.value?.user?.email) return currentUserSessionInjected.value.user.email.split('@')[0];
+  return 'Usuario';
 });
-// --- Funciones de formato ---
-const formatCurrency = (amount, currency = 'ARS') => {
-  if (amount === null || amount === undefined || isNaN(parseFloat(amount))) return 'N/A';
-  return new Intl.NumberFormat('es-AR', { style: 'currency', currency: currency, minimumFractionDigits: 2 }).format(amount);
-};
 
-const formatDate = (dateString, options = { day: '2-digit', month: 'short' }) => {
-  if (!dateString) return 'N/A';
-  // Intentar parsear asumiendo que la fecha de Supabase es YYYY-MM-DD
-  const parts = String(dateString).split('-');
-  let date;
-  if (parts.length === 3) {
-    // Date.UTC para evitar problemas de timezone si solo es fecha
-    date = new Date(Date.UTC(parseInt(parts[0]), parseInt(parts[1]) - 1, parseInt(parts[2])));
-  } else {
-    // Fallback para otros formatos o timestamps completos
-    date = new Date(dateString);
+// Determina si se debe mostrar el loader principal de App.vue
+const showAppLevelLoader = computed(() => {
+  return appLoading.value || (appInitialAuthCheckDone.value && !!currentUserSessionInjected.value && appProfileLoading.value);
+});
+
+// Determina si se puede mostrar el contenido principal del dashboard
+const canShowDashboardContent = computed(() => {
+  return appInitialAuthCheckDone.value && !!currentUserSessionInjected.value && !!userProfileInjected.value;
+});
+
+// Determina si se debe mostrar un mensaje para iniciar sesión
+const showLoginPrompt = computed(() => {
+  return appInitialAuthCheckDone.value && !currentUserSessionInjected.value;
+});
+
+
+// --- Métodos de Carga de Datos ---
+
+async function fetchDashboardKPIs() {
+  console.log("%cDashboardView: fetchDashboardKPIs INICIO", "color: dodgerblue;");
+  isLoadingDashboardKPIs.value = true;
+  const userId = currentUserSessionInjected.value?.user?.id;
+
+  if (!userId) {
+    console.warn("DashboardView fetchDashboardKPIs: No hay user_id para cargar KPIs.");
+    dashboardStats.value = { viajesCount: 0, gastosCount: 0 }; // Resetear stats
+    isLoadingDashboardKPIs.value = false;
+    return;
   }
-  if (isNaN(date.getTime())) return 'Fecha Inválida';
-  // Usar es-ES para formatos como "10 may", pero es-AR para otros si se prefiere
-  return date.toLocaleDateString('es-ES', {...options, timeZone: 'UTC'}); // Añadir timeZone UTC para consistencia
-};
-
-async function fetchDashboardData() {
-  console.log("%cDashboardView (COMPLETO): fetchDashboardData INICIO", "color: darkcyan; font-weight: bold;");
-  loadingStats.value = true;
-  loadingGastosRecientes.value = true;
-  loadingChartData.value = true;
-  errorMessage.value = '';
 
   try {
-    const { data: { user } } = await supabase.auth.getUser();
-    if (!user) {
-      console.error("DashboardView: Usuario no autenticado en fetchDashboardData");
-      errorMessage.value = "Sesión no válida. Por favor, inicie sesión de nuevo.";
-      // Establecer todos los loaders a false para que no se quede cargando indefinidamente
-      loadingStats.value = false;
-      loadingGastosRecientes.value = false;
-      loadingChartData.value = false;
-      throw new Error("Usuario no autenticado.");
-    }
-    console.log("DashboardView: Usuario autenticado, UID:", user.id);
-
-    // Actualizar userName (nombre completo) del perfil
-    if (userProfile.value && userProfile.value.nombre_completo) {
-      userName.value = userProfile.value.nombre_completo;
-    } else if (userProfile.value && userProfile.value.email) {
-        userName.value = userProfile.value.email;
-    } else {
-        console.log("DashboardView: userProfile inyectado no tiene nombre/email, intentando fetch directo.");
-        const { data: profileData, error: profileError } = await supabase.from('perfiles').select('nombre_completo, email').eq('id', user.id).single();
-        if (profileError && profileError.code !== 'PGRST116') { 
-            console.warn("DashboardView: Error obteniendo nombre/email del perfil desde BD:", profileError.message);
-        }
-        userName.value = profileData?.nombre_completo || profileData?.email || user.email || 'Usuario';
-    }
-    console.log("DashboardView: nombreCompletoUsuario será:", nombreCompletoUsuario.value);
-
-
-    // --- Sub-función para Cargar Estadísticas (Viajes y Gastos Count) ---
-    const cargarStats = async () => {
-      console.log("DashboardView: cargarStats INICIO");
-      try {
-        const [viajesRes, gastosRes] = await Promise.all([
-          supabase.from('viajes').select('*', { count: 'exact', head: true }).eq('user_id', user.id),
-          supabase.from('gastos').select('*', { count: 'exact', head: true }).eq('user_id', user.id),
-        ]);
-
-        if (viajesRes.error) throw new Error(`Error contando viajes: ${viajesRes.error.message}`);
-        stats.value.viajesCount = viajesRes.count || 0;
-        console.log("DashboardView: stats.viajesCount:", stats.value.viajesCount);
-
-        if (gastosRes.error) throw new Error(`Error contando gastos: ${gastosRes.error.message}`);
-        stats.value.gastosCount = gastosRes.count || 0;
-        console.log("DashboardView: stats.gastosCount:", stats.value.gastosCount);
-
-      } catch(e) {
-        console.error("DashboardView: ERROR en cargarStats:", e.message);
-        errorMessage.value += `\nError cargando estadísticas: ${e.message}.`; // Acumular errores
-      } finally {
-        loadingStats.value = false;
-        console.log("DashboardView: cargarStats FIN, loadingStats:", loadingStats.value);
-      }
-    };
-
-    // --- Sub-función para Cargar Últimos Gastos Recientes y Datos del Gráfico ---
-    const cargarGastosRecientesYGrafico = async () => {
-      console.log("DashboardView: cargarGastosRecientesYGrafico INICIO");
-      try {
-        // !!! VERIFICA que 'adelanto_especifico_aplicado' sea el nombre correcto de la columna en tu tabla 'gastos' !!!
-        const nombreColumnaAdelantoGasto = 'adelanto_especifico_aplicado'; 
-        const { data: gastosRecientesData, error: gastosRecientesError } = await supabase
-          .from('gastos')
-          .select(`
-            id, fecha_gasto, descripcion_general, monto_total, moneda, 
-            ${nombreColumnaAdelantoGasto}, 
-            tipos_gasto_config (nombre_tipo_gasto),
-            viajes (nombre_viaje)
-          `)
-          .eq('user_id', user.id)
-          .order('fecha_gasto', { ascending: false })
-          .order('created_at', { ascending: false }) // Como desempate si hay varios en el mismo día
-          .limit(5); // Traer los últimos 5 para tener datos para el gráfico
-
-        if (gastosRecientesError) throw new Error(`Error obteniendo gastos recientes: ${gastosRecientesError.message}`);
-        
-        ultimosGastos.value = (gastosRecientesData || []).slice(0, 3); // Tomar solo los 3 más recientes para la lista
-        console.log("DashboardView: ultimosGastos cargados (primeros 3 de 5):", JSON.parse(JSON.stringify(ultimosGastos.value)));
-        
-        // Preparar datos para el gráfico
-        if (gastosRecientesData && gastosRecientesData.length > 0) {
-          const gastosParaGrafico = [...gastosRecientesData].reverse(); // De más antiguo a más nuevo para el eje X
-          chartData.value = {
-            labels: gastosParaGrafico.map(g => {
-              const tipo = g.tipos_gasto_config ? g.tipos_gasto_config.nombre_tipo_gasto : 'Gral';
-              const tipoAbreviado = tipo.length > 10 ? tipo.substring(0, 8) + '...' : tipo;
-              return `${formatDate(g.fecha_gasto, {day:'numeric', month:'short'})} (${tipoAbreviado})`;
-            }),
-            datasets: [ { label: 'Monto Gasto', data: gastosParaGrafico.map(g => g.monto_total || 0) } ],
-          };
-          console.log("DashboardView: chartData preparado.", JSON.parse(JSON.stringify(chartData.value)));
-        } else {
-            chartData.value = null; // Asegurar que sea null si no hay datos
-            console.log("DashboardView: No hay datos suficientes para el gráfico.");
-        }
-      } catch(e) {
-        console.error("DashboardView: ERROR en cargarGastosRecientesYGrafico:", e.message);
-        errorMessage.value += `\nError cargando gastos recientes/gráfico: ${e.message}.`;
-        chartData.value = null; // Asegurar que chartData es null en caso de error
-      } finally {
-        loadingGastosRecientes.value = false; 
-        console.log("DashboardView: cargarGastosRecientesYGrafico, loadingGastosRecientes:", loadingGastosRecientes.value);
-        loadingChartData.value = false; 
-        console.log("DashboardView: cargarGastosRecientesYGrafico, loadingChartData:", loadingChartData.value);
-      }
-    };
-
-    console.log("DashboardView: Ejecutando Promise.allSettled para cargarStats y cargarGastosRecientesYGrafico");
-    const results = await Promise.allSettled([
-        cargarStats(),
-        cargarGastosRecientesYGrafico()
+    // Usar Promise.all para ejecutar ambas consultas en paralelo
+    const [viajesRes, gastosRes] = await Promise.all([
+      supabase.from('viajes').select('id', { count: 'exact', head: true }).eq('user_id', userId),
+      supabase.from('gastos').select('id', { count: 'exact', head: true }).eq('user_id', userId),
     ]);
-    console.log("DashboardView: Promise.allSettled COMPLETADO. Resultados:", results);
 
-    results.forEach(result => {
-        if (result.status === 'rejected') {
-            // Los errores individuales ya deberían haber sido logueados y añadidos a errorMessage
-            console.warn("DashboardView: Una de las promesas de carga del dashboard falló:", result.reason);
-        }
-    });
+    if (viajesRes.error) throw new Error(`Contando viajes: ${viajesRes.error.message}`);
+    dashboardStats.value.viajesCount = viajesRes.count || 0;
 
-  } catch (error) { 
-    console.error("DashboardView: Error CAPTURADO en el bloque principal de fetchDashboardData:", error.message);
-    errorMessage.value = error.message || "No se pudieron cargar los datos del dashboard.";
-    loadingStats.value = false;
-    loadingGastosRecientes.value = false;
-    loadingChartData.value = false;
+    if (gastosRes.error) throw new Error(`Contando gastos: ${gastosRes.error.message}`);
+    dashboardStats.value.gastosCount = gastosRes.count || 0;
+
+    console.log("DashboardView: KPIs cargados:", dashboardStats.value);
+  } catch(e) {
+    console.error("DashboardView: ERROR en fetchDashboardKPIs:", e.message, e);
+    dashboardErrorMessage.value = (dashboardErrorMessage.value ? dashboardErrorMessage.value + '\n' : '') + `Error cargando estadísticas: ${e.message}.`;
+    dashboardStats.value = { viajesCount: 0, gastosCount: 0 }; // Resetear en caso de error
+  } finally {
+    isLoadingDashboardKPIs.value = false;
+    console.log("%cDashboardView: fetchDashboardKPIs FIN", "color: dodgerblue;");
   }
-  console.log("%cDashboardView: fetchDashboardData FIN. isLoadingDashboard computed:", "color: darkcyan; font-weight: bold;", isLoadingDashboard.value);
 }
 
+async function fetchGastosRecientesYParaChart() {
+  console.log("%cDashboardView: fetchGastosRecientesYParaChart INICIO", "color: mediumseagreen;");
+  isLoadingGastosRecientes.value = true;
+  isLoadingChartData.value = true; // Ambos se cargan aquí
+  ultimosGastosMostrados.value = [];
+  barChartData.value = null;
+
+  const userId = currentUserSessionInjected.value?.user?.id;
+  if (!userId) {
+    console.warn("DashboardView fetchGastosRecientesYParaChart: No hay user_id.");
+    isLoadingGastosRecientes.value = false;
+    isLoadingChartData.value = false;
+    return;
+  }
+
+  try {
+    const { data: gastosData, error } = await supabase
+      .from('gastos')
+      .select('id, fecha_gasto, descripcion_general, monto_total, moneda, tipos_gasto_config (nombre_tipo_gasto), viajes (nombre_viaje)') // Adelanto no se usa aquí
+      .eq('user_id', userId)
+      .order('fecha_gasto', { ascending: false })
+      .order('created_at', { ascending: false }) // Desempate por fecha de creación
+      .limit(5); // Obtener los últimos 5 para el gráfico
+
+    if (error) throw new Error(`Obteniendo gastos recientes: ${error.message}`);
+    
+    ultimosGastosMostrados.value = (gastosData || []).slice(0, 3); // Mostrar los 3 más recientes en la lista
+    console.log("DashboardView: Últimos 3 gastos para lista:", ultimosGastosMostrados.value);
+    
+    if (gastosData && gastosData.length > 0) {
+      // Para el gráfico, usar los hasta 5 gastos obtenidos, revertidos para orden cronológico
+      const gastosParaGrafico = [...gastosData].reverse(); 
+      barChartData.value = {
+        labels: gastosParaGrafico.map(g => 
+          `${formatDate(g.fecha_gasto, {day:'numeric', month:'short'})} (${(g.tipos_gasto_config?.nombre_tipo_gasto || 'Gral.').substring(0,10)}...)`
+        ),
+        datasets: [ { 
+          label: 'Monto Gasto', // Usado en el tooltip
+          data: gastosParaGrafico.map(g => g.monto_total || 0) 
+          // Los colores se definen en barChartOptions.elements.bar.backgroundColor
+        } ],
+      };
+      console.log("DashboardView: Datos para gráfico generados:", barChartData.value);
+    } else {
+      console.log("DashboardView: No se encontraron gastos para el gráfico.");
+      // No es necesario setear barChartData a null aquí, el v-if en el template lo manejará
+    }
+  } catch(e) {
+    console.error("DashboardView: ERROR en fetchGastosRecientesYParaChart:", e.message, e);
+    dashboardErrorMessage.value = (dashboardErrorMessage.value ? dashboardErrorMessage.value + '\n' : '') + `Error cargando gastos/gráfico: ${e.message}.`;
+    // barChartData.value = null; // Ya es null por defecto o si no hay datos
+  } finally {
+    isLoadingGastosRecientes.value = false;
+    isLoadingChartData.value = false;
+    console.log("%cDashboardView: fetchGastosRecientesYParaChart FIN", "color: mediumseagreen;");
+  }
+}
+
+// Función principal para cargar todos los datos del dashboard
+async function loadAllDashboardData() {
+    console.log("%cDashboardView: loadAllDashboardData INICIO", "color: darkcyan; font-weight: bold;");
+    dashboardErrorMessage.value = ''; // Limpiar errores previos
+    
+    // Establecer el nombre para el saludo
+    if (userProfileInjected.value?.nombre_completo) {
+        userNameForGreeting.value = userProfileInjected.value.nombre_completo.split(' ')[0]; // Primer nombre
+    } else if (currentUserSessionInjected.value?.user?.email) {
+        userNameForGreeting.value = currentUserSessionInjected.value.user.email.split('@')[0];
+    } else {
+        userNameForGreeting.value = 'Usuario';
+    }
+    console.log("DashboardView loadAllDashboardData: userNameForGreeting establecido a:", userNameForGreeting.value);
+    
+    // Ejecutar cargas en paralelo
+    await Promise.all([
+        fetchDashboardKPIs(),
+        fetchGastosRecientesYParaChart()
+    ]);
+    console.log("%cDashboardView: loadAllDashboardData FIN", "color: darkcyan; font-weight: bold;");
+}
+
+// --- Watcher para Carga de Datos basada en Estado Global de App.vue ---
+watch(
+  [appInitialAuthCheckDone, appLoading, appProfileLoading, currentUserSessionInjected, userProfileInjected], 
+  ([initialCheckDone, isAppLoading, isProfileLoading, currentSession, currentProfile], 
+   [prevInitialCheckDone, prevIsAppLoading, prevIsProfileLoading, prevCurrentSession, prevCurrentProfile]) => {
+    
+    // Loguear solo si algún valor relevante cambia para evitar spam
+    const relevantChange = initialCheckDone !== prevInitialCheckDone || 
+                           isAppLoading !== prevIsAppLoading || 
+                           isProfileLoading !== prevIsProfileLoading || 
+                           !!currentSession !== !!prevCurrentSession ||
+                           !!currentProfile !== !!prevCurrentProfile;
+
+    if (relevantChange) {
+        console.log(`%cDashboardView Watcher (App State Change):
+          InitialAuthDone: ${initialCheckDone}
+          AppLoading (Sesión App.vue): ${isAppLoading}
+          ProfileLoading (Perfil App.vue): ${isProfileLoading}
+          UserSession (App.vue): ${!!currentSession}
+          UserProfile (App.vue): ${!!currentProfile}`, "color: purple");
+    }
+
+    if (initialCheckDone && !isAppLoading && currentSession) {
+      if (!isProfileLoading && currentProfile) {
+        console.log("%cDashboardView Watcher: Auth y Perfil de App.vue listos. Cargando datos del dashboard...", "color: green;");
+        loadAllDashboardData();
+      } else if (isProfileLoading) {
+        console.log("%cDashboardView Watcher: Auth de App.vue lista, pero perfil de App.vue aún cargando. Esperando...", "color: orange;");
+      } else if (!currentProfile && !isProfileLoading) {
+        console.warn("%cDashboardView Watcher: Auth lista, sesión existe, pero no hay perfil de App.vue (y no está cargando). Se intentará cargar datos del dashboard, pero puede faltar información de perfil para el saludo.", "color: orange;");
+        loadAllDashboardData(); 
+      }
+    } else if (initialCheckDone && !currentSession) {
+      console.log("%cDashboardView Watcher: No hay sesión de usuario (detectado desde App.vue). Limpiando datos del dashboard.", "color: red;");
+      dashboardStats.value = { viajesCount: 0, gastosCount: 0 };
+      ultimosGastosMostrados.value = [];
+      barChartData.value = null;
+      userNameForGreeting.value = '';
+      // Asegurar que los loaders locales se reseteen si la sesión se pierde
+      isLoadingDashboardKPIs.value = false; 
+      isLoadingGastosRecientes.value = false;
+      isLoadingChartData.value = false;
+    } else if (!initialCheckDone || isAppLoading) {
+        // console.log("%cDashboardView Watcher: Esperando que App.vue termine su carga inicial de Auth/Sesión.", "color: lightgray;");
+    }
+  }, 
+  { immediate: true, deep: true } // immediate:true para la carga inicial, deep:true porque observamos objetos anidados
+);
+
+
+// --- Ciclo de Vida ---
 onMounted(() => {
-  // Loguear el estado del perfil inyectado al montar.
-  // fetchDashboardData se encargará de usarlo o cargar uno nuevo si es necesario.
-  console.log("%cDashboardView (COMPLETO): Componente MONTADO.", "color: green; font-weight: bold;");
-  console.log("DashboardView (COMPLETO): userProfile inyectado al montar:", userProfile.value ? JSON.parse(JSON.stringify(userProfile.value)) : null);
-  
-  fetchDashboardData(); // Iniciar la carga de todos los datos del dashboard
+  console.log("%cDashboardView.vue: Componente MONTADO (onMounted ejecutado).", "color: sienna; font-weight: bold;");
+  // La lógica principal de carga de datos está en el watcher para asegurar que
+  // las dependencias inyectadas (userProfile, currentUserSession) estén disponibles y actualizadas.
 });
 
-// Funciones de navegación (sin cambios respecto a la versión anterior)
+// --- Métodos de Navegación ---
 const navigateTo = (routeName, params = {}, query = {}) => {
-  console.log(`DashboardView: Navegando a '${routeName}' con params: ${JSON.stringify(params)} y query: ${JSON.stringify(query)}`);
+  console.log(`DashboardView: Navegando a la ruta '${routeName}' con params: ${JSON.stringify(params)} y query: ${JSON.stringify(query)}`);
   router.push({ name: routeName, params, query });
 };
+
+console.log("DashboardView.vue (Mejorado): Script setup FINALIZADO");
 </script>
 <template>
   <div class="min-h-screen bg-gray-100/50 p-4 sm:p-6 lg:p-8 print:hidden">
     <div class="max-w-7xl mx-auto space-y-8">
 
-      <!-- Saludo al Usuario -->
-      <div class="mb-10">
-        <h1 class="text-3xl sm:text-4xl font-bold text-districorr-primary tracking-tight">
-          ¡Hola, {{ nombreCompletoUsuario }}!
-        </h1>
-        <p class="mt-2 text-lg text-districorr-text-medium">
-          Bienvenido a tu panel de control de InfoGastos. Aquí tienes un resumen de tu actividad.
-        </p>
+      <!-- BLOQUE 1: Loader de App.vue o Prompt de Login -->
+      <div v-if="showAppLevelLoader" class="text-center py-20">
+        <div class="flex justify-center items-center">
+          <svg class="animate-spin h-10 w-10 text-districorr-primary" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg>
+          <p class="ml-4 text-xl text-gray-600">Cargando datos de sesión y perfil...</p>
+        </div>
+        <!-- {{ console.log("DashboardView Template: BLOQUE 1 - Mostrando loader de App.vue (sesión/perfil global)") }} -->
       </div>
-
-      <!-- Indicador de Carga General (mientras alguna de las partes principales carga) o Error General -->
-      <!-- Se muestra si todos los loaders principales están activos y no hay error, y aún no hay datos en stats o ultimosGastos -->
-      <div v-if="isLoadingDashboard && !errorMessage && !stats.viajesCount && !stats.gastosCount && ultimosGastos.length === 0" 
-           class="text-center text-gray-500 py-20">
-          <svg class="animate-spin h-12 w-12 text-districorr-primary mx-auto" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-              <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
-              <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-          </svg>
-          <p class="mt-3 text-lg">Cargando tu información...</p>
+      
+      <div v-else-if="showLoginPrompt" class="text-center py-20">
+         <p class="text-xl text-gray-700">Por favor, <router-link :to="{name: 'Login'}" class="font-semibold hover:underline text-districorr-accent">inicia sesión</router-link> para ver tu dashboard.</p>
+         <!-- {{ console.log("DashboardView Template: BLOQUE 1 - Mostrando mensaje para iniciar sesión") }} -->
       </div>
-      <!-- Mostrar error principal si existe y no hay datos principales cargados -->
-      <div v-else-if="errorMessage && !stats.viajesCount && !stats.gastosCount && !ultimosGastos.length" 
-           class="bg-red-50 border-l-4 border-red-500 text-red-700 p-4 rounded-md shadow-md" role="alert">
-        <p class="font-bold">Error al cargar el dashboard:</p>
-        <p class="whitespace-pre-line">{{ errorMessage }}</p> <!-- whitespace-pre-line para respetar saltos de línea en errores acumulados -->
-      </div>
-
-      <!-- Contenido Principal del Dashboard -->
-      <!-- Se muestra si no hay un error fatal que impida mostrar CUALQUIER contenido,
-           o si el spinner general ya no está activo. Los loaders internos manejan sus secciones. -->
-      <div v-else class="space-y-10">
-        <!-- Tarjetas de Estadísticas -->
-        <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-          <!-- Tarjeta Viajes -->
-          <div class="bg-white p-6 rounded-xl shadow-lg hover:shadow-xl transition-all duration-300 ease-in-out transform hover:-translate-y-1 border-l-4 border-districorr-accent min-h-[160px] flex flex-col">
-            <div v-if="loadingStats" class="flex-grow flex items-center justify-center">
-                <svg class="animate-spin h-8 w-8 text-districorr-accent" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg>
-            </div>
-            <div v-else @click="navigateTo('ViajesList')" class="cursor-pointer flex-grow flex flex-col justify-between">
-              <div>
-                <div class="flex items-center justify-between">
-                  <div>
-                    <p class="text-sm font-medium text-districorr-text-medium uppercase tracking-wider">Viajes / Períodos</p>
-                    <p class="text-4xl font-bold text-districorr-primary mt-1">{{ stats.viajesCount }}</p>
-                  </div>
-                  <div class="p-3.5 rounded-full bg-districorr-accent/10 text-districorr-accent">
-                    <svg xmlns="http://www.w3.org/2000/svg" class="h-8 w-8" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M13 16V6a1 1 0 00-1-1H4a1 1 0 00-1 1v10a1 1 0 001 1h1m8-1a1 1 0 01-1 1H9m4-1V8a1 1 0 011-1h2.586a1 1 0 01.707.293l3.414 3.414a1 1 0 01.293.707V16m-4-1v-1h-4v1m0-4h4" /></svg>
-                  </div>
-                </div>
-              </div>
-              <p class="text-xs text-gray-500 mt-3">Total de registros de viajes y períodos de rendición.</p>
-            </div>
-          </div>
-
-          <!-- Tarjeta Gastos -->
-          <div class="bg-white p-6 rounded-xl shadow-lg hover:shadow-xl transition-all duration-300 ease-in-out transform hover:-translate-y-1 border-l-4 border-green-500 min-h-[160px] flex flex-col">
-            <div v-if="loadingStats" class="flex-grow flex items-center justify-center">
-                <svg class="animate-spin h-8 w-8 text-green-500" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg>
-            </div>
-            <div v-else @click="navigateTo('GastosList')" class="cursor-pointer flex-grow flex flex-col justify-between">
-              <div>
-                <div class="flex items-center justify-between">
-                  <div>
-                    <p class="text-sm font-medium text-districorr-text-medium uppercase tracking-wider">Gastos Registrados</p>
-                    <p class="text-4xl font-bold text-districorr-primary mt-1">{{ stats.gastosCount }}</p>
-                  </div>
-                  <div class="p-3.5 rounded-full bg-green-500/10 text-green-600">
-                    <svg xmlns="http://www.w3.org/2000/svg" class="h-8 w-8" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M17 9V7a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2m2 4h10a2 2 0 002-2v-6a2 2 0 00-2-2H9a2 2 0 00-2 2v6a2 2 0 002 2zm7-5a2 2 0 11-4 0 2 2 0 014 0z" /></svg>
-                  </div>
-                </div>
-              </div>
-              <p class="text-xs text-gray-500 mt-3">Total de gastos individuales documentados.</p>
-            </div>
-          </div>
-
-          <!-- Botones de Acción Rápida -->
-           <div class="bg-white p-6 rounded-xl shadow-lg flex flex-col justify-center space-y-4 border-l-4 border-gray-400 min-h-[160px]">
-              <button @click="navigateTo('ViajeNuevo')"
-                      class="w-full bg-districorr-accent text-white font-semibold py-3 px-4 rounded-lg hover:bg-opacity-85 focus:outline-none focus:ring-2 focus:ring-districorr-accent focus:ring-offset-2 transition-all duration-150 ease-in-out transform hover:scale-103 flex items-center justify-center text-sm shadow-md hover:shadow-lg">
-                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="w-5 h-5 mr-2.5"><path d="M10.75 4.75a.75.75 0 00-1.5 0v4.5h-4.5a.75.75 0 000 1.5h4.5v4.5a.75.75 0 001.5 0v-4.5h4.5a.75.75 0 000-1.5h-4.5v-4.5z" /></svg>
-                Nuevo Viaje/Período
-              </button>
-              <button @click="navigateTo('GastoNuevo')" 
-                      class="w-full bg-green-500 text-white font-semibold py-3 px-4 rounded-lg hover:bg-green-600 focus:outline-none focus:ring-2 focus:ring-green-500 focus:ring-offset-2 transition-all duration-150 ease-in-out transform hover:scale-103 flex items-center justify-center text-sm shadow-md hover:shadow-lg">
-                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="w-5 h-5 mr-2.5"><path d="M10.75 4.75a.75.75 0 00-1.5 0v4.5h-4.5a.75.75 0 000 1.5h4.5v4.5a.75.75 0 001.5 0v-4.5h4.5a.75.75 0 000-1.5h-4.5v-4.5z" /></svg>
-                Nuevo Gasto
-              </button>
-          </div>
+      
+      <!-- BLOQUE 2: Contenido del Dashboard del Usuario (Solo si todo está listo) -->
+      <div v-else-if="canShowDashboardContent">
+        <!-- {{ console.log("DashboardView Template: BLOQUE 2 - Mostrando contenido principal del dashboard (saludo, etc.)") }} -->
+        <div class="mb-10">
+          <h1 class="text-3xl sm:text-4xl font-bold text-districorr-primary tracking-tight">
+            ¡Hola, {{ greetingName }}!
+          </h1>
+          <p class="mt-2 text-lg text-districorr-text-medium">
+            Bienvenido a tu panel de control de InfoGastos.
+          </p>
         </div>
 
-        <!-- Sección de Últimos Gastos y Gráfico -->
-        <div class="grid grid-cols-1 lg:grid-cols-5 gap-6 items-start">
-          <!-- Lista de Últimos Gastos -->
-          <div class="lg:col-span-2 bg-white p-6 rounded-xl shadow-lg border border-gray-200/80 min-h-[300px]">
-            <h2 class="text-xl font-semibold text-districorr-primary mb-5">Últimos Gastos Registrados</h2>
-            <div v-if="loadingGastosRecientes" class="text-center text-gray-400 py-10">
-              <svg class="animate-spin h-8 w-8 text-districorr-primary mx-auto" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg>
-              <p class="mt-2.5 text-sm">Cargando gastos recientes...</p>
-            </div>
-            <div v-else-if="ultimosGastos.length > 0" class="space-y-4">
-              <div v-for="gasto in ultimosGastos" :key="gasto.id" 
-                   class="p-3.5 rounded-lg hover:bg-gray-100/70 transition-colors duration-150 border border-gray-200/70">
-                <div class="flex justify-between items-center gap-3">
-                  <div class="flex-1 min-w-0">
-                    <p class="text-sm font-medium text-districorr-text-dark truncate" :title="gasto.descripcion_general || gasto.tipos_gasto_config?.nombre_tipo_gasto || 'Gasto'">
-                      {{ gasto.descripcion_general || gasto.tipos_gasto_config?.nombre_tipo_gasto || 'Gasto sin descripción' }}
-                    </p>
-                    <p class="text-xs text-gray-500 mt-0.5">
-                      {{ formatDate(gasto.fecha_gasto, {day: 'numeric', month: 'long'}) }} 
-                      <span v-if="gasto.viajes" class="italic">- En: {{ gasto.viajes.nombre_viaje.substring(0,20) }}<span v-if="gasto.viajes.nombre_viaje.length > 20">...</span></span>
-                    </p>
-                  </div>
-                  <p class="text-sm font-semibold text-gray-700 whitespace-nowrap">
-                    {{ formatCurrency(gasto.monto_total, gasto.moneda) }}
-                  </p>
-                </div>
+        <!-- Banner de Error para datos del Dashboard -->
+        <div v-if="dashboardErrorMessage && !isLoadingDashboardContentOverall" class="error-banner mb-6" role="alert">
+          <p class="font-bold">Ocurrió un error al cargar los datos del dashboard:</p>
+          <p class="whitespace-pre-line text-sm">{{ dashboardErrorMessage }}</p>
+        </div>
+
+        <!-- Loader para el contenido específico del Dashboard -->
+        <div v-if="isLoadingDashboardContentOverall && !dashboardErrorMessage" class="text-center text-gray-500 py-10">
+            <!-- {{ console.log("DashboardView Template: BLOQUE 2.2 - Mostrando loader interno del dashboard (isLoadingOverall es true)") }} -->
+            <svg class="animate-spin h-10 w-10 text-districorr-primary mx-auto" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg>
+            <p class="mt-3 text-md">Cargando tu información del dashboard...</p>
+        </div>
+
+        <!-- Contenido principal del dashboard una vez cargado -->
+        <div v-else-if="!isLoadingDashboardContentOverall" class="space-y-10">
+          <!-- {{ console.log("DashboardView Template: BLOQUE 2.3 - Mostrando KPIs, gastos y gráfico (isLoadingOverall es false)") }} -->
+          <!-- KPIs y Acciones -->
+          <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+            <div class="kpi-card border-blue-500">
+              <p class="kpi-label">Viajes / Períodos</p>
+              <div v-if="isLoadingDashboardKPIs" class="kpi-loading-sm">...</div>
+              <div v-else @click="navigateTo('ViajesListUser')" class="cursor-pointer hover:opacity-80">
+                <p class="kpi-value">{{ dashboardStats.viajesCount }}</p>
               </div>
-              <button @click="navigateTo('GastosList')" class="w-full mt-5 text-sm text-center text-districorr-accent hover:underline font-medium py-2 rounded-md hover:bg-districorr-accent/10 transition-colors">
-                Ver todos los gastos →
-              </button>
+              <p class="kpi-description">Total de tus registros de períodos.</p>
             </div>
-            <div v-else class="text-center text-gray-500 py-10">
-              <svg xmlns="http://www.w3.org/2000/svg" class="h-12 w-12 mx-auto text-gray-300" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5"> <path stroke-linecap="round" stroke-linejoin="round" d="M9.75 17.25v1.508c0 .396.32.716.716.716h2.068a.716.716 0 00.716-.716V17.25m0 0A2.25 2.25 0 0010.5 15V12m0 0A2.25 2.25 0 008.25 9.75V7.5A2.25 2.25 0 006 5.25v.154c0 .431-.076.856-.222 1.25M17.25 6.75V12m0 0a2.25 2.25 0 00-2.25-2.25M17.25 12a2.25 2.25 0 01-2.25 2.25m2.25-2.25a2.25 2.25 0 012.25 2.25M19.5 12h.008v.008H19.5V12zm-2.25-3h.008v.008H17.25V9zm-2.25 3h.008v.008H15V12zm-2.25-3h.008v.008H12.75V9zM7.5 12h.008v.008H7.5V12zm2.25-3h.008v.008H9.75V9z" /> </svg>
-              <p class="mt-2 text-sm">Aún no has registrado gastos.</p>
+            <div class="kpi-card border-green-500">
+              <p class="kpi-label">Gastos Registrados</p>
+              <div v-if="isLoadingDashboardKPIs" class="kpi-loading-sm">...</div>
+              <div v-else @click="navigateTo('GastosListUser')" class="cursor-pointer hover:opacity-80">
+                <p class="kpi-value">{{ dashboardStats.gastosCount }}</p>
+              </div>
+              <p class="kpi-description">Total de tus comprobantes cargados.</p>
+            </div>
+            <div class="kpi-card-actions">
+              <button @click="navigateTo('ViajeCreate')" class="btn-action-primary">
+                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="w-5 h-5 mr-2"><path d="M10.75 4.75a.75.75 0 00-1.5 0v4.5h-4.5a.75.75 0 000 1.5h4.5v4.5a.75.75 0 001.5 0v-4.5h4.5a.75.75 0 000-1.5h-4.5v-4.5z" /></svg>Nuevo Viaje
+              </button>
+              <button @click="navigateTo('GastoFormCreate')" class="btn-action-secondary">
+                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="w-5 h-5 mr-2"><path d="M10.75 4.75a.75.75 0 00-1.5 0v4.5h-4.5a.75.75 0 000 1.5h4.5v4.5a.75.75 0 001.5 0v-4.5h4.5a.75.75 0 000-1.5h-4.5v-4.5z" /></svg>Nuevo Gasto
+              </button>
             </div>
           </div>
 
-          <!-- Gráfico (Opcional) -->
-          <div class="lg:col-span-3 bg-white p-4 sm:p-6 rounded-xl shadow-lg border border-gray-200/80 min-h-[350px] sm:min-h-[420px] flex flex-col items-center justify-center">
-            <div v-if="loadingChartData" class="text-center text-gray-400 w-full">
-                <svg class="animate-spin h-8 w-8 text-districorr-primary mx-auto" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg>
-                <p class="mt-2.5 text-sm">Cargando datos del gráfico...</p>
+          <!-- Últimos Gastos y Gráfico -->
+          <div class="grid grid-cols-1 lg:grid-cols-5 gap-6 items-start">
+            <div class="lg:col-span-2 section-container min-h-[300px]">
+              <h2 class="text-lg font-semibold text-districorr-primary mb-4">Últimos Gastos Registrados</h2>
+              <div v-if="isLoadingGastosRecientes" class="loading-placeholder-sm">Cargando últimos gastos...</div>
+              <div v-else-if="ultimosGastosMostrados.length > 0" class="space-y-3">
+                <div v-for="gasto in ultimosGastosMostrados" :key="gasto.id" class="p-3 rounded-md hover:bg-gray-100 border border-gray-200 transition-colors">
+                  <div class="flex justify-between items-center gap-2">
+                    <div class="flex-1 min-w-0">
+                      <p class="text-sm font-medium text-gray-800 truncate" :title="gasto.descripcion_general || gasto.tipos_gasto_config?.nombre_tipo_gasto">
+                        {{ gasto.descripcion_general || gasto.tipos_gasto_config?.nombre_tipo_gasto || 'Gasto sin descripción' }}
+                      </p>
+                      <p class="text-xs text-gray-500">
+                        {{ formatDate(gasto.fecha_gasto, {day: 'numeric', month: 'short', year: '2-digit'}) }} 
+                        <span v-if="gasto.viajes?.nombre_viaje" class="italic">- {{ gasto.viajes.nombre_viaje.substring(0,15) }}{{ gasto.viajes.nombre_viaje.length > 15 ? '...' : '' }}</span>
+                      </p>
+                    </div>
+                    <p class="text-sm font-semibold text-gray-700 whitespace-nowrap">
+                      {{ formatCurrency(gasto.monto_total, gasto.moneda) }}
+                    </p>
+                  </div>
+                </div>
+                <button @click="navigateTo('GastosListUser')" class="link-more">
+                  Ver todos mis gastos →
+                </button>
+              </div>
+              <div v-else class="no-data-placeholder-sm">No has registrado gastos recientemente.</div>
             </div>
-            <div v-else-if="chartData && chartData.datasets && chartData.datasets[0].data && chartData.datasets[0].data.length > 0" class="w-full h-full relative">
-              <!-- Descomenta la siguiente línea si Chart.js y vue-chartjs están instalados y configurados -->
-              <Bar :data="chartData" :options="chartOptions" id="dashboard-chart" />
-            </div>
-            <div v-else class="text-center text-gray-400">
-              <svg xmlns="http://www.w3.org/2000/svg" class="h-12 w-12 mx-auto text-gray-300" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5"> <path stroke-linecap="round" stroke-linejoin="round" d="M3 13.125C3 12.504 3.504 12 4.125 12h15.75c.621 0 1.125.504 1.125 1.125v6.75c0 .621-.504 1.125-1.125 1.125H4.125A1.125 1.125 0 013 19.875v-6.75zM3 8.625c0-.621.504-1.125 1.125-1.125h15.75c.621 0 1.125.504 1.125 1.125v0c0 .621-.504 1.125-1.125 1.125H4.125A1.125 1.125 0 013 8.625v0zM3 4.125c0-.621.504-1.125 1.125-1.125h15.75c.621 0 1.125.504 1.125 1.125v0c0 .621-.504 1.125-1.125 1.125H4.125A1.125 1.125 0 013 4.125v0z" /> </svg>
-              <p class="mt-2 text-sm">
-                <!-- Pequeña lógica para el mensaje del gráfico -->
-                <span v-if="typeof Bar === 'undefined'">Componente de gráfico no activo.</span>
-                <span v-else>No hay suficientes datos recientes para mostrar el gráfico.</span>
-              </p>
+
+            <div class="lg:col-span-3 section-container min-h-[350px] sm:min-h-[420px] flex flex-col items-center justify-center">
+              <div v-if="isLoadingChartData" class="loading-placeholder-sm">Cargando datos del gráfico...</div>
+              <div v-else-if="barChartData && barChartData.datasets && barChartData.datasets[0].data.length > 0" class="w-full h-full relative">
+                <BarChart :data="barChartData" :options="barChartOptions" id="dashboard-user-barchart" />
+              </div>
+              <div v-else class="no-data-placeholder-sm">No hay datos suficientes para mostrar el gráfico de gastos.</div>
             </div>
           </div>
         </div>
+      </div>
+      
+      <!-- BLOQUE 3: Fallback por si ninguna condición anterior se cumple (debería ser raro) -->
+      <div v-else class="text-center py-20">
+        <p class="text-lg text-gray-500">Cargando o estado inesperado del dashboard...</p>
+         <!-- {{ console.warn('DashboardView Template: Estado inesperado en la estructura v-if/v-else-if principal.') }} -->
       </div>
     </div>
   </div>
 </template>
-
 <style scoped>
-/* #dashboard-chart { 
-  height: 300px; 
-  width: 100%;
+/* Estilos Generales para el Dashboard */
+.section-container { 
+  @apply bg-white p-4 sm:p-6 rounded-xl shadow-lg border border-gray-200/80; 
 }
-@media (min-width: 640px) { #dashboard-chart { height: 350px; } }
-@media (min-width: 1024px) { #dashboard-chart { height: 400px; } } */
-/* El contenedor del gráfico ya tiene min-h, por lo que el canvas debería expandirse.
-   Ajusta las alturas con clases de Tailwind en el div padre si es necesario. */
+.error-banner { 
+  @apply bg-red-50 border-l-4 border-red-500 text-red-700 p-4 rounded-md shadow-md; 
+}
+
+/* KPIs (Key Performance Indicators) */
+.kpi-card { 
+  @apply bg-white p-5 sm:p-6 rounded-xl shadow-lg hover:shadow-xl transition-shadow duration-200 border-l-4 min-h-[140px] flex flex-col; 
+  /* Los colores de borde se aplican directamente en el template, ej: border-blue-500 */
+}
+.kpi-label { 
+  @apply text-xs sm:text-sm font-medium text-gray-500 uppercase tracking-wider mb-1; 
+}
+.kpi-value { 
+  @apply text-3xl sm:text-4xl font-bold text-districorr-primary mt-1; 
+}
+.kpi-description { 
+  @apply text-xs text-gray-500 mt-2 flex-grow; /* flex-grow para empujar el contenido si la tarjeta tiene altura fija */
+}
+.kpi-loading-sm { /* Placeholder para cuando el valor del KPI está cargando */
+  @apply text-gray-400 text-2xl font-bold animate-pulse mt-1; 
+}
+
+/* Tarjeta de Acciones Rápidas */
+.kpi-card-actions { 
+  @apply bg-white p-5 sm:p-6 rounded-xl shadow-lg flex flex-col justify-center space-y-3 border-l-4 border-gray-300 min-h-[140px]; 
+}
+.btn-action-primary { 
+  @apply w-full bg-districorr-accent text-white font-semibold py-2.5 px-4 rounded-lg 
+         hover:bg-opacity-85 focus:outline-none focus:ring-2 focus:ring-districorr-accent focus:ring-offset-2 
+         transition-all duration-150 ease-in-out transform hover:scale-105 
+         flex items-center justify-center text-sm shadow-md hover:shadow-lg; 
+}
+.btn-action-secondary { 
+  @apply w-full bg-green-500 text-white font-semibold py-2.5 px-4 rounded-lg 
+         hover:bg-green-600 focus:outline-none focus:ring-2 focus:ring-green-500 focus:ring-offset-2 
+         transition-all duration-150 ease-in-out transform hover:scale-105 
+         flex items-center justify-center text-sm shadow-md hover:shadow-lg; 
+}
+
+/* Placeholders y Enlaces "Ver más" */
+.loading-placeholder-sm { 
+  @apply text-center text-gray-400 py-10 text-sm flex flex-col items-center justify-center h-full; 
+}
+.no-data-placeholder-sm { 
+  @apply text-center text-gray-500 py-10 text-sm flex flex-col items-center justify-center h-full; 
+}
+.link-more { 
+  @apply block w-full mt-4 text-sm text-center text-districorr-accent hover:underline font-medium 
+         py-2 rounded-md hover:bg-districorr-accent/10 transition-colors; 
+}
+
+/* Estilos para asegurar que los gráficos tengan altura y se centren si no hay datos */
+.lg\:col-span-3.section-container { /* Específico para el contenedor del gráfico de barras */
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+}
+.chart-container-wrapper { /* Contenedor para dar altura a los gráficos si hay datos */
+  @apply h-80 md:h-96 w-full max-w-3xl mx-auto relative; /* max-w-3xl para que no sea demasiado ancho */
+}
+
+
+/* Colores de Districorr (Asegúrate que estén en tu tailwind.config.js) */
+/* Estas son clases de fallback o para referencia si no están en la config de Tailwind */
+/* Si ya están en tu config, estas definiciones aquí no son estrictamente necesarias */
+/* pero no harán daño si las clases de Tailwind no se aplican por alguna razón. */
+
+/* .text-districorr-primary { color: #0A2D5A; }  */
+/* .text-districorr-text-medium { color: #4A5568; }  */
+/* .text-districorr-accent { color: #3B82F6; }  */
+/* .border-districorr-accent { border-color: #3B82F6; } */
+/* .bg-districorr-accent { background-color: #3B82F6; } */
+/* .focus\:ring-districorr-accent:focus { --tw-ring-color: #3B82F6; } */
+/* .focus\:border-districorr-accent:focus { border-color: #3B82F6; } */
+
+/* Ejemplo de colores para los bordes de las tarjetas KPI si los aplicas con clases */
+/* .border-blue-500 { border-left-color: #3b82f6; } */
+/* .border-green-500 { border-left-color: #22c55e; } */
+/* .border-gray-300 { border-left-color: #d1d5db; } */
 </style>

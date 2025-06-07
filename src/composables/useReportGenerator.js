@@ -1,6 +1,6 @@
 // src/composables/useReportGenerator.js
 import jsPDF from 'jspdf';
-import 'jspdf-autotable';
+import 'jspdf-autotable'; // Importante para que .autoTable esté disponible
 import * as XLSX from 'xlsx';
 import { formatDate, formatCurrency } from '../utils/formatters.js'; // Ajusta la ruta si es necesario
 
@@ -16,9 +16,15 @@ export function useReportGenerator() {
    * @returns {object} - { neto, iva, total }
    */
   const getValoresMonetariosGasto = (gasto) => {
+    if (!gasto || typeof gasto !== 'object') { // Verificación adicional
+        console.warn("getValoresMonetariosGasto: Se recibió un gasto inválido:", gasto);
+        return { neto: 0, iva: 0, total: 0 };
+    }
     const totalBruto = parseFloat(gasto.gasto_monto_total || gasto.monto_total) || 0;
     const iva = parseFloat(gasto.gasto_monto_iva || gasto.monto_iva) || 0;
-    const neto = totalBruto - iva;
+    // El neto se calcula como total - iva. Si el IVA no está, el neto es igual al total.
+    // Esto asume que si el IVA es 0 o no está, el total es el neto.
+    const neto = totalBruto - iva; 
     return { neto, iva, total: totalBruto };
   };
 
@@ -28,38 +34,31 @@ export function useReportGenerator() {
    * @returns {object} - { min: string | null, max: string | null }
    */
   const getFechaMinMaxGastos = (gastos) => {
-    if (!gastos || !Array.isArray(gastos) || gastos.length === 0) { // Verificación adicional
+    if (!gastos || !Array.isArray(gastos) || gastos.length === 0) {
         console.warn("getFechaMinMaxGastos: Se recibió una entrada inválida o vacía para 'gastos'.");
         return { min: null, max: null };
     }
-    let minDate = null;
-    let maxDate = null;
+    let minDateObj = null;
+    let maxDateObj = null;
     try {
-      // Filtrar gastos sin fecha_gasto válida antes de procesar
       const gastosConFechaValida = gastos.filter(gasto => gasto && gasto.fecha_gasto);
       if (gastosConFechaValida.length === 0) {
           console.warn("getFechaMinMaxGastos: Ningún gasto con fecha válida encontrado.");
           return { min: null, max: null };
       }
 
-      minDate = new Date(gastosConFechaValida[0].fecha_gasto);
-      maxDate = new Date(gastosConFechaValida[0].fecha_gasto);
-      if (isNaN(minDate.getTime())) { // Si la primera fecha parseada es inválida
-          minDate = null; maxDate = null; // Resetear para buscar la primera válida en el loop
-      }
-
       for (const gasto of gastosConFechaValida) {
         const currentDate = new Date(gasto.fecha_gasto);
         if (!isNaN(currentDate.getTime())) {
-          if (minDate === null || currentDate < minDate) minDate = currentDate;
-          if (maxDate === null || currentDate > maxDate) maxDate = currentDate;
+          if (minDateObj === null || currentDate < minDateObj) minDateObj = currentDate;
+          if (maxDateObj === null || currentDate > maxDateObj) maxDateObj = currentDate;
         } else {
           console.warn("getFechaMinMaxGastos: Fecha inválida encontrada y omitida durante el loop:", gasto.fecha_gasto);
         }
       }
       return { 
-        min: minDate ? formatDate(minDate) : null, 
-        max: maxDate ? formatDate(maxDate) : null 
+        min: minDateObj ? formatDate(minDateObj) : null, 
+        max: maxDateObj ? formatDate(maxDateObj) : null 
       };
     } catch (e) {
       console.error("Error procesando fechas en getFechaMinMaxGastos:", e);
@@ -81,12 +80,12 @@ export function useReportGenerator() {
     const MONEDA_REPORTE = 'ARS';
 
     gastos.forEach(gasto => {
-      if (!gasto || typeof gasto !== 'object') return; // Saltar iteración si el gasto es inválido
+      if (!gasto || typeof gasto !== 'object') return; 
 
       const monedaGasto = (gasto.gasto_moneda || gasto.moneda || 'ARS').toUpperCase();
-      if (monedaGasto === MONEDA_REPORTE) {
-        const responsableId = gasto.gasto_user_id || 'desconocido';
-        const nombre = gasto.responsable_gasto_nombre || `Usuario ID ${typeof responsableId === 'string' ? responsableId.substring(0,8) : 'Inválido'}`;
+      if (monedaGasto === MONEDA_REPORTE) { // Solo considerar gastos en ARS para este cálculo específico
+        const responsableId = gasto.gasto_user_id || gasto.user_id || 'desconocido'; // Añadir user_id como fallback
+        const nombre = gasto.responsable_gasto_nombre || gasto.responsable_nombre || `Usuario ID ${typeof responsableId === 'string' ? responsableId.substring(0,8) : 'Inválido'}`;
         const valores = getValoresMonetariosGasto(gasto);
 
         if (!gastosPorResponsableARS[responsableId]) {
@@ -98,8 +97,8 @@ export function useReportGenerator() {
     
     let maxGastador = { nombre: 'N/A (Sin gastos en ARS)', total: 0, moneda: MONEDA_REPORTE };
     if (Object.keys(gastosPorResponsableARS).length > 0) {
-        maxGastador.nombre = 'N/A'; // Reset para asegurar que solo se asigna si hay un gastador
-        let maxTotal = -1; // Iniciar con -1 para que el primer gastador real sea asignado
+        maxGastador.nombre = 'N/A'; 
+        let maxTotal = -1; 
         for (const respId in gastosPorResponsableARS) {
           if (gastosPorResponsableARS[respId].totalGastadoBruto > maxTotal) {
             maxTotal = gastosPorResponsableARS[respId].totalGastadoBruto;
@@ -114,21 +113,10 @@ export function useReportGenerator() {
     return maxGastador;
   };
 
-// --- FIN DEL BLOQUE 1 ---
+  // --- FIN DEL BLOQUE 1 ---
+
   // --- BLOQUE 2: FUNCIONES DE CÁLCULO Y PREPARACIÓN DE DATOS PARA REPORTES ESPECÍFICOS ---
 
-  /**
-   * Agrupa gastos por tipo y moneda. Usado para "Resumen Detallado por Tipo".
-   * Devuelve un array de objetos listos para ser consumidos por las funciones de generación de reportes.
-   * @param {Array<Object>} gastos - Lista de gastos (de la vista admin_gastos_completos).
-   * @param {string} monedaPrincipalParaTotales - Moneda para formatear los totales generales.
-   * @returns {Object} - { 
-   *                      body: Array<Array<string>>, // Para PDF autoTable
-   *                      foot: Array<Array<Object>>, // Para PDF autoTable
-   *                      rawData: Array<object>,     // Para Excel (datos crudos por tipo/moneda)
-   *                      totales: object             // Objeto con totales generales (neto, iva, bruto)
-   *                    }
-   */
   const calculateAdminGastosPorTipo = (gastos, monedaPrincipalParaTotales = 'ARS') => {
     const resumen = {};
     if (!gastos || !Array.isArray(gastos) || gastos.length === 0) {
@@ -138,7 +126,7 @@ export function useReportGenerator() {
 
     gastos.forEach(gasto => {
       if (!gasto || typeof gasto !== 'object') return;
-      const tipoNombre = gasto.nombre_tipo_gasto || 'Sin Tipo Especificado'; 
+      const tipoNombre = gasto.nombre_tipo_gasto || gasto.tipo_gasto_nombre || 'Sin Tipo Especificado'; // Fallback
       const moneda = (gasto.gasto_moneda || gasto.moneda || 'ARS').toUpperCase();
       const key = `${tipoNombre}_${moneda}`; 
       const valores = getValoresMonetariosGasto(gasto);
@@ -153,8 +141,11 @@ export function useReportGenerator() {
     const detallesOrdenados = Object.values(resumen).sort((a,b) => a.tipoGastoNombre.localeCompare(b.tipoGastoNombre) || a.moneda.localeCompare(b.moneda));
     
     const totalesGenerales = { neto: 0, iva: 0, bruto: 0, moneda: monedaPrincipalParaTotales };
+    // Para los totales generales, si queremos sumarizar todo a ARS, necesitaríamos tasas de conversión.
+    // Por ahora, sumaremos los valores brutos tal cual, asumiendo que la moneda principal es para display.
     detallesOrdenados.forEach(item => {
-        totalesGenerales.neto += item.totalNeto;
+        // Aquí se podría implementar lógica de conversión si fuera necesario antes de sumar a totalesGenerales
+        totalesGenerales.neto += item.totalNeto; // Esto suma valores de diferentes monedas sin convertir
         totalesGenerales.iva += item.totalIVA;
         totalesGenerales.bruto += item.totalBruto;
     });
@@ -162,19 +153,18 @@ export function useReportGenerator() {
     const bodyForPDF = detallesOrdenados.map(item => [ 
         item.tipoGastoNombre,
         item.moneda, 
-        formatCurrency(item.totalNeto, item.moneda), // Formatear con la moneda del item
+        formatCurrency(item.totalNeto, item.moneda),
         formatCurrency(item.totalIVA, item.moneda),
         formatCurrency(item.totalBruto, item.moneda),
     ]);
     
     const footForPDF = [[ 
-      { content: 'TOTAL GENERAL (Resumen Detallado):', colSpan:2, styles: { halign: 'left', fontStyle: 'bold'} },
+      { content: `TOTAL GENERAL (${monedaPrincipalParaTotales}):`, colSpan:2, styles: { halign: 'left', fontStyle: 'bold'} },
       { content: formatCurrency(totalesGenerales.neto, monedaPrincipalParaTotales), styles: { halign: 'right', fontStyle: 'bold'} },
       { content: formatCurrency(totalesGenerales.iva, monedaPrincipalParaTotales), styles: { halign: 'right', fontStyle: 'bold'} },
       { content: formatCurrency(totalesGenerales.bruto, monedaPrincipalParaTotales), styles: { halign: 'right', fontStyle: 'bold'} },
     ]];
 
-    // rawData para Excel (números crudos)
     const rawDataForExcel = detallesOrdenados.map(item => ({
         tipo_gasto: item.tipoGastoNombre,
         moneda: item.moneda,
@@ -186,20 +176,11 @@ export function useReportGenerator() {
     return { 
         body: bodyForPDF, 
         foot: footForPDF, 
-        rawData: rawDataForExcel, // Para que generateAdminResumenTiposGastoExcel use los datos crudos
-        totales: totalesGenerales // Para que generateAdminResumenTiposGastoExcel use los totales crudos
+        rawData: rawDataForExcel,
+        totales: totalesGenerales
     };
   };
 
-  /**
-   * Prepara datos para el "Resumen Gerencial por Tipo", agrupando tipos y sumando monedas.
-   * @param {Array<Object>} gastos - Lista de gastos.
-   * @param {string} monedaPrincipalParaTotales - Moneda para mostrar los totales generales.
-   * @returns {Object} - { 
-   *                      detalles: Array<Object>, // Datos agrupados por tipo (sumando diferentes monedas)
-   *                      totalesGenerales: Object  // Totales generales de la agrupación
-   *                    }
-   */
   const calculateResumenGerencialPorTipo = (gastos, monedaPrincipalParaTotales = 'ARS') => {
     const resumenPorTipo = {}; 
     if (!gastos || !Array.isArray(gastos) || gastos.length === 0) {
@@ -209,13 +190,11 @@ export function useReportGenerator() {
 
     gastos.forEach(gasto => {
       if (!gasto || typeof gasto !== 'object') return;
-      const tipoNombre = gasto.nombre_tipo_gasto || 'Sin Tipo Especificado';
+      const tipoNombre = gasto.nombre_tipo_gasto || gasto.tipo_gasto_nombre || 'Sin Tipo Especificado';
       const valores = getValoresMonetariosGasto(gasto);
       if (!resumenPorTipo[tipoNombre]) {
         resumenPorTipo[tipoNombre] = { tipoGastoNombre: tipoNombre, totalNeto: 0, totalIVA: 0, totalBruto: 0, monedas: new Set() };
       }
-      // Suma directa de montos, independientemente de la moneda original para el total por tipo.
-      // La conversión de moneda sería más compleja.
       resumenPorTipo[tipoNombre].totalNeto += valores.neto;
       resumenPorTipo[tipoNombre].totalIVA += valores.iva;
       resumenPorTipo[tipoNombre].totalBruto += valores.total;
@@ -224,10 +203,10 @@ export function useReportGenerator() {
 
     const detalles = Object.values(resumenPorTipo).map(item => ({
         ...item, 
-        monedas: Array.from(item.monedas).join(', ') // String de monedas encontradas
+        monedas: Array.from(item.monedas).join(', ') 
     })).sort((a, b) => a.tipoGastoNombre.localeCompare(b.tipoGastoNombre));
     
-    const totalesGenerales = { nombre: "TOTAL GENERAL", neto: 0, iva: 0, bruto: 0, moneda: monedaPrincipalParaTotales };
+    const totalesGenerales = { nombre: `TOTAL GENERAL (${monedaPrincipalParaTotales})`, neto: 0, iva: 0, bruto: 0, moneda: monedaPrincipalParaTotales };
     detalles.forEach(item => {
         totalesGenerales.neto += item.totalNeto;
         totalesGenerales.iva += item.totalIVA;
@@ -237,100 +216,239 @@ export function useReportGenerator() {
     return { detalles, totalesGenerales }; 
   };
 
-  /**
-   * Prepara los datos para la tabla de detalle de gastos (formato Libro IVA).
-   * Usado por el reporte consolidado y podría ser usado por un reporte de Libro IVA individual.
-   * @param {Array<Object>} gastos - Lista de objetos gasto de la vista admin_gastos_completos.
-   * @returns {object} - { body: Array<Array<string>>, foot: Array<Array<Object>>, totales: object, rawData: Array<object> }
-   */
-  const prepararDetalleGastosParaLibroIVA = (gastos) => { // Renombrada para claridad, es la que usa el consolidado
+  const prepararDetalleGastosParaLibroIVA = (gastos) => {
     let totalNetoGeneral = 0, totalIVAGeneral = 0, totalGeneralBruto = 0;
-    const monedaTotales = 'ARS'; 
+    const monedaTotales = 'ARS'; // Asumimos que los totales generales se expresan en ARS
     const rawDataForExcel = [];
     if (!gastos || !Array.isArray(gastos) || gastos.length === 0) {
         return { body: [], foot: [], totales: {neto: 0, iva: 0, bruto: 0, moneda: monedaTotales}, rawData: [] };
     }
 
     const bodyForPDF = gastos.map(gasto => {
-      if (!gasto || typeof gasto !== 'object') return []; // Omitir si el gasto es inválido
+      if (!gasto || typeof gasto !== 'object') return [];
       const valores = getValoresMonetariosGasto(gasto);
       const monedaGastoActual = gasto.gasto_moneda || gasto.moneda || monedaTotales;
-      totalNetoGeneral += valores.neto; totalIVAGeneral += valores.iva; totalGeneralBruto += valores.total;
+      // Para los totales generales, si queremos sumarizar todo a ARS, necesitaríamos tasas de conversión.
+      // Por ahora, sumaremos los valores brutos tal cual.
+      totalNetoGeneral += valores.neto; 
+      totalIVAGeneral += valores.iva; 
+      totalGeneralBruto += valores.total;
+
       rawDataForExcel.push({
-        fecha: formatDate(gasto.fecha_gasto), n_comp: gasto.gasto_n_factura || gasto.numero_factura || 'S/N',
-        descripcion: gasto.gasto_descripcion || gasto.descripcion_general || '-', responsable: gasto.responsable_gasto_nombre || 'N/A',
-        neto: valores.neto, iva: valores.iva, total: valores.total, moneda: monedaGastoActual
+        fecha: formatDate(gasto.fecha_gasto), 
+        n_comp: gasto.gasto_n_factura || gasto.numero_factura || 'S/N',
+        descripcion: gasto.gasto_descripcion || gasto.descripcion_general || '-', 
+        responsable: gasto.responsable_gasto_nombre || gasto.responsable_nombre || 'N/A',
+        neto: valores.neto, 
+        iva: valores.iva, 
+        total: valores.total, 
+        moneda: monedaGastoActual,
+        viaje_rendicion: gasto.nombre_viaje || 'N/A', // Añadido
+        estado_viaje: gasto.viaje_cerrado_en ? `Cerrado (${formatDate(gasto.viaje_cerrado_en)})` : 'En Curso' // Añadido
       });
       return [ 
-        formatDate(gasto.fecha_gasto), gasto.gasto_n_factura || gasto.numero_factura || 'S/N',
+        formatDate(gasto.fecha_gasto), 
+        gasto.gasto_n_factura || gasto.numero_factura || 'S/N',
         gasto.gasto_descripcion || gasto.descripcion_general || '-',
-        gasto.responsable_gasto_nombre || 'N/A', formatCurrency(valores.neto, monedaGastoActual),
-        formatCurrency(valores.iva, monedaGastoActual), formatCurrency(valores.total, monedaGastoActual),
+        gasto.responsable_gasto_nombre || gasto.responsable_nombre || 'N/A', 
+        formatCurrency(valores.neto, monedaGastoActual),
+        formatCurrency(valores.iva, monedaGastoActual), 
+        formatCurrency(valores.total, monedaGastoActual),
       ];
-    });
+    }).filter(row => row.length > 0); // Filtrar filas vacías si algún gasto era inválido
+
     const footForPDF = [[
-        { content: 'TOTALES GENERALES (Detalle):', colSpan: 4, styles: { halign: 'right', fontStyle: 'bold'} },
+        { content: `TOTALES GENERALES (${monedaTotales}):`, colSpan: 4, styles: { halign: 'right', fontStyle: 'bold'} },
         { content: formatCurrency(totalNetoGeneral, monedaTotales), styles: { halign: 'right', fontStyle: 'bold'} },
         { content: formatCurrency(totalIVAGeneral, monedaTotales), styles: { halign: 'right', fontStyle: 'bold'} },
         { content: formatCurrency(totalGeneralBruto, monedaTotales), styles: { halign: 'right', fontStyle: 'bold'} },
     ]];
     return { body: bodyForPDF, foot: footForPDF, totales: {neto: totalNetoGeneral, iva: totalIVAGeneral, bruto: totalGeneralBruto, moneda: monedaTotales}, rawData: rawDataForExcel };
   };
-
   // --- FIN DEL BLOQUE 2 ---
-    // --- BLOQUE 3: FUNCIONES DE GENERACIÓN DE REPORTES Y EXPORTACIÓN FINAL ---
 
-  // --- FUNCIONES ORIGINALES PARA REPORTES DE RENDICIÓN INDIVIDUAL (COMPLETAS) ---
+  // --- BLOQUE 3: FUNCIONES DE GENERACIÓN DE REPORTES Y EXPORTACIÓN FINAL ---
+
   const generateGastosPDF = (gastos, viajeSeleccionadoInfo, userInfo) => {
-    // ... (CÓDIGO COMPLETO DE TU generateGastosPDF ORIGINAL - como lo tenías en el archivo .txt) ...
-    // Ejemplo simplificado para asegurar que la estructura es correcta:
-    console.log("Ejecutando generateGastosPDF (individual)... Reemplaza con tu código completo.");
-    if (!gastos || gastos.length === 0) { alert('No hay datos para PDF individual.'); return; }
+    console.log("useReportGenerator: generateGastosPDF (individual) - Iniciando con", gastos?.length, "gastos.");
+    if (!gastos || gastos.length === 0) { 
+      alert('No hay datos de gastos para generar el PDF de rendición individual.'); 
+      console.warn("generateGastosPDF: No hay gastos.");
+      return; 
+    }
     const doc = new jsPDF();
-    doc.text("Reporte de Rendición Individual", 10, 10);
-    let currentY = 20;
+    const margin = 15;
+    const pageWidth = doc.internal.pageSize.getWidth();
+    let currentY = margin;
+
+    doc.setFontSize(16);
+    doc.setFont(undefined, 'bold');
+    doc.text("Reporte de Rendición de Gastos", pageWidth / 2, currentY, { align: 'center' });
+    currentY += 20;
+
+    doc.setFontSize(10);
+    doc.setFont(undefined, 'normal');
     if (viajeSeleccionadoInfo) {
-      doc.text(`Viaje: ${viajeSeleccionadoInfo.nombre_viaje || 'N/A'}`, 10, currentY); currentY += 7;
+      doc.text(`Viaje/Período: ${viajeSeleccionadoInfo.nombre_viaje || 'N/A'} (ID: ${viajeSeleccionadoInfo.codigo_rendicion || viajeSeleccionadoInfo.id})`, margin, currentY); currentY += 12;
+      doc.text(`Fechas Viaje: ${formatDate(viajeSeleccionadoInfo.fecha_inicio)} - ${viajeSeleccionadoInfo.fecha_fin ? formatDate(viajeSeleccionadoInfo.fecha_fin) : 'En curso'}`, margin, currentY); currentY += 12;
     }
     if (userInfo) {
-      doc.text(`Responsable: ${userInfo.nombre || userInfo.email || 'N/A'}`, 10, currentY); currentY += 7;
+      doc.text(`Responsable: ${userInfo.nombre_completo || userInfo.email || 'N/A'}`, margin, currentY); currentY += 12;
     }
-    doc.text("Detalle de Gastos:", 10, currentY); currentY += 7;
-    const tableColumn = ["Fecha", "Descripción", "Monto"];
-    const tableRows = gastos.map(g => [formatDate(g.fecha_gasto), g.descripcion_general || '-', formatCurrency(g.monto_total, g.moneda)]);
-    doc.autoTable({ head: [tableColumn], body: tableRows, startY: currentY });
+    doc.text(`Fecha de Emisión: ${formatDate(new Date())}`, margin, currentY); currentY += 20;
+    
+    const tableColumn = ["Fecha", "N° Factura", "Descripción", "Neto", "IVA", "Total", "Moneda"];
+    const tableRows = gastos.map(g => {
+      const valores = getValoresMonetariosGasto(g);
+      return [
+        formatDate(g.fecha_gasto), 
+        g.numero_factura || 'S/N', 
+        g.descripcion_general || '-', 
+        formatCurrency(valores.neto, g.moneda),
+        formatCurrency(valores.iva, g.moneda),
+        formatCurrency(valores.total, g.moneda),
+        g.moneda || 'ARS'
+      ];
+    });
+
+    let totalNetoRendicion = 0, totalIVARendicion = 0, totalBrutoRendicion = 0;
+    gastos.forEach(g => {
+        const valores = getValoresMonetariosGasto(g);
+        totalNetoRendicion += valores.neto;
+        totalIVARendicion += valores.iva;
+        totalBrutoRendicion += valores.total;
+    });
+    const monedaPrincipal = viajeSeleccionadoInfo?.moneda_adelanto || 'ARS';
+
+    const tableFoot = [[
+        { content: 'TOTALES DE LA RENDICIÓN:', colSpan: 3, styles: { halign: 'right', fontStyle: 'bold'} },
+        { content: formatCurrency(totalNetoRendicion, monedaPrincipal), styles: { halign: 'right', fontStyle: 'bold'} },
+        { content: formatCurrency(totalIVARendicion, monedaPrincipal), styles: { halign: 'right', fontStyle: 'bold'} },
+        { content: formatCurrency(totalBrutoRendicion, monedaPrincipal), styles: { halign: 'right', fontStyle: 'bold'} },
+        { content: '', styles: { halign: 'right', fontStyle: 'bold'} }, // Celda vacía para columna Moneda
+    ]];
+
+    doc.autoTable({ 
+      head: [tableColumn], 
+      body: tableRows, 
+      foot: tableFoot,
+      startY: currentY,
+      theme: 'striped',
+      headStyles: { fillColor: [13, 47, 91], textColor: [255,255,255], fontStyle: 'bold', fontSize: 9 },
+      footStyles: { fillColor: [220, 220, 220], textColor: [0,0,0], fontStyle: 'bold', fontSize: 9, halign: 'right' },
+      styles: { fontSize: 8, cellPadding: 1.5, overflow: 'linebreak' },
+      columnStyles: { 
+        3: { halign: 'right' }, 4: { halign: 'right' }, 5: { halign: 'right' }
+      },
+      didDrawPage: (data) => { currentY = data.cursor.y + 15; }
+    });
+    
+    // Información del Adelanto y Saldo (si aplica)
+    if (viajeSeleccionadoInfo && typeof viajeSeleccionadoInfo.monto_adelanto === 'number') {
+        currentY = doc.lastAutoTable.finalY + 20; // Posición después de la tabla
+        if (currentY > doc.internal.pageSize.getHeight() - 60) { // Si no hay espacio, nueva página
+            doc.addPage();
+            currentY = margin;
+        }
+        doc.setFontSize(10);
+        doc.setFont(undefined, 'bold');
+        doc.text('Resumen del Adelanto:', margin, currentY); currentY += 15;
+        doc.setFont(undefined, 'normal');
+        doc.text(`Monto del Adelanto: ${formatCurrency(viajeSeleccionadoInfo.monto_adelanto, monedaPrincipal)}`, margin + 5, currentY); currentY += 12;
+        doc.text(`Total Gastado (aplicado al adelanto): ${formatCurrency(totalBrutoRendicion, monedaPrincipal)}`, margin + 5, currentY); currentY += 12;
+        const saldo = (viajeSeleccionadoInfo.monto_adelanto || 0) - totalBrutoRendicion;
+        doc.setFont(undefined, 'bold');
+        doc.text(`Saldo del Adelanto: ${formatCurrency(saldo, monedaPrincipal)} (${saldo >= 0 ? 'A favor del responsable' : 'A reintegrar por el responsable'})`, margin + 5, currentY);
+    }
+
     doc.save(`Rendicion_${viajeSeleccionadoInfo?.codigo_rendicion || 'General'}_${new Date().toISOString().split('T')[0]}.pdf`);
+    console.log("useReportGenerator: PDF de rendición individual generado.");
   };
 
   const generateGastosExcel = (gastos, viajeSeleccionadoInfo, userInfo, esAdminReport = false) => {
-    // ... (CÓDIGO COMPLETO DE TU generateGastosExcel ORIGINAL - como lo tenías en el archivo .txt) ...
-    // Ejemplo simplificado:
-    console.log("Ejecutando generateGastosExcel (individual/admin)... Reemplaza con tu código completo.");
-    if (!gastos || gastos.length === 0) { alert('No hay datos para Excel.'); return; }
-    const headers = ["Fecha", "Descripción", "Monto", "Moneda"];
-    if (esAdminReport) headers.unshift("Responsable");
+    console.log("useReportGenerator: generateGastosExcel - Iniciando con", gastos?.length, "gastos. Es Admin:", esAdminReport);
+    if (!gastos || gastos.length === 0) { 
+      alert('No hay datos de gastos para generar el archivo Excel.'); 
+      console.warn("generateGastosExcel: No hay gastos.");
+      return; 
+    }
+    
+    const headers = ["Fecha Gasto", "N° Factura", "Descripción", "Proveedor", "Tipo de Gasto", "Neto", "IVA", "Total Bruto", "Moneda"];
+    if (esAdminReport) { // Si es reporte de admin, añadir columnas de responsable y viaje
+        headers.unshift("Viaje/Período");
+        headers.unshift("Responsable");
+    }
+
     const dataRows = gastos.map(g => {
-      let row = [formatDate(g.fecha_gasto), g.descripcion_general || '-', parseFloat(g.monto_total) || 0, g.moneda || 'ARS'];
-      if (esAdminReport) row.unshift(g.responsable_gasto_nombre || userInfo?.nombre || 'N/A');
+      const valores = getValoresMonetariosGasto(g);
+      let row = [
+        formatDate(g.fecha_gasto), 
+        g.numero_factura || 'S/N', 
+        g.descripcion_general || '-',
+        g.proveedor_nombre || '-', // Asumiendo que tienes este campo
+        g.tipo_gasto_nombre || g.nombre_tipo_gasto || '-', // Asumiendo que tienes este campo
+        valores.neto,
+        valores.iva,
+        valores.total,
+        g.moneda || 'ARS'
+      ];
+      if (esAdminReport) {
+        row.unshift(g.nombre_viaje || '-'); // Nombre del viaje/período
+        row.unshift(g.responsable_gasto_nombre || g.responsable_nombre || userInfo?.nombre_completo || 'N/A');
+      }
       return row;
     });
-    const worksheet = XLSX.utils.aoa_to_sheet([headers, ...dataRows]);
-    // ... (Aplicar anchos y formatos) ...
-    const workbook = XLSX.utils.book_new(); XLSX.utils.book_append_sheet(workbook, worksheet, 'Gastos');
-    XLSX.writeFile(workbook, `Gastos_${esAdminReport ? 'Admin' : (viajeSeleccionadoInfo?.codigo_rendicion || 'General')}_${new Date().toISOString().split('T')[0]}.xlsx`);
+
+    // Calcular totales
+    let totalNetoGeneral = 0, totalIVAGeneral = 0, totalBrutoGeneral = 0;
+    gastos.forEach(g => {
+        const valores = getValoresMonetariosGasto(g);
+        totalNetoGeneral += valores.neto;
+        totalIVAGeneral += valores.iva;
+        totalBrutoGeneral += valores.total;
+    });
+    
+    const footerRow = ["TOTALES", "", "", "", "", totalNetoGeneral, totalIVAGeneral, totalBrutoGeneral, "ARS"];
+    if (esAdminReport) {
+        footerRow.unshift(""); // Celda vacía para columna Viaje
+        footerRow.unshift(""); // Celda vacía para columna Responsable
+    }
+
+    const worksheet = XLSX.utils.aoa_to_sheet([headers, ...dataRows, footerRow]);
+    
+    // Ajustar anchos de columna (aproximado)
+    const colWidths = esAdminReport 
+        ? [{wch:25},{wch:25},{wch:12},{wch:15},{wch:30},{wch:20},{wch:20},{wch:12},{wch:12},{wch:12},{wch:8}] 
+        : [{wch:12},{wch:15},{wch:40},{wch:25},{wch:25},{wch:12},{wch:12},{wch:12},{wch:8}];
+    worksheet['!cols'] = colWidths;
+
+    // Aplicar formato de moneda
+    const currencyFormat = '#,##0.00';
+    const netoCol = esAdminReport ? 5 : 5; // Ajustar índice de columna
+    for (let r = 1; r <= dataRows.length + 1; ++r) { // +1 para incluir la fila de totales
+        [netoCol, netoCol + 1, netoCol + 2].forEach(c => { 
+            const cellAddress = XLSX.utils.encode_cell({r,c});
+            if (worksheet[cellAddress] && typeof worksheet[cellAddress].v === 'number') {
+                worksheet[cellAddress].t = 'n';
+                worksheet[cellAddress].z = currencyFormat;
+            }
+        });
+    }
+    
+    const workbook = XLSX.utils.book_new(); 
+    XLSX.utils.book_append_sheet(workbook, worksheet, 'Detalle_Gastos');
+    
+    const fileName = `Gastos_${esAdminReport ? 'Admin_Global' : (viajeSeleccionadoInfo?.codigo_rendicion || 'General')}_${new Date().toISOString().split('T')[0]}.xlsx`;
+    XLSX.writeFile(workbook, fileName);
+    console.log("useReportGenerator: Archivo Excel generado:", fileName);
   };
-  // --- FIN DE FUNCIONES ORIGINALES ---
-
-
-  // --- FUNCIONES PARA "RESUMEN DETALLADO POR TIPO" (Admin) ---
-  // Estas funciones ahora esperan el resultado de calculateAdminGastosPorTipo, 
-  // que es un objeto con { body, foot, rawData, totales }
+  
   const generateAdminResumenTiposGastoExcel = (dataCalculada, fileNamePrefix = 'Admin_ResumenDetalladoTipo') => {
     const { rawData, totales } = dataCalculada;
     if (!rawData || rawData.length === 0) { console.warn('No hay datos para Resumen Detallado Excel.'); return; }
     const headers = ["Tipo de Gasto", "Moneda", "Total Neto", "Total IVA", "Total Bruto"];
     const dataRows = rawData.map(item => [item.tipo_gasto, item.moneda, item.neto, item.iva, item.bruto]);
-    const footerRow = ["TOTAL GENERAL", "", totales.neto, totales.iva, totales.bruto];
+    const footerRow = [`TOTAL GENERAL (${totales.moneda})`, "", totales.neto, totales.iva, totales.bruto];
     const worksheet = XLSX.utils.aoa_to_sheet([headers, ...dataRows, footerRow]);
     worksheet['!cols'] = [{wch:30},{wch:10},{wch:20},{wch:20},{wch:20}];
     const currencyFormat = '#,##0.00';
@@ -357,9 +475,6 @@ export function useReportGenerator() {
     console.log("Resumen Detallado por Tipo (PDF) generado.");
   };
 
-  // --- FUNCIONES PARA "RESUMEN GERENCIAL POR TIPO" (Admin) ---
-  // Estas funciones esperan el resultado de calculateResumenGerencialPorTipo, 
-  // que es un objeto con { detalles, totalesGenerales }
   const generateResumenGerencialTiposGastoExcel = (dataResumen, fileNamePrefix = 'Admin_ResumenGerencialTipo') => {
     const { detalles, totalesGenerales } = dataResumen;
     if (!detalles || detalles.length === 0) { console.warn('No hay datos para Resumen Gerencial Excel.'); return; }
@@ -394,19 +509,200 @@ export function useReportGenerator() {
     console.log("Resumen Gerencial por Tipo (PDF) generado.");
   };
 
-  // --- FUNCIONES PARA REPORTE CONSOLIDADO DE ADMIN (Opcional, si se usan desde AdminViajesList u otro lado) ---
-  const generateAdminReporteConsolidadoPDF = (gastos, filtrosAplicados = {}, fileNamePrefix = 'Reporte_Consolidado_Admin') => { /* ... (código completo de la respuesta anterior) ... */ };
-  const generateAdminReporteConsolidadoExcel = (gastos, filtrosAplicados = {}, fileNamePrefix = 'Reporte_Consolidado_Admin') => { /* ... (código completo de la respuesta anterior) ... */ };
+  const generateAdminReporteConsolidadoPDF = (gastos, filtrosAplicados = {}, fileNamePrefix = 'Reporte_Consolidado_Admin') => {
+    console.log("useReportGenerator: Iniciando generateAdminReporteConsolidadoPDF con", gastos?.length, "gastos.");
+    if (!gastos || gastos.length === 0) {
+      alert('No hay gastos para generar el reporte consolidado PDF.');
+      console.warn("generateAdminReporteConsolidadoPDF: No hay gastos.");
+      return;
+    }
 
-  // --- EXPORTAR TODAS LAS FUNCIONES ---
+    const doc = new jsPDF({ orientation: 'landscape', unit: 'pt', format: 'a4' });
+    const pageWidth = doc.internal.pageSize.getWidth();
+    const pageHeight = doc.internal.pageSize.getHeight();
+    const margin = 40;
+    let currentY = margin;
+
+    doc.setFontSize(18);
+    doc.setFont(undefined, 'bold');
+    doc.text("Reporte Consolidado de Gastos (Admin)", pageWidth / 2, currentY, { align: 'center' });
+    currentY += 30;
+
+    doc.setFontSize(10);
+    doc.setFont(undefined, 'normal');
+    let filtroTexto = "Período de Gastos: Todos los gastos cargados.";
+    if (filtrosAplicados.fechaDesde || filtrosAplicados.fechaHasta) {
+        const desde = filtrosAplicados.fechaDesde ? formatDate(filtrosAplicados.fechaDesde) : 'Inicio';
+        const hasta = filtrosAplicados.fechaHasta ? formatDate(filtrosAplicados.fechaHasta) : 'Fin';
+        filtroTexto = `Período de Gastos: Desde ${desde} Hasta ${hasta}`;
+    }
+    doc.text(filtroTexto, margin, currentY);
+    currentY += 15;
+    doc.text(`Generado el: ${formatDate(new Date(), { day: '2-digit', month: 'long', year: 'numeric', hour: '2-digit', minute: '2-digit' })}`, margin, currentY);
+    currentY += 25;
+
+    doc.setFontSize(12);
+    doc.setFont(undefined, 'bold');
+    doc.text("1. Resumen de Gastos por Tipo y Moneda", margin, currentY);
+    currentY += 20;
+
+    const dataResumenPorTipo = calculateAdminGastosPorTipo(gastos, 'ARS');
+    if (dataResumenPorTipo.body.length > 0) {
+      doc.autoTable({
+        head: [["Tipo de Gasto", "Moneda", "Total Neto", "Total IVA", "Total Bruto"]],
+        body: dataResumenPorTipo.body,
+        foot: dataResumenPorTipo.foot,
+        startY: currentY,
+        theme: 'striped',
+        headStyles: { fillColor: [13, 47, 91], textColor: [255,255,255], fontStyle: 'bold', fontSize: 9 },
+        footStyles: { fillColor: [220, 220, 220], textColor: [0,0,0], fontStyle: 'bold', fontSize: 9, halign: 'right' },
+        styles: { fontSize: 8, cellPadding: 2, overflow: 'linebreak' },
+        columnStyles: { 
+            0: { cellWidth: pageWidth * 0.25 }, 
+            1: { cellWidth: pageWidth * 0.10 }, 
+            2: { halign: 'right', cellWidth: pageWidth * 0.18 }, 
+            3: { halign: 'right', cellWidth: pageWidth * 0.18 }, 
+            4: { halign: 'right', cellWidth: pageWidth * 0.18 } 
+        },
+        didDrawPage: (data) => { currentY = data.cursor.y + 15; } 
+      });
+    } else {
+      doc.setFontSize(10); doc.setFont(undefined, 'italic');
+      doc.text("No hay datos para el resumen por tipo.", margin, currentY); currentY += 20;
+    }
+    currentY = doc.lastAutoTable.finalY ? doc.lastAutoTable.finalY + 25 : currentY + 10;
+
+
+    if (currentY > pageHeight - 150) { 
+        doc.addPage(); currentY = margin;
+    }
+
+    doc.setFontSize(12); doc.setFont(undefined, 'bold');
+    doc.text("2. Detalle Completo de Gastos", margin, currentY); currentY += 20;
+
+    const dataDetalleGastos = prepararDetalleGastosParaLibroIVA(gastos);
+    if (dataDetalleGastos.body.length > 0) {
+      doc.autoTable({
+        head: [["Fecha", "N° Comp.", "Descripción", "Responsable", "Neto", "IVA", "Total"]],
+        body: dataDetalleGastos.body,
+        foot: dataDetalleGastos.foot,
+        startY: currentY,
+        theme: 'grid',
+        headStyles: { fillColor: [13, 47, 91], textColor: [255,255,255], fontStyle: 'bold', fontSize: 9 },
+        footStyles: { fillColor: [220, 220, 220], textColor: [0,0,0], fontStyle: 'bold', fontSize: 9, halign: 'right' },
+        styles: { fontSize: 7, cellPadding: 1.5, overflow: 'ellipsize' },
+        columnStyles: {
+            0: { cellWidth: pageWidth * 0.08 }, 1: { cellWidth: pageWidth * 0.10 }, 
+            2: { cellWidth: pageWidth * 0.27 }, 3: { cellWidth: pageWidth * 0.15 },
+            4: { halign: 'right', cellWidth: pageWidth * 0.12 }, 
+            5: { halign: 'right', cellWidth: pageWidth * 0.10 }, 
+            6: { halign: 'right', cellWidth: pageWidth * 0.12 }
+        },
+      });
+    } else {
+      doc.setFontSize(10); doc.setFont(undefined, 'italic');
+      doc.text("No hay gastos detallados para mostrar.", margin, currentY);
+    }
+
+    doc.save(`${fileNamePrefix}_${new Date().toISOString().split('T')[0]}.pdf`);
+    console.log("useReportGenerator: Reporte Consolidado PDF generado.");
+  };
+
+  const generateAdminReporteConsolidadoExcel = (gastos, filtrosAplicados = {}, fileNamePrefix = 'Reporte_Consolidado_Admin') => {
+    console.log("useReportGenerator: Iniciando generateAdminReporteConsolidadoExcel con", gastos?.length, "gastos.");
+    if (!gastos || gastos.length === 0) {
+      alert('No hay gastos para generar el reporte consolidado Excel.');
+      console.warn("generateAdminReporteConsolidadoExcel: No hay gastos.");
+      return;
+    }
+
+    const workbook = XLSX.utils.book_new();
+
+    const dataResumenPorTipo = calculateAdminGastosPorTipo(gastos, 'ARS');
+    if (dataResumenPorTipo.rawData.length > 0) {
+        const headersResumen = ["Tipo de Gasto", "Moneda", "Total Neto", "Total IVA", "Total Bruto"];
+        const dataRowsResumen = dataResumenPorTipo.rawData.map(item => [
+            item.tipo_gasto, item.moneda, item.neto, item.iva, item.bruto
+        ]);
+        const footerResumen = [`TOTAL GENERAL (${dataResumenPorTipo.totales.moneda})`, "", dataResumenPorTipo.totales.neto, dataResumenPorTipo.totales.iva, dataResumenPorTipo.totales.bruto];
+        const wsResumen = XLSX.utils.aoa_to_sheet([headersResumen, ...dataRowsResumen, footerResumen]);
+        wsResumen['!cols'] = [{wch:35},{wch:10},{wch:18},{wch:18},{wch:18}];
+        const currencyFormat = '#,##0.00';
+        for (let r = 1; r <= dataRowsResumen.length + 1; ++r) { 
+            [2,3,4].forEach(c => { 
+                const cellAddress = XLSX.utils.encode_cell({r,c});
+                if (wsResumen[cellAddress] && typeof wsResumen[cellAddress].v === 'number') {
+                    wsResumen[cellAddress].t = 'n'; wsResumen[cellAddress].z = currencyFormat;
+                }
+            });
+        }
+        XLSX.utils.book_append_sheet(workbook, wsResumen, 'ResumenPorTipo');
+    } else {
+        console.log("generateAdminReporteConsolidadoExcel: No hay datos para la hoja 'ResumenPorTipo'.");
+    }
+    
+    const dataDetalleGastos = prepararDetalleGastosParaLibroIVA(gastos);
+    if (dataDetalleGastos.rawData.length > 0) {
+        const headersDetalle = ["Fecha", "N° Comprobante", "Descripción", "Responsable", "Neto", "IVA", "Total", "Moneda", "Viaje/Rendición", "Estado Viaje"];
+        const dataRowsDetalle = dataDetalleGastos.rawData.map(item => [
+            item.fecha, item.n_comp, item.descripcion, item.responsable,
+            item.neto, item.iva, item.total, item.moneda,
+            item.viaje_rendicion, item.estado_viaje // Nuevas columnas
+        ]);
+        const footerDetalle = [`TOTALES GENERALES (${dataDetalleGastos.totales.moneda})`, "", "", "", dataDetalleGastos.totales.neto, dataDetalleGastos.totales.iva, dataDetalleGastos.totales.bruto, "", "", ""];
+        const wsDetalle = XLSX.utils.aoa_to_sheet([headersDetalle, ...dataRowsDetalle, footerDetalle]);
+        wsDetalle['!cols'] = [{wch:12},{wch:20},{wch:40},{wch:30},{wch:15},{wch:15},{wch:15},{wch:10},{wch:30},{wch:20}];
+        const currencyFormat = '#,##0.00';
+        for (let r = 1; r <= dataRowsDetalle.length + 1; ++r) { 
+            [4,5,6].forEach(c => {
+                const cellAddress = XLSX.utils.encode_cell({r,c});
+                if (wsDetalle[cellAddress] && typeof wsDetalle[cellAddress].v === 'number') {
+                    wsDetalle[cellAddress].t = 'n'; wsDetalle[cellAddress].z = currencyFormat;
+                }
+            });
+        }
+        XLSX.utils.book_append_sheet(workbook, wsDetalle, 'DetalleDeGastos');
+    } else {
+        console.log("generateAdminReporteConsolidadoExcel: No hay datos para la hoja 'DetalleDeGastos'.");
+    }
+
+    let filtroTextoSheet = [["Filtros Aplicados al Reporte Consolidado"]];
+    if (filtrosAplicados.fechaDesde || filtrosAplicados.fechaHasta) {
+        const desde = filtrosAplicados.fechaDesde ? formatDate(filtrosAplicados.fechaDesde) : 'Inicio del registro';
+        const hasta = filtrosAplicados.fechaHasta ? formatDate(filtrosAplicados.fechaHasta) : 'Fin del registro';
+        filtroTextoSheet.push(["Período de Gastos:", `Desde ${desde} Hasta ${hasta}`]);
+    } else {
+        filtroTextoSheet.push(["Período de Gastos:", "Todos los gastos cargados."]);
+    }
+    filtroTextoSheet.push(["Generado el:", formatDate(new Date(), { day: '2-digit', month: 'long', year: 'numeric', hour: '2-digit', minute: '2-digit' })]);
+    const wsFiltros = XLSX.utils.aoa_to_sheet(filtroTextoSheet);
+    wsFiltros['!cols'] = [{wch:25},{wch:50}];
+    XLSX.utils.book_append_sheet(workbook, wsFiltros, 'InfoReporte');
+
+    if (workbook.SheetNames.length > 0) {
+        XLSX.writeFile(workbook, `${fileNamePrefix}_${new Date().toISOString().split('T')[0]}.xlsx`);
+        console.log("useReportGenerator: Reporte Consolidado Excel generado.");
+    } else {
+        alert("No se pudo generar ninguna hoja en el reporte Excel debido a la falta de datos.");
+        console.warn("generateAdminReporteConsolidadoExcel: No se generaron hojas.");
+    }
+  };
+  // --- FIN DEL BLOQUE 3 ---
+
   return {
-    // Funciones originales para rendiciones individuales
-    generateGastosPDF, 
-    generateGastosExcel, 
+    // Funciones auxiliares (si necesitas exponerlas, aunque usualmente son internas)
+    // getValoresMonetariosGasto, 
+    // getFechaMinMaxGastos,
+    // calculateResponsableConMasGasto,
 
     // Funciones de cálculo que los componentes pueden usar directamente
     calculateAdminGastosPorTipo,
     calculateResumenGerencialPorTipo,
+    prepararDetalleGastosParaLibroIVA,
+
+    // Funciones de generación para reportes individuales (si las usas desde otros componentes)
+    generateGastosPDF, 
+    generateGastosExcel, 
 
     // Funciones de generación para reportes granulares de Admin (usadas por AdminGastosListView)
     generateAdminResumenTiposGastoExcel,
@@ -414,9 +710,9 @@ export function useReportGenerator() {
     generateResumenGerencialTiposGastoExcel,
     generateResumenGerencialTiposGastoPDF,
 
-    // Funciones de reporte consolidado (si las usas en algún componente como AdminViajesListView)
+    // Funciones de reporte consolidado (usadas por AdminViajesListView)
     generateAdminReporteConsolidadoPDF,
     generateAdminReporteConsolidadoExcel,
   };
   
-} // ESTA ES LA LLAVE DE CIERRE FINAL DE export function useReportGenerator()
+}

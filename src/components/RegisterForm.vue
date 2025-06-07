@@ -1,159 +1,150 @@
 <script setup>
 import { ref } from 'vue';
-import { supabase } from '../supabaseClient.js'; // Ajusta la ruta según tu estructura
+import { supabase } from '../supabaseClient.js'; 
 import { useRouter } from 'vue-router';
+
+console.log("RegisterForm.vue (v2 - con options.data): Script setup INICIADO");
 
 const router = useRouter();
 
 // Refs para los campos del formulario
 const nombreCompleto = ref('');
-const puesto = ref(''); // Asumo que tienes un campo para "Puesto"
+const puesto = ref(''); 
 const email = ref('');
 const password = ref('');
-const passwordConfirm = ref(''); // Si tienes confirmación de contraseña
+const confirmPassword = ref(''); 
+
+// Opciones para el select de "Puesto / Área"
+const puestosDisponibles = ref([
+  { valor: '', etiqueta: '-- Selecciona tu puesto --' }, // Opción deshabilitada por defecto
+  { valor: 'Vendedor', etiqueta: 'Vendedor' },
+  { valor: 'Administrativo', etiqueta: 'Administrativo' },
+  { valor: 'Tecnico', etiqueta: 'Técnico' },
+  { valor: 'Gerencia', etiqueta: 'Gerencia' },
+  { valor: 'Otro', etiqueta: 'Otro' },
+  // Asegúrate de que los 'valor' sean los que quieres guardar en la BD.
+]);
 
 // Refs para mensajes y estado de carga
 const errorMessage = ref('');
-const successMessage = ref('');
+const successMessage = ref(''); // No se usa directamente para mostrar al usuario aquí, se emite.
 const loading = ref(false);
 
-// Aquí podrías tener otras refs para formato_predeterminado_id si lo seleccionas en el registro
+// Emitir evento cuando el registro se completa (o falla con mensaje)
+const emit = defineEmits(['registration-complete']);
 
 const handleRegister = async () => {
-  // Validación básica de contraseña (puedes añadir más validaciones)
-  if (password.value !== passwordConfirm.value) {
+  console.log("RegisterForm.vue: handleRegister - INICIO");
+  errorMessage.value = ''; // Limpiar error previo
+
+  if (password.value !== confirmPassword.value) {
     errorMessage.value = 'Las contraseñas no coinciden.';
+    emit('registration-complete', { success: false, isError: true, requiresConfirmation: false, message: errorMessage.value });
     return;
   }
-  if (password.value.length < 6) { // Mínimo de Supabase por defecto
+  if (password.value.length < 6) { 
     errorMessage.value = 'La contraseña debe tener al menos 6 caracteres.';
+    emit('registration-complete', { success: false, isError: true, requiresConfirmation: false, message: errorMessage.value });
     return;
   }
+  if (!puesto.value) { 
+    errorMessage.value = 'Por favor, selecciona tu puesto o área.';
+    emit('registration-complete', { success: false, isError: true, requiresConfirmation: false, message: errorMessage.value });
+    return;
+  }
+  if (!nombreCompleto.value.trim()) {
+    errorMessage.value = 'Por favor, ingresa tu nombre completo.';
+    emit('registration-complete', { success: false, isError: true, requiresConfirmation: false, message: errorMessage.value });
+    return;
+  }
+   if (!email.value.trim()) {
+    errorMessage.value = 'Por favor, ingresa tu correo electrónico.';
+    emit('registration-complete', { success: false, isError: true, requiresConfirmation: false, message: errorMessage.value });
+    return;
+  }
+
 
   loading.value = true;
-  errorMessage.value = '';
-  successMessage.value = '';
+  let feedback = { success: false, isError: false, requiresConfirmation: false, message: '' };
 
   try {
-    // 1. Registrar el usuario en Supabase Auth
-    // No es necesario pasar 'nombre_completo' o 'puesto' en options.data
-    // si vamos a hacer un UPDATE explícito después.
+    console.log("RegisterForm.vue: Llamando a supabase.auth.signUp con options.data...");
     const { data: authData, error: signUpError } = await supabase.auth.signUp({
       email: email.value,
       password: password.value,
-      // options: {
-      //   redirectTo: `${window.location.origin}/ruta-post-confirmacion` // Opcional
-      // }
+      options: {
+        data: { 
+          nombre_completo: nombreCompleto.value.trim(),
+          puesto: puesto.value
+          // El rol se asignará por el default de la tabla 'perfiles' o por el trigger si lo modifica.
+        }
+        // redirectTo: `${window.location.origin}/ruta-post-confirmacion` // Opcional si quieres una página específica post-confirmación
+      }
     });
 
     if (signUpError) {
-      console.error('Error en Supabase signUp:', signUpError);
+      console.error('RegisterForm.vue: Error en Supabase signUp:', signUpError);
       if (signUpError.message.includes("User already registered")) {
-        errorMessage.value = "Este correo electrónico ya está registrado. Intenta iniciar sesión.";
+        feedback.message = "Este correo electrónico ya está registrado. Intenta iniciar sesión.";
       } else if (signUpError.message.includes("Password should be at least 6 characters")) {
-        errorMessage.value = "La contraseña debe tener al menos 6 caracteres.";
+        feedback.message = "La contraseña debe tener al menos 6 caracteres.";
       } else {
-        errorMessage.value = `Error en el registro: ${signUpError.message}`;
+        feedback.message = `Error en el registro: ${signUpError.message}`;
       }
-      loading.value = false;
-      return; // Detener ejecución si signUp falla
-    }
-
-    // 2. Si signUp fue exitoso y tenemos un usuario (authData.user)
-    //    El trigger 'handle_new_user' ya debería haber creado una fila en 'public.perfiles'
-    //    con el id y email del usuario. Ahora actualizamos esa fila.
-    if (authData.user) {
-      console.log('Usuario creado en Auth, actualizando perfil...');
+      feedback.isError = true;
+      // No es necesario 'return' aquí, el flujo continuará al 'finally' y emitirá el feedback.
+    } else {
+      console.log('RegisterForm.vue: Usuario creado/pendiente en Auth:', authData);
+      // authData.user será null si la confirmación de email está habilitada y el usuario aún no ha confirmado.
+      // authData.session será null en ese mismo caso.
       
-      const profileDataToUpdate = {
-        nombre_completo: nombreCompleto.value,
-        puesto: puesto.value,
-        // email: email.value, // El email ya debería estar en perfiles gracias al trigger
-        // rol: 'usuario_comun', // El rol debería ser establecido por el trigger o como default en la tabla
-        // formato_predeterminado_id: tuRefDeFormatoId.value, // Si lo tienes
-      };
-
-      // Filtrar propiedades undefined para no enviar campos vacíos si no se rellenaron (opcional)
-      Object.keys(profileDataToUpdate).forEach(key => {
-        if (profileDataToUpdate[key] === '' || profileDataToUpdate[key] === undefined) {
-          delete profileDataToUpdate[key];
-        }
-      });
+      feedback.requiresConfirmation = !!(authData.session === null && !authData.user && authData.identities && authData.identities.length > 0);
       
-      // Solo proceder con el update si hay algo que actualizar además de lo que el trigger pondría
-      if (Object.keys(profileDataToUpdate).length > 0) {
-          const { error: profileUpdateError } = await supabase
-            .from('perfiles')
-            .update(profileDataToUpdate)
-            .eq('id', authData.user.id); // Condición WHERE para actualizar el perfil correcto
-
-          if (profileUpdateError) {
-            console.error('Error actualizando perfil después del registro:', profileUpdateError);
-            // Este es un caso complicado: el usuario está en Auth pero su perfil no se completó.
-            // Podrías mostrar un error más específico o intentar alguna lógica de compensación.
-            // Por ahora, un mensaje de error general.
-            errorMessage.value = 'Usuario registrado, pero hubo un problema al guardar los detalles del perfil. Contacta a soporte.';
-            // Podrías considerar añadir un log más detallado aquí para ti (ej. a un servicio de logging)
-            // sobre authData.user.id para investigar manualmente.
-            loading.value = false;
-            return; // Detener para no mostrar mensaje de éxito incorrecto
-          }
-          console.log('Perfil actualizado exitosamente para el usuario:', authData.user.id);
+      if (feedback.requiresConfirmation) {
+        feedback.message = "¡Gracias por registrarte! Revisa tu correo electrónico para confirmar tu cuenta y poder iniciar sesión.";
+        feedback.success = true; // El signUp fue exitoso en iniciar el proceso
+      } else if (authData.user) { // Usuario creado y sesión iniciada (confirmación desactivada o ya hecha)
+        feedback.message = "¡Registro exitoso! Serás redirigido al login en unos segundos.";
+        feedback.success = true;
       } else {
-          console.log('No se requirió actualización adicional del perfil, el trigger lo manejó todo o no había datos extra.');
+        // Caso inesperado, signUp no dio error pero tampoco user ni session null (indicando confirmación)
+        console.warn("RegisterForm.vue: Respuesta de signUp no concluyente, asumiendo pendiente de confirmación.", authData);
+        feedback.message = "Registro procesado. Revisa tu correo para los siguientes pasos.";
+        feedback.success = true; // Asumir éxito parcial
+        feedback.requiresConfirmation = true; // Asumir que requiere confirmación
       }
-
-      successMessage.value = "¡Registro exitoso! Revisa tu correo electrónico para confirmar tu cuenta. Serás redirigido al login.";
-      
-      // Opcional: Redirigir al usuario después de un breve retraso
-      setTimeout(() => {
-        router.push({ name: 'Login' }); // O a una página de "revisa tu email"
-      }, 3000); // Redirigir después de 3 segundos
-
-    } else if (authData && !authData.user && authData.session === null) {
-      // Este caso es común si "Confirm email" está activado en Supabase.
-      // signUp no devuelve un user inmediatamente, sino que espera la confirmación.
-      // El trigger handle_new_user SÍ se ejecuta en cuanto el usuario se añade a auth.users.
-      // Así que la lógica de UPDATE no se podría hacer aquí si dependemos de authData.user.id directamente.
-      // Sin embargo, tu error original era "duplicate key", lo que sugiere que el trigger SÍ crea el perfil.
-      // La lógica de UPDATE con .eq('id', authData.user.id) fallaría si authData.user es null.
-      //
-      // Si "Confirm email" está activado, el flujo cambia:
-      // 1. signUp() se llama.
-      // 2. auth.users se crea, el trigger handle_new_user crea el perfil básico.
-      // 3. El usuario confirma el email.
-      // 4. El usuario inicia sesión por primera vez. EN ESTE PUNTO podrías querer completar el perfil
-      //    si hay campos que no se pudieron rellenar solo con el trigger.
-      //
-      // Por ahora, mantenemos la lógica de UPDATE asumiendo que authData.user está disponible
-      // o que el trigger ya pobló todo lo necesario desde options.data si eso se usara.
-      // El error "duplicate key" indica que el INSERT era el problema. El UPDATE no debería dar ese error.
-      console.log("Registro pendiente de confirmación por email. El trigger debería haber creado el perfil base.");
-      successMessage.value = "¡Gracias por registrarte! Revisa tu correo electrónico para confirmar tu cuenta y poder iniciar sesión.";
-       setTimeout(() => {
-        router.push({ name: 'Login' });
-      }, 3000);
     }
-
-  } catch (error) { // Catch para errores inesperados o los re-lanzados
-    console.error('Error general en handleRegister:', error);
-    if (!errorMessage.value) { // Si no se estableció un mensaje de error más específico
-      errorMessage.value = 'Ocurrió un error inesperado durante el registro.';
-    }
+  } catch (error) { 
+    console.error('RegisterForm.vue: Error general en handleRegister:', error);
+    feedback.message = 'Ocurrió un error inesperado durante el registro.';
+    feedback.isError = true;
   } finally {
     loading.value = false;
+    emit('registration-complete', feedback); // Emitir el feedback final
+    console.log("RegisterForm.vue: handleRegister - FIN. Feedback emitido:", feedback);
   }
 };
+console.log("RegisterForm.vue (v2 - con options.data): Script setup FINALIZADO");
 </script>
 <template>
-  <!-- La tarjeta blanca y el layout de la página ahora están en RegisterForm.vue -->
-  <!-- Si este componente es usado por RegisterView.vue (que ya tiene el layout de página completo),
-       entonces este div raíz podría ser solo la tarjeta del formulario.
-       Asumiré que este componente es la tarjeta del formulario en sí. -->
-  <div class="bg-white p-8 pt-6 shadow-2xl rounded-xl space-y-6 border border-gray-200/60 w-full">
+  <!-- 
+    Contenedor principal del formulario. 
+    Asumimos que RegisterView.vue proporciona el layout de página (centrado, fondo, etc.).
+    Este div es la "tarjeta" del formulario.
+  -->
+  <div class="bg-white p-6 sm:p-8 shadow-xl rounded-xl border border-gray-200/70 w-full space-y-6">
+    <!-- El título y subtítulo ahora están en RegisterView.vue para mayor flexibilidad -->
+    <!-- Si quieres un título específico para esta tarjeta de formulario, puedes añadirlo aquí -->
+    <!-- 
+    <div class="text-center mb-6">
+      <h2 class="text-2xl font-bold text-districorr-primary">Crear Cuenta</h2>
+      <p class="text-sm text-districorr-text-medium">Ingresa tus datos para comenzar.</p>
+    </div>
+    -->
+
     <form @submit.prevent="handleRegister" class="space-y-5">
       <div>
-        <label for="reg-nombre-completo" class="block text-sm font-medium text-gray-700 mb-1.5">
+        <label for="reg-nombre-completo" class="form-label">
           Nombre Completo <span class="text-red-500">*</span>
         </label>
         <input 
@@ -164,12 +155,12 @@ const handleRegister = async () => {
           required 
           v-model="nombreCompleto" 
           placeholder="Tu nombre y apellido"
-          class="appearance-none block w-full px-4 py-3 border border-gray-300 rounded-lg shadow-sm placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-districorr-accent focus:border-districorr-accent sm:text-sm transition-colors duration-150"
-        >
+          class="form-input"
+        />
       </div>
 
       <div>
-        <label for="reg-puesto" class="block text-sm font-medium text-gray-700 mb-1.5">
+        <label for="reg-puesto" class="form-label">
           Puesto / Área <span class="text-red-500">*</span>
         </label>
         <select 
@@ -177,7 +168,7 @@ const handleRegister = async () => {
           name="puesto" 
           required 
           v-model="puesto"
-          class="appearance-none block w-full px-4 py-3 border border-gray-300 rounded-lg shadow-sm focus:outline-none focus:ring-2 focus:ring-districorr-accent focus:border-districorr-accent sm:text-sm transition-colors duration-150 bg-white"
+          class="form-input form-select" 
         >
           <option value="" disabled>-- Selecciona tu puesto --</option>
           <option v-for="item in puestosDisponibles" :key="item.valor" :value="item.valor">
@@ -187,7 +178,7 @@ const handleRegister = async () => {
       </div>
 
       <div>
-        <label for="reg-email" class="block text-sm font-medium text-gray-700 mb-1.5">
+        <label for="reg-email" class="form-label">
           Correo Electrónico <span class="text-red-500">*</span>
         </label>
         <input 
@@ -198,12 +189,12 @@ const handleRegister = async () => {
           required 
           v-model="email" 
           placeholder="tu@email.com"
-          class="appearance-none block w-full px-4 py-3 border border-gray-300 rounded-lg shadow-sm placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-districorr-accent focus:border-districorr-accent sm:text-sm transition-colors duration-150"
-        >
+          class="form-input"
+        />
       </div>
 
       <div>
-        <label for="reg-password" class="block text-sm font-medium text-gray-700 mb-1.5">
+        <label for="reg-password" class="form-label">
           Contraseña <span class="text-red-500">*</span>
         </label>
         <input 
@@ -214,12 +205,12 @@ const handleRegister = async () => {
           required 
           v-model="password" 
           placeholder="Mínimo 6 caracteres"
-          class="appearance-none block w-full px-4 py-3 border border-gray-300 rounded-lg shadow-sm placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-districorr-accent focus:border-districorr-accent sm:text-sm transition-colors duration-150"
-        >
+          class="form-input"
+        />
       </div>
 
       <div>
-        <label for="reg-confirm-password" class="block text-sm font-medium text-gray-700 mb-1.5">
+        <label for="reg-confirm-password" class="form-label">
           Confirmar Contraseña <span class="text-red-500">*</span>
         </label>
         <input 
@@ -230,30 +221,56 @@ const handleRegister = async () => {
           required 
           v-model="confirmPassword" 
           placeholder="Repite la contraseña"
-          class="appearance-none block w-full px-4 py-3 border border-gray-300 rounded-lg shadow-sm placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-districorr-accent focus:border-districorr-accent sm:text-sm transition-colors duration-150"
-        >
+          class="form-input"
+        />
       </div>
       
-      <!-- El div para mostrar mensajes de error/éxito ha sido movido a RegisterView.vue -->
-      <!-- y RegisterForm.vue ahora emite un evento 'registration-complete' -->
+      <!-- Los mensajes de error/éxito ahora son manejados por RegisterView.vue -->
+      <!-- a través del evento 'registration-complete'. Si quieres mostrarlos también aquí, -->
+      <!-- necesitarías refs locales para errorMessage y successMessage y no emitir, -->
+      <!-- o duplicar la lógica de mensajes. Es más limpio manejarlo en el padre. -->
 
-      <div class="pt-2"> <!-- Un poco de espacio extra antes del botón -->
+      <div class="pt-3"> 
         <button 
           type="submit" 
           :disabled="loading" 
-          class="w-full flex justify-center items-center py-3 px-4 border border-transparent rounded-lg shadow-sm text-base font-medium text-white bg-districorr-accent hover:bg-opacity-85 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-districorr-accent disabled:opacity-60 disabled:cursor-not-allowed transition-all duration-150 ease-in-out transform active:scale-95"
+          class="form-button-submit group w-full" 
         >
           <svg v-if="loading" class="animate-spin -ml-1 mr-3 h-5 w-5 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
             <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
             <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
           </svg>
-          {{ loading ? 'Registrando...' : 'Crear Cuenta' }}
+          <span class="group-hover:tracking-wider transition-all duration-200 text-base font-semibold">
+            {{ loading ? 'Registrando...' : 'Crear Cuenta' }}
+          </span>
         </button>
       </div>
     </form>
   </div>
 </template>
-
 <style scoped>
-/* Estilos adicionales si son necesarios para este componente específico. */
+.form-label {
+  @apply block text-sm font-medium text-gray-700 mb-1.5;
+}
+
+.form-input { /* Estilo base para inputs y select */
+  @apply appearance-none block w-full px-4 py-3 border border-gray-300 rounded-lg shadow-sm 
+         placeholder-gray-400 
+         focus:outline-none focus:ring-2 focus:ring-districorr-accent focus:border-districorr-accent 
+         sm:text-sm transition-colors duration-150;
+}
+
+.form-select { /* Puede heredar de form-input y añadir/sobrescribir estilos de select */
+  @apply bg-white; /* Para asegurar que el fondo del select sea blanco */
+}
+
+.form-button-submit { /* Similar al de Login, pero puedes cambiar el color base si quieres */
+  @apply w-full flex justify-center items-center py-3.5 px-4 rounded-xl 
+         bg-districorr-accent text-white /* Usando tu color de acento */
+         hover:bg-opacity-85 
+         focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-districorr-accent
+         disabled:opacity-60 disabled:cursor-not-allowed
+         transition-all duration-150 ease-in-out shadow-lg hover:shadow-md 
+         transform active:scale-95; /* Efecto al presionar */
+}
 </style>

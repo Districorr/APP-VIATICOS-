@@ -7,8 +7,9 @@
 <script setup>
 // Asegúrate de que la ruta al componente LoginForm sea correcta.
 // Si LoginForm.vue está en 'src/components/forms/LoginForm.vue':
-import LoginForm from '../components/LoginForm.vue'; 
-
+import LoginForm from '../components/LoginForm.vue';
+console.log('LoginView: LoginForm importado:', LoginForm); // Verifica este log
+console.log('LoginView.vue SCRIPT EJECUTADO');
 // Si LoginForm.vue está directamente en 'src/components/LoginForm.vue':
 // import LoginForm from '../components/LoginForm.vue';
 

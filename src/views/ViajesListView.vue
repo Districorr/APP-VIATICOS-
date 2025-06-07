@@ -186,7 +186,7 @@ onMounted(() => {
 
 // --- Funciones de Interacción y Navegación ---
 const goToNuevoViaje = () => {
-  router.push({ name: 'ViajeNuevo' });
+  router.push({ name: 'ViajeCreate' });
 };
 
 const editarViaje = (viaje) => {

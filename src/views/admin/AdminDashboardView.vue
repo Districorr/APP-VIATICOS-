@@ -1,8 +1,8 @@
 <script setup> 
 import { ref, onMounted, computed, watch } from 'vue';
-import { supabase } from '../../supabaseClient.js';
+import { supabase } from '../../supabaseClient.js'; // Asegúrate que la ruta sea correcta
 import { RouterLink } from 'vue-router';
-import { formatCurrency, formatDate } from '../../utils/formatters.js';
+import { formatCurrency, formatDate } from '../../utils/formatters.js'; // Asegúrate que la ruta sea correcta
 
 // Importaciones para Chart.js y vue-chartjs
 import { Pie, Line as LineChart } from 'vue-chartjs';
@@ -19,6 +19,8 @@ import {
   Filler
 } from 'chart.js';
 
+console.log("AdminDashboardView.vue: Script setup INICIADO");
+
 ChartJS.register(Title, Tooltip, Legend, ArcElement, CategoryScale, LinearScale, PointElement, LineElement, Filler);
 
 // --- KPIs ---
@@ -32,7 +34,7 @@ const errorKPIs = ref('');
 const chartDataGastosPorTipo = ref(null);
 const isLoadingChartGastosPorTipo = ref(true);
 const chartErrorGastosPorTipo = ref('');
-const periodoSeleccionadoPieChart = ref('mensual');
+const periodoSeleccionadoPieChart = ref('mensual'); // Default
 const fechaInicioPieChartPersonalizado = ref('');
 const fechaFinPieChartPersonalizado = ref('');
 const chartOptionsGastosPorTipo = ref({
@@ -62,7 +64,7 @@ const chartOptionsGastosPorTipo = ref({
 const chartDataEvolucionGastos = ref(null);
 const isLoadingEvolucionGastos = ref(true);
 const chartErrorEvolucionGastos = ref('');
-const periodoSeleccionadoEvolucion = ref('mes'); // 'mes', 'dia' (para el agrupador de la RPC)
+const periodoSeleccionadoEvolucion = ref('mes'); // Default
 const fechaInicioEvolucion = ref(''); 
 const fechaFinEvolucion = ref('');   
 
@@ -91,15 +93,22 @@ const chartOptionsEvolucionGastos = ref({
 
 // --- Funciones de Carga de Datos ---
 async function fetchAdminDashboardData() {
-  console.log("AdminDashboardView: Iniciando fetchAdminDashboardData para KPIs...");
+  console.log("%cAdminDashboardView: Iniciando fetchAdminDashboardData para KPIs...", "color: orange;");
   loadingKPIs.value = true; errorKPIs.value = '';
   kpiTotalGastadoGlobal.value = null; kpiRendicionesPendientes.value = null; kpiResponsablesActivos.value = null;
   try {
     const [totalResult, pendientesResult, activosResult] = await Promise.all([
       supabase.rpc('get_total_gastado_global'),
       supabase.rpc('get_count_rendiciones_pendientes'),
-      supabase.rpc('get_count_responsables_activos', { dias_atras: 30 })
+      supabase.rpc('get_count_responsables_activos', { dias_atras: 30 }) 
     ]);
+
+    // Log detallado de los resultados de KPIs
+    console.log("AdminDashboardView fetchAdminDashboardData - Resultados CRUDOS RPC KPIs:", {
+        totalResult: totalResult ? JSON.parse(JSON.stringify(totalResult)) : totalResult, 
+        pendientesResult: pendientesResult ? JSON.parse(JSON.stringify(pendientesResult)) : pendientesResult, 
+        activosResult: activosResult ? JSON.parse(JSON.stringify(activosResult)) : activosResult
+    });
 
     if (totalResult.error) { console.error("Error RPC (get_total_gastado_global):", totalResult.error); errorKPIs.value += `Total gastado: ${totalResult.error.message}\n`; } 
     else { kpiTotalGastadoGlobal.value = totalResult.data; } 
@@ -111,76 +120,113 @@ async function fetchAdminDashboardData() {
     else { kpiResponsablesActivos.value = activosResult.data; } 
 
   } catch (error) {
-    console.error("AdminDashboardView: Error general en fetchAdminDashboardData:", error.message);
+    console.error("AdminDashboardView: Error general en fetchAdminDashboardData:", error.message, error);
     errorKPIs.value = `Error general al cargar KPIs: ${error.message}`;
   } finally {
     loadingKPIs.value = false;
+    console.log("%cAdminDashboardView: fetchAdminDashboardData FIN.", "color: orange;");
   }
 }
 
 const formatDateForRPC = (dateStrOrObj) => {
   if (!dateStrOrObj) return null;
-  if (dateStrOrObj instanceof Date) { return dateStrOrObj.toISOString().split('T')[0]; }
-  return dateStrOrObj; 
+  try {
+    if (typeof dateStrOrObj === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(dateStrOrObj)) {
+      return dateStrOrObj;
+    }
+    const date = new Date(dateStrOrObj);
+    if (isNaN(date.getTime())) {
+        console.warn("formatDateForRPC: Fecha inválida recibida, devolviendo null:", dateStrOrObj);
+        return null; 
+    }
+    return date.toISOString().split('T')[0];
+  } catch (e) {
+    console.warn("formatDateForRPC: Error formateando fecha, devolviendo null:", dateStrOrObj, e);
+    return null;
+  }
 };
 
-// Función para cargar y formatear datos para el gráfico de gastos por tipo (PIE CHART)
 async function fetchChartDataGastosPorTipo(fechaInicio = null, fechaFin = null) {
   isLoadingChartGastosPorTipo.value = true; chartErrorGastosPorTipo.value = '';
   
-  const params = { // RPC get_gastos_por_tipo_en_periodo NO usa 'agrupador'
+  const params = { 
       fecha_inicio: formatDateForRPC(fechaInicio),
       fecha_fin: formatDateForRPC(fechaFin) 
   };
-  console.log("AdminDashboardView: fetchChartDataGastosPorTipo - RPC 'get_gastos_por_tipo_en_periodo' con:", params);
+  console.log("%cAdminDashboardView: fetchChartDataGastosPorTipo - Llamando RPC 'get_gastos_por_tipo_en_periodo' con PARAMS:", "color: green;", JSON.parse(JSON.stringify(params)));
   try {
     const { data, error } = await supabase.rpc('get_gastos_por_tipo_en_periodo', params); 
+    console.log("%cAdminDashboardView: fetchChartDataGastosPorTipo - Datos CRUDOS RECIBIDOS de RPC:", "color: green;", data ? JSON.parse(JSON.stringify(data)) : data, "Error:", error ? JSON.parse(JSON.stringify(error)) : error);
+    
     if (error) throw error;
+
     if (data && data.length > 0) {
       const labels = data.map(item => item.nombre_tipo || 'Desconocido');
       const chartValues = data.map(item => parseFloat(item.total_gastado_bruto) || 0);
       const colorPalette = ['rgba(255, 99, 132, 0.7)', 'rgba(54, 162, 235, 0.7)', 'rgba(255, 206, 86, 0.7)', 'rgba(75, 192, 192, 0.7)', 'rgba(153, 102, 255, 0.7)', 'rgba(255, 159, 64, 0.7)', 'rgba(199, 199, 199, 0.7)'];
       const backgroundColors = data.map((_, index) => colorPalette[index % colorPalette.length]);
       chartDataGastosPorTipo.value = { labels, datasets: [{ data: chartValues, backgroundColor: backgroundColors, borderColor: '#fff', borderWidth: 1 }] };
+      console.log("%cAdminDashboardView: fetchChartDataGastosPorTipo - Datos para Pie Chart PROCESADOS.", "color: green;", chartDataGastosPorTipo.value);
     } else {
+      console.log("%cAdminDashboardView: fetchChartDataGastosPorTipo - No hay datos o array vacío de RPC.", "color: green;");
       chartDataGastosPorTipo.value = { labels: ['Sin datos para el período'], datasets: [{ data: [1], backgroundColor: ['#E0E0E0'] }] };
     }
   } catch (error) {
-    console.error("Error cargando datos para Pie Chart:", error.message);
-    chartErrorGastosPorTipo.value = `Error al cargar gráfico: ${error.details || error.message}`; chartDataGastosPorTipo.value = null;
-  } finally { isLoadingChartGastosPorTipo.value = false; }
+    console.error("AdminDashboardView: Error cargando datos para Pie Chart:", error.message, error);
+    chartErrorGastosPorTipo.value = `Error al cargar gráfico: ${error.details || error.message}`; 
+    chartDataGastosPorTipo.value = { labels: ['Error al cargar'], datasets: [{ data: [1], backgroundColor: ['#FFCCCC'] }] };
+  } finally { 
+    isLoadingChartGastosPorTipo.value = false; 
+    console.log("%cAdminDashboardView: fetchChartDataGastosPorTipo FIN.", "color: green;");
+  }
 }
 
 function cargarDatosPieChartSegunPeriodo() {
+  console.log("AdminDashboardView: cargarDatosPieChartSegunPeriodo - Periodo seleccionado:", periodoSeleccionadoPieChart.value);
   let inicio = null, fin = null; const hoy = new Date();
+  
   if (periodoSeleccionadoPieChart.value === 'semanal') {
-    const haceUnaSemana = new Date(hoy); haceUnaSemana.setDate(hoy.getDate() - 6);
+    const haceUnaSemana = new Date(hoy); haceUnaSemana.setDate(hoy.getDate() - 6); 
     inicio = haceUnaSemana; fin = hoy;
   } else if (periodoSeleccionadoPieChart.value === 'mensual') {
     inicio = new Date(hoy.getFullYear(), hoy.getMonth(), 1); fin = hoy;
   } else if (periodoSeleccionadoPieChart.value === 'personalizado') {
     if (fechaInicioPieChartPersonalizado.value && fechaFinPieChartPersonalizado.value) {
       inicio = fechaInicioPieChartPersonalizado.value; fin = fechaFinPieChartPersonalizado.value;
-    } else { chartErrorGastosPorTipo.value = "Seleccione un rango de fechas."; chartDataGastosPorTipo.value = { labels: ['Seleccione rango'], datasets: [{ data: [1], backgroundColor: ['#E0E0E0']}]}; return; }
+       if (new Date(inicio) > new Date(fin)) {
+        chartErrorGastosPorTipo.value = "La fecha de inicio no puede ser posterior a la fecha de fin.";
+        chartDataGastosPorTipo.value = { labels: ['Fechas inválidas'], datasets: [{ data: [1], backgroundColor: ['#FFCCCC']}]};
+        isLoadingChartGastosPorTipo.value = false; 
+        return;
+      }
+    } else { 
+      chartErrorGastosPorTipo.value = "Seleccione un rango de fechas para el período personalizado."; 
+      chartDataGastosPorTipo.value = { labels: ['Seleccione rango'], datasets: [{ data: [1], backgroundColor: ['#E0E0E0']}]};
+      isLoadingChartGastosPorTipo.value = false; 
+      return; 
+    }
   }
+  console.log("AdminDashboardView: cargarDatosPieChartSegunPeriodo - Fechas calculadas para RPC:", {inicio: formatDateForRPC(inicio), fin: formatDateForRPC(fin)});
   fetchChartDataGastosPorTipo(inicio, fin);
 }
 
-// Función para cargar y formatear datos para el gráfico de EVOLUCIÓN DE GASTOS (LINE CHART)
 async function fetchEvolucionGastosData(fechaInicio, fechaFin, agrupador) {
   isLoadingEvolucionGastos.value = true; chartErrorEvolucionGastos.value = '';
   const params = {
-    p_fecha_inicio: formatDateForRPC(fechaInicio) || null, // Usar p_ para coincidir con RPC
-    p_fecha_fin: formatDateForRPC(fechaFin) || null,     // Usar p_
-    p_agrupador: agrupador                               // Usar p_
+    p_fecha_inicio: formatDateForRPC(fechaInicio) || null,
+    p_fecha_fin: formatDateForRPC(fechaFin) || null,
+    p_agrupador: agrupador
   };
-  console.log("AdminDashboardView: fetchEvolucionGastosData - RPC 'get_evolucion_gastos_ars' con:", params);
+  console.log("%cAdminDashboardView: fetchEvolucionGastosData - Llamando RPC 'get_evolucion_gastos_ars' con PARAMS:", "color: blueviolet;", JSON.parse(JSON.stringify(params)));
   try {
     const { data, error } = await supabase.rpc('get_evolucion_gastos_ars', params);
+    console.log("%cAdminDashboardView: fetchEvolucionGastosData - Datos CRUDOS RECIBIDOS de RPC:", "color: blueviolet;", data ? JSON.parse(JSON.stringify(data)) : data, "Error:", error ? JSON.parse(JSON.stringify(error)) : error);
+    
     if (error) throw error; 
+
     if (data && data.length > 0) {
-      const labels = data.map(item => item.periodo_label);
-      const chartValues = data.map(item => parseFloat(item.total_gastado_bruto) || 0);
+      const labels = data.map(item => item.periodo_label); 
+      const chartValues = data.map(item => parseFloat(item.total_gastado_bruto) || 0); 
       chartDataEvolucionGastos.value = {
         labels,
         datasets: [{
@@ -188,9 +234,11 @@ async function fetchEvolucionGastosData(fechaInicio, fechaFin, agrupador) {
             borderWidth: 2, tension: 0.1, data: chartValues, fill: true,
         }]
       };
-      let periodoTexto = agrupador === 'mes' ? 'Mensual' : 'Diaria';
+      console.log("%cAdminDashboardView: fetchEvolucionGastosData - Datos para Line Chart PROCESADOS.", "color: blueviolet;", chartDataEvolucionGastos.value);
+      
+      let periodoTexto = agrupador === 'mes' ? 'Mensual' : (agrupador === 'dia' ? 'Diaria' : 'Personalizada');
       let rangoTexto = '';
-      // Usar los valores originales de las refs para el título, no los formateados para RPC
+      // Usar los valores de las refs para el título, que son los que el usuario ve/ingresa
       const inicioOriginalParaTitulo = fechaInicioEvolucion.value; 
       const finOriginalParaTitulo = fechaFinEvolucion.value;
 
@@ -201,56 +249,96 @@ async function fetchEvolucionGastosData(fechaInicio, fechaFin, agrupador) {
       } else if (finOriginalParaTitulo) {
          rangoTexto = ` (Hasta ${formatDate(finOriginalParaTitulo)})`;
       } else {
-        if (agrupador === 'mes') rangoTexto = " (Últimos 12 meses por defecto)";
-        else if (agrupador === 'dia') rangoTexto = " (Rango por defecto de RPC)";
+        if (agrupador === 'mes') rangoTexto = " (Últimos 12 meses por defecto)"; // O el default de tu RPC
+        else if (agrupador === 'dia') rangoTexto = " (Rango por defecto de RPC)"; // O el default de tu RPC
       }
       chartOptionsEvolucionGastos.value.plugins.title.text = `Evolución de Gastos ${periodoTexto}${rangoTexto} (ARS)`;
     } else {
+      console.log("%cAdminDashboardView: fetchEvolucionGastosData - No hay datos o array vacío de RPC.", "color: blueviolet;");
       chartDataEvolucionGastos.value = { labels: ['Sin datos para el período/agrupador'], datasets: [{ data: [] }]};
       chartOptionsEvolucionGastos.value.plugins.title.text = `Evolución de Gastos (ARS) - Sin Datos`;
     }
   } catch (error) {
-    console.error("Error cargando datos para Line Chart:", error.message);
+    console.error("AdminDashboardView: Error cargando datos para Line Chart:", error.message, error);
     chartErrorEvolucionGastos.value = `Error al cargar gráfico de evolución: ${error.details || error.message}`; 
-    chartDataEvolucionGastos.value = null;
-  } finally { isLoadingEvolucionGastos.value = false; }
+    chartDataEvolucionGastos.value = { labels: ['Error al cargar'], datasets: [{ data: [] }] }; 
+  } finally { 
+    isLoadingEvolucionGastos.value = false; 
+    console.log("%cAdminDashboardView: fetchEvolucionGastosData FIN.", "color: blueviolet;");
+  }
 }
 
 function cargarDatosEvolucionConFiltros() {
-    // Los valores de fechaInicioEvolucion.value y fechaFinEvolucion.value ya son strings YYYY-MM-DD o ''
+    console.log("AdminDashboardView: cargarDatosEvolucionConFiltros - Filtros actuales:", {
+        inicio: fechaInicioEvolucion.value,
+        fin: fechaFinEvolucion.value,
+        agrupador: periodoSeleccionadoEvolucion.value
+    });
+    if (fechaInicioEvolucion.value && fechaFinEvolucion.value && new Date(fechaInicioEvolucion.value) > new Date(fechaFinEvolucion.value)) {
+        chartErrorEvolucionGastos.value = "La fecha de inicio no puede ser posterior a la fecha de fin para el gráfico de evolución.";
+        // Opcional: limpiar el gráfico o no hacer la llamada
+        // chartDataEvolucionGastos.value = { labels: ['Fechas inválidas'], datasets: [{ data: [] }] };
+        // isLoadingEvolucionGastos.value = false;
+        console.warn("AdminDashboardView: cargarDatosEvolucionConFiltros - Fechas inválidas, no se cargará el gráfico.");
+        return;
+    }
     fetchEvolucionGastosData(fechaInicioEvolucion.value, fechaFinEvolucion.value, periodoSeleccionadoEvolucion.value);
 }
 
 // Watchers
-watch([periodoSeleccionadoPieChart, fechaInicioPieChartPersonalizado, fechaFinPieChartPersonalizado], 
-  () => {
-    if (periodoSeleccionadoPieChart.value === 'personalizado') {
+watch(periodoSeleccionadoPieChart, () => {
+    console.log("AdminDashboardView Watcher: periodoSeleccionadoPieChart cambió a", periodoSeleccionadoPieChart.value);
+    if (periodoSeleccionadoPieChart.value !== 'personalizado') {
+      cargarDatosPieChartSegunPeriodo();
+    } else {
+      // Para personalizado, solo cargar si ambas fechas están presentes.
+      // El usuario debe seleccionar ambas fechas.
       if (fechaInicioPieChartPersonalizado.value && fechaFinPieChartPersonalizado.value) {
         cargarDatosPieChartSegunPeriodo();
+      } else {
+        chartDataGastosPorTipo.value = { labels: ['Seleccione rango personalizado'], datasets: [{ data: [1], backgroundColor: ['#E0E0E0']}]};
+        chartErrorGastosPorTipo.value = "Por favor, seleccione una fecha de inicio y fin para el período personalizado.";
       }
-    } else {
-      cargarDatosPieChartSegunPeriodo();
     }
-  }, { deep: false }
+  }
 );
 
-watch(periodoSeleccionadoEvolucion, (newValue, oldValue) => {
-    if(oldValue !== undefined){ 
-        cargarDatosEvolucionConFiltros();
+watch([fechaInicioPieChartPersonalizado, fechaFinPieChartPersonalizado], 
+  ([newInicio, newFin]) => { // No es necesario oldInicio, oldFin si no los usas
+    if (periodoSeleccionadoPieChart.value === 'personalizado') {
+      console.log("AdminDashboardView Watcher: Fechas Pie Chart Personalizado cambiaron:", {newInicio, newFin});
+      if (newInicio && newFin) { 
+        cargarDatosPieChartSegunPeriodo();
+      }
+      // Si una fecha se borra, no se recarga automáticamente, espera a que ambas estén.
     }
+  }
+);
+
+
+watch(periodoSeleccionadoEvolucion, (newValue, oldValue) => {
+    console.log("AdminDashboardView Watcher: periodoSeleccionadoEvolucion cambió de", oldValue, "a", newValue);
+    // No llamar a cargarDatosEvolucionConFiltros aquí directamente si se depende de un botón "Aplicar"
+    // o si la carga inicial ya se hizo en onMounted.
+    // Si quieres que cambie automáticamente al cambiar el agrupador (sin tocar fechas):
+    // if(oldValue !== undefined){ 
+    //     cargarDatosEvolucionConFiltros();
+    // }
 });
-// No se necesita un watch para fechaInicioEvolucion/fechaFinEvolucion si se usa un botón "Aplicar"
 
 onMounted(() => {
-  console.log("AdminDashboardView: Componente MONTADO.");
+  console.log("%cAdminDashboardView.vue: Componente MONTADO (onMounted).", "color: red; font-weight: bold;");
   fetchAdminDashboardData(); 
-  cargarDatosPieChartSegunPeriodo(); 
-
-  fechaInicioEvolucion.value = ''; 
-  fechaFinEvolucion.value = '';     
-  periodoSeleccionadoEvolucion.value = 'mes';
-  cargarDatosEvolucionConFiltros();
+  
+  // Carga inicial de gráficos
+  cargarDatosPieChartSegunPeriodo(); // Usará el default 'mensual'
+  
+  // Para evolución, la carga inicial se hace con los valores por defecto de las refs
+  // (fechas vacías, agrupador 'mes')
+  cargarDatosEvolucionConFiltros(); 
 });
+
+console.log("AdminDashboardView.vue: Script setup FINALIZADO");
 </script>
 <template>
   <div class="container mx-auto px-4 sm:px-6 lg:px-8 py-8">
