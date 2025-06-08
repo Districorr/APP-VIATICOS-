@@ -3,7 +3,7 @@ import { ref } from 'vue';
 import { supabase } from '../supabaseClient.js'; 
 import { useRouter } from 'vue-router';
 
-console.log("RegisterForm.vue (v2 - con options.data): Script setup INICIADO");
+console.log("RegisterForm.vue (V2.1 - con options.data): Script setup INICIADO");
 
 const router = useRouter();
 
@@ -16,115 +16,122 @@ const confirmPassword = ref('');
 
 // Opciones para el select de "Puesto / Área"
 const puestosDisponibles = ref([
-  { valor: '', etiqueta: '-- Selecciona tu puesto --' }, // Opción deshabilitada por defecto
+  { valor: '', etiqueta: '-- Selecciona tu puesto --' },
   { valor: 'Vendedor', etiqueta: 'Vendedor' },
   { valor: 'Administrativo', etiqueta: 'Administrativo' },
   { valor: 'Tecnico', etiqueta: 'Técnico' },
   { valor: 'Gerencia', etiqueta: 'Gerencia' },
   { valor: 'Otro', etiqueta: 'Otro' },
-  // Asegúrate de que los 'valor' sean los que quieres guardar en la BD.
 ]);
 
 // Refs para mensajes y estado de carga
 const errorMessage = ref('');
-const successMessage = ref(''); // No se usa directamente para mostrar al usuario aquí, se emite.
+// successMessage se maneja a través del evento emitido
 const loading = ref(false);
 
-// Emitir evento cuando el registro se completa (o falla con mensaje)
 const emit = defineEmits(['registration-complete']);
 
 const handleRegister = async () => {
-  console.log("RegisterForm.vue: handleRegister - INICIO");
+  console.log("RegisterForm.vue (V2.1): handleRegister - INICIO. Email:", email.value);
   errorMessage.value = ''; // Limpiar error previo
 
-  if (password.value !== confirmPassword.value) {
-    errorMessage.value = 'Las contraseñas no coinciden.';
-    emit('registration-complete', { success: false, isError: true, requiresConfirmation: false, message: errorMessage.value });
-    return;
-  }
-  if (password.value.length < 6) { 
-    errorMessage.value = 'La contraseña debe tener al menos 6 caracteres.';
-    emit('registration-complete', { success: false, isError: true, requiresConfirmation: false, message: errorMessage.value });
+  // Validaciones del Frontend
+  if (!nombreCompleto.value.trim()) {
+    errorMessage.value = 'Por favor, ingresa tu nombre completo.';
+    // No emitir aquí, dejar que el usuario corrija y reintente. El mensaje se muestra en el form.
+    // Si quieres emitir para que RegisterView lo muestre, puedes hacerlo:
+    // emit('registration-complete', { success: false, isError: true, requiresConfirmation: false, message: errorMessage.value });
     return;
   }
   if (!puesto.value) { 
     errorMessage.value = 'Por favor, selecciona tu puesto o área.';
-    emit('registration-complete', { success: false, isError: true, requiresConfirmation: false, message: errorMessage.value });
     return;
   }
-  if (!nombreCompleto.value.trim()) {
-    errorMessage.value = 'Por favor, ingresa tu nombre completo.';
-    emit('registration-complete', { success: false, isError: true, requiresConfirmation: false, message: errorMessage.value });
-    return;
-  }
-   if (!email.value.trim()) {
+  if (!email.value.trim()) {
     errorMessage.value = 'Por favor, ingresa tu correo electrónico.';
-    emit('registration-complete', { success: false, isError: true, requiresConfirmation: false, message: errorMessage.value });
     return;
   }
-
+  if (password.value !== confirmPassword.value) {
+    errorMessage.value = 'Las contraseñas no coinciden.';
+    return;
+  }
+  if (password.value.length < 6) { 
+    errorMessage.value = 'La contraseña debe tener al menos 6 caracteres.';
+    return;
+  }
 
   loading.value = true;
   let feedback = { success: false, isError: false, requiresConfirmation: false, message: '' };
 
   try {
-    console.log("RegisterForm.vue: Llamando a supabase.auth.signUp con options.data...");
+    console.log("RegisterForm.vue (V2.1): Llamando a supabase.auth.signUp con options.data:", 
+      { nombre_completo: nombreCompleto.value.trim(), puesto: puesto.value }
+    );
+
     const { data: authData, error: signUpError } = await supabase.auth.signUp({
-      email: email.value,
+      email: email.value.trim(), // Asegurar trim también en el email
       password: password.value,
       options: {
         data: { 
           nombre_completo: nombreCompleto.value.trim(),
           puesto: puesto.value
-          // El rol se asignará por el default de la tabla 'perfiles' o por el trigger si lo modifica.
+          // El rol será asignado por el DEFAULT en la tabla 'perfiles' o por el trigger si lo modifica.
+          // formato_predeterminado_id también tomará su DEFAULT.
         }
-        // redirectTo: `${window.location.origin}/ruta-post-confirmacion` // Opcional si quieres una página específica post-confirmación
+        // redirectTo: `${window.location.origin}/ruta-post-confirmacion` // Opcional
       }
     });
 
     if (signUpError) {
-      console.error('RegisterForm.vue: Error en Supabase signUp:', signUpError);
-      if (signUpError.message.includes("User already registered")) {
-        feedback.message = "Este correo electrónico ya está registrado. Intenta iniciar sesión.";
-      } else if (signUpError.message.includes("Password should be at least 6 characters")) {
+      console.error('RegisterForm.vue (V2.1): Error en Supabase signUp:', signUpError);
+      if (signUpError.message.toLowerCase().includes("user already registered")) {
+        feedback.message = "Este correo electrónico ya está registrado. Intenta iniciar sesión o recuperar tu contraseña.";
+      } else if (signUpError.message.toLowerCase().includes("password should be at least 6 characters")) {
         feedback.message = "La contraseña debe tener al menos 6 caracteres.";
-      } else {
+      } else if (signUpError.message.toLowerCase().includes("database error saving new user")) {
+        // Este es el error que veíamos si el trigger fallaba (ej. por duplicate key ANTES del ON CONFLICT)
+        feedback.message = "Hubo un error al guardar tu información de perfil. Por favor, intenta de nuevo o contacta a soporte si el problema persiste.";
+      }
+      else {
         feedback.message = `Error en el registro: ${signUpError.message}`;
       }
       feedback.isError = true;
-      // No es necesario 'return' aquí, el flujo continuará al 'finally' y emitirá el feedback.
     } else {
-      console.log('RegisterForm.vue: Usuario creado/pendiente en Auth:', authData);
+      console.log('RegisterForm.vue (V2.1): Usuario creado/pendiente en Auth:', authData);
+      
       // authData.user será null si la confirmación de email está habilitada y el usuario aún no ha confirmado.
-      // authData.session será null en ese mismo caso.
+      // authData.session también será null en ese caso.
+      // El trigger handle_new_user se habrá ejecutado y creado/actualizado la fila en perfiles.
       
       feedback.requiresConfirmation = !!(authData.session === null && !authData.user && authData.identities && authData.identities.length > 0);
       
       if (feedback.requiresConfirmation) {
         feedback.message = "¡Gracias por registrarte! Revisa tu correo electrónico para confirmar tu cuenta y poder iniciar sesión.";
-        feedback.success = true; // El signUp fue exitoso en iniciar el proceso
-      } else if (authData.user) { // Usuario creado y sesión iniciada (confirmación desactivada o ya hecha)
+        feedback.success = true; 
+      } else if (authData.user) { 
         feedback.message = "¡Registro exitoso! Serás redirigido al login en unos segundos.";
         feedback.success = true;
       } else {
-        // Caso inesperado, signUp no dio error pero tampoco user ni session null (indicando confirmación)
-        console.warn("RegisterForm.vue: Respuesta de signUp no concluyente, asumiendo pendiente de confirmación.", authData);
-        feedback.message = "Registro procesado. Revisa tu correo para los siguientes pasos.";
-        feedback.success = true; // Asumir éxito parcial
-        feedback.requiresConfirmation = true; // Asumir que requiere confirmación
+        // Caso menos común si signUp no da error pero tampoco user ni indica confirmación explícita
+        console.warn("RegisterForm.vue (V2.1): Respuesta de signUp no concluyente, asumiendo pendiente de confirmación.", authData);
+        feedback.message = "Registro procesado. Por favor, revisa tu correo para los siguientes pasos.";
+        feedback.success = true; 
+        feedback.requiresConfirmation = true; 
       }
     }
   } catch (error) { 
-    console.error('RegisterForm.vue: Error general en handleRegister:', error);
-    feedback.message = 'Ocurrió un error inesperado durante el registro.';
+    console.error('RegisterForm.vue (V2.1): Error general en handleRegister:', error);
+    feedback.message = 'Ocurrió un error inesperado durante el registro. Por favor, inténtalo de nuevo.';
     feedback.isError = true;
   } finally {
     loading.value = false;
-    emit('registration-complete', feedback); // Emitir el feedback final
-    console.log("RegisterForm.vue: handleRegister - FIN. Feedback emitido:", feedback);
+    // Emitir el feedback al componente padre (RegisterView.vue)
+    // RegisterView.vue se encargará de mostrar el mensaje y/o redirigir.
+    emit('registration-complete', feedback); 
+    console.log("RegisterForm.vue (V2.1): handleRegister - FIN. Feedback emitido:", feedback);
   }
 };
-console.log("RegisterForm.vue (v2 - con options.data): Script setup FINALIZADO");
+console.log("RegisterForm.vue (V2.1 - con options.data): Script setup FINALIZADO");
 </script>
 <template>
   <!-- 

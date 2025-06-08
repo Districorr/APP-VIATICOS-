@@ -1,10 +1,10 @@
 <script setup>
-import { ref, onMounted, computed, onUnmounted, provide, readonly, nextTick } from 'vue'; // watch eliminado de imports si no se usa
+import { ref, onMounted, computed, onUnmounted, provide, readonly, nextTick } from 'vue';
 import AppHeader from './components/AppHeader.vue'; 
 import { supabase } from './supabaseClient.js';    
 import { useRouter, useRoute } from 'vue-router'; 
 
-console.log("App.vue (V3.7.1 - Estable con testOtraTabla): Script setup INICIADO");
+console.log("App.vue (V4.3 - SIN TIMEOUTS FETCH): Script setup INICIADO");
 
 const isDevelopmentMode = computed(() => import.meta.env.DEV);
 
@@ -28,7 +28,7 @@ provide('errorUserProfile', readonly(errorUserProfile));
 let authListenerSubscription = null;
 
 async function fetchUserProfile(userId) {
-  // console.log(`%cApp.vue (V3.7.1) fetchUserProfile: INICIO para userId: ${userId}`, "color: blueviolet;"); // Menos verboso
+  console.log(`%cApp.vue (V4.3) fetchUserProfile: INICIO para userId: ${userId}`, "color: blueviolet;");
   if (!userId) { 
     userProfile.value = null; 
     loadingUserProfile.value = false;
@@ -39,78 +39,73 @@ async function fetchUserProfile(userId) {
   errorUserProfile.value = ''; 
   
   try {
-    // console.log("App.vue (V3.7.1) fetchUserProfile: Ejecutando consulta a 'perfiles'..."); // Menos verboso
+    // ***** SIN Promise.race, await directo *****
+    console.log("App.vue (V4.3) fetchUserProfile: Ejecutando consulta a 'perfiles' (SELECT COMPLETO)...");
+    const startTime = performance.now();
     const { data, error, status } = await supabase
       .from('perfiles')
       .select('id, email, rol, nombre_completo, puesto, formato_predeterminado_id') 
       .eq('id', userId)
       .single();
+    const endTime = performance.now();
+    console.log(`%cApp.vue (V4.3) fetchUserProfile: Consulta a 'perfiles' completada en: ${(endTime - startTime).toFixed(2)} ms`, "color: #28a745;");
+    // *****************************************
 
     if (error && status !== 406) { 
-      console.error('App.vue (V3.7.1) fetchUserProfile: Error Supabase:', error.message, `(Status: ${status})`); 
-      userProfile.value = { id: userId, email: userSession.value?.user?.email, rol: 'error_db', nombre_completo: '(Error BD)' }; 
-      errorUserProfile.value = `Error cargando perfil: ${error.message}`;
+      console.error('App.vue (V4.3) fetchUserProfile: Error Supabase:', error.message, `(Status: ${status})`); 
+      userProfile.value = { id: userId, email: userSession.value?.user?.email, rol: 'error_db_v43', nombre_completo: '(Error BD V4.3)' }; 
+      errorUserProfile.value = `Error cargando perfil (V4.3): ${error.message}`;
     } else if (data) { 
-      // console.log('%cApp.vue (V3.7.1) fetchUserProfile: Perfil ENCONTRADO.', "color: green;"); 
+      console.log('%cApp.vue (V4.3) fetchUserProfile: Perfil COMPLETO ENCONTRADO.', "color: green;"); 
       userProfile.value = data; 
     } else { 
-      console.warn('App.vue (V3.7.1) fetchUserProfile: Perfil NO encontrado. Status:', status); 
-      userProfile.value = { id: userId, email: userSession.value?.user?.email, rol: 'no_perfil', nombre_completo: '(No en BD)'}; 
+      console.warn('App.vue (V4.3) fetchUserProfile: Perfil NO encontrado. Status:', status); 
+      userProfile.value = { id: userId, email: userSession.value?.user?.email, rol: 'no_perfil_v43', nombre_completo: '(No en BD V4.3)'}; 
       if (status !== 406) errorUserProfile.value = 'Perfil de usuario no encontrado.';
     }
   } catch (e) { 
-    console.error('App.vue (V3.7.1) fetchUserProfile: EXCEPCIÓN:', e.message); 
-    userProfile.value = { id: userId, email: userSession.value?.user?.email, rol: 'excepcion', nombre_completo: '(Excepción)' };
-    errorUserProfile.value = `Excepción al cargar perfil: ${e.message}`;
+    console.error('App.vue (V4.3) fetchUserProfile: EXCEPCIÓN:', e.message); 
+    userProfile.value = { id: userId, email: userSession.value?.user?.email, rol: 'excepcion_v43', nombre_completo: '(Excepción V4.3)' };
+    errorUserProfile.value = `Excepción al cargar perfil (V4.3): ${e.message}`;
   } finally {
     loadingUserProfile.value = false; 
   }
 }
 
-async function testOtraTabla() { 
-  console.log("%cApp.vue (V3.7.1): INICIO testOtraTabla()", "color: magenta;");
-  try {
-    const startTime = performance.now();
-    const { data, error } = await supabase.from('tipos_gasto_config').select('id', {count: 'exact', head: true}).limit(0); // Solo contar, no traer datos
-    const endTime = performance.now();
-    if (error) { console.error("App.vue (V3.7.1) testOtraTabla: Error:", error); }
-    else { console.log(`%cApp.vue (V3.7.1) testOtraTabla: Ping exitoso en ${(endTime - startTime).toFixed(2)} ms. Count: ${data ? 'N/A (head:true)' : error?.count}`, "color: magenta;");}
-  } catch (e) { console.error("App.vue (V3.7.1) testOtraTabla: EXCEPCIÓN:", e.message); }
-  console.log("%cApp.vue (V3.7.1): FIN testOtraTabla()", "color: magenta;");
-}
+// testOtraTabla() se mantiene eliminada. Si la necesitas para el "efecto de timing" en onMounted,
+// puedes usar la versión con await directo también.
+// async function testOtraTabla() { ... }
+
 
 async function handleLogoutEvent() {
+  // ... (igual que V4.0/V4.1.1) ...
   const { error } = await supabase.auth.signOut();
-  if (error) { console.error('App.vue (V3.7.1): Error en signOut:', error.message); }
+  if (error) { console.error('App.vue (V4.3): Error en signOut:', error.message); }
   else { router.push({ name: 'Login' }); }
 }
 
 onMounted(async () => { 
-  console.log('App.vue (V3.7.1): onMounted - INICIO.');
+  console.log('App.vue (V4.3): onMounted.');
   loadingAuthSession.value = true; 
   initialAuthCheckDone.value = false; 
   loadingUserProfile.value = false;
   errorUserProfile.value = ''; 
 
-  console.log('App.vue (V3.7.1): onMounted - LLAMANDO a await testOtraTabla()...');
-  await testOtraTabla(); // Mantenemos esta llamada
-  console.log('App.vue (V3.7.1): onMounted - testOtraTabla() COMPLETADO.');
+  // Si el "await testOtraTabla()" era necesario para el timing en F5,
+  // podrías reemplazarlo con un pequeño delay explícito si prefieres no hacer la consulta:
+  console.log('App.vue (V4.3): onMounted - Aplicando pequeño delay inicial...');
+  await new Promise(resolve => setTimeout(resolve, 100)); // Ejemplo: 100ms delay
+  console.log('App.vue (V4.3): onMounted - Delay completado. Suscribiendo a Auth...');
 
   authListenerSubscription = supabase.auth.onAuthStateChange(
+    // ... (Lógica de onAuthStateChange igual que en V3.7.1 / V4.1.1, incluyendo el nextTick) ...
     async (_event, session) => {
-      console.log(`%cApp.vue (V3.7.1) onAuthStateChange: Evento: ${_event}, Sesión: ${!!session}`, "color: teal;");
-      
-      if (!initialAuthCheckDone.value) {
-        initialAuthCheckDone.value = true;
-      }
+      // console.log(`%cApp.vue (V4.3) onAuthStateChange: Evento: ${_event}, Sesión: ${!!session}`, "color: teal;");
+      if (!initialAuthCheckDone.value) { initialAuthCheckDone.value = true; }
       const previousUserId = userSession.value?.user?.id;
       userSession.value = session;
-
       if (session?.user) {
-        const necesitaCargarPerfil = !userProfile.value || 
-                                  userProfile.value.id !== session.user.id ||
-                                  userProfile.value.rol?.includes('error') || 
-                                  userProfile.value.rol === 'no_perfil';
+        const necesitaCargarPerfil = !userProfile.value || userProfile.value.id !== session.user.id || userProfile.value.rol?.includes('error') || userProfile.value.rol === 'no_perfil';
         if (necesitaCargarPerfil) {
             await fetchUserProfile(session.user.id); 
             if (_event === 'SIGNED_IN' && userProfile.value && !userProfile.value.rol?.includes('error')) {
@@ -126,35 +121,21 @@ onMounted(async () => {
             }
         }
       } else { 
-        userProfile.value = null;
-        loadingUserProfile.value = false; 
+        userProfile.value = null; loadingUserProfile.value = false; 
       }
-      if (loadingAuthSession.value) {
-          loadingAuthSession.value = false;
-      }
+      if (loadingAuthSession.value) { loadingAuthSession.value = false; }
     }
   );
-  console.log("App.vue (V3.7.1): onMounted - Suscripción Auth establecida. FIN onMounted.");
 });
 
+// ... (onUnmounted, isAuthRoute, showAppLoader igual que en V4.0/V4.1.1) ...
 onUnmounted(() => {
-  if (authListenerSubscription) {
-    authListenerSubscription.unsubscribe();
-  }
+  if (authListenerSubscription) { authListenerSubscription.unsubscribe(); }
 });
+const isAuthRoute = computed(() => { /* ... */ return ['Login', 'Register', 'ActualizarContrasena'].includes(String(route.name)); });
+const showAppLoader = computed(() => !initialAuthCheckDone.value || (!!userSession.value && loadingUserProfile.value));
 
-// Watchers comentados/eliminados
-const isAuthRoute = computed(() => {
-  const authRouteNames = ['Login', 'Register', 'ActualizarContrasena']; 
-  const currentRouteName = String(route.name); 
-  return authRouteNames.includes(currentRouteName);
-});
-
-const showAppLoader = computed(() => {
-    return !initialAuthCheckDone.value || (!!userSession.value && loadingUserProfile.value);
-});
-
-console.log("App.vue (V3.7.1 - Estable con testOtraTabla): Script setup FINALIZADO");
+console.log("App.vue (V4.3 - SIN TIMEOUTS FETCH): Script setup FINALIZADO");
 </script>
 <template>
   <div id="app-container-v371"> <!-- ID actualizado para V3.7.1 -->

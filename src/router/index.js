@@ -51,26 +51,34 @@ const routes = [
     path: '/', 
     name: 'Dashboard', 
     component: DashboardView,
-    meta: { requiresAuth: true, title: 'Dashboard Principal' }
+    meta: { requiresAuth: true, title: 'Inicio' } // Título actualizado
   },
   {
     path: '/viajes',
     name: 'ViajesListUser', 
     component: ViajesListView,
-    meta: { requiresAuth: true, title: 'Mis Viajes' }
+    meta: { requiresAuth: true, title: 'Mis Rendiciones' } // Título actualizado
   },
+  // --- INICIO DEL CÓDIGO AÑADIDO ---
+  {
+    path: '/reportes',
+    name: 'Reportes',
+    component: () => import('../views/ReportesView.vue'), // Importamos la nueva vista
+    meta: { requiresAuth: true, title: 'Mis Reportes' }
+  },
+  // --- FIN DEL CÓDIGO AÑADIDO ---
   {
     path: '/viajes/nuevo',
     name: 'ViajeCreate', 
     component: ViajeFormView,
-    meta: { requiresAuth: true, title: 'Nuevo Viaje' }
+    meta: { requiresAuth: true, title: 'Nueva Rendición' } // Título actualizado
   },
   {
     path: '/viajes/editar/:id',
     name: 'ViajeEdit', 
     component: ViajeFormView,
     props: true,
-    meta: { requiresAuth: true, title: 'Editar Viaje' }
+    meta: { requiresAuth: true, title: 'Editar Rendición' } // Título actualizado
   },
   {
     path: '/gastos', 
@@ -126,7 +134,7 @@ const routes = [
   },
   {
     path: '/admin/formatos-gasto/:formatoId/asignar-usuarios',
-    name: 'AdminAsignarFormatoUsuarios', // Corregido el nombre para consistencia si lo tenías diferente
+    name: 'AdminAsignarFormatoUsuarios',
     component: AdminAsignarUsuariosFormatoView,
     props: true,
     meta: { requiresAuth: true, requiresAdmin: true, title: 'Admin: Asignar Formatos' }
@@ -135,7 +143,7 @@ const routes = [
     path: '/admin/todos-los-viajes',
     name: 'AdminViajesList',
     component: AdminViajesListView,
-    meta: { requiresAuth: true, requiresAdmin: true, title: 'Admin: Todos los Viajes' }
+    meta: { requiresAuth: true, requiresAdmin: true, title: 'Admin: Todas las Rendiciones' } // Título actualizado
   },
   { 
     path: '/admin/gastos', 
@@ -249,8 +257,6 @@ router.beforeEach(async (to, from, next) => {
   
   if (requiresGuest && isAuthenticated) {
     const intendedRedirect = to.query.redirectTo || from.query.redirectTo; 
-    // Evitar redirigir a /login si ya está autenticado y no hay un redirectTo más específico.
-    // También evitar redirigir a la misma ruta de invitado si por alguna razón to.query.redirectTo es la misma ruta.
     if (intendedRedirect && typeof intendedRedirect === 'string' && intendedRedirect !== '/' && !intendedRedirect.startsWith('/login') && intendedRedirect !== to.path) {
       console.log(`%cRouter Guard: ACCIÓN -> Usuario autenticado en ruta guest. Redirigiendo a 'redirectTo': ${intendedRedirect}`, "color: orange;");
       return next({ path: intendedRedirect });

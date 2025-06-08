@@ -1,4 +1,4 @@
-// src/composables/useReportGenerator.js
+// src/composables/useReportGenerator.js - Bloque 1
 import jsPDF from 'jspdf';
 import 'jspdf-autotable'; // Importante para que .autoTable esté disponible
 import * as XLSX from 'xlsx';
@@ -65,6 +65,7 @@ export function useReportGenerator() {
       return { min: null, max: null };
     }
   };
+  // src/composables/useReportGenerator.js - Bloque 2
   
   /**
    * Calcula el responsable con el mayor gasto total en ARS.
@@ -179,7 +180,7 @@ export function useReportGenerator() {
         rawData: rawDataForExcel,
         totales: totalesGenerales
     };
-  };
+  };// src/composables/useReportGenerator.js - Bloque 3
 
   const calculateResumenGerencialPorTipo = (gastos, monedaPrincipalParaTotales = 'ARS') => {
     const resumenPorTipo = {}; 
@@ -266,6 +267,7 @@ export function useReportGenerator() {
     return { body: bodyForPDF, foot: footForPDF, totales: {neto: totalNetoGeneral, iva: totalIVAGeneral, bruto: totalGeneralBruto, moneda: monedaTotales}, rawData: rawDataForExcel };
   };
   // --- FIN DEL BLOQUE 2 ---
+  // src/composables/useReportGenerator.js - Bloque 4
 
   // --- BLOQUE 3: FUNCIONES DE GENERACIÓN DE REPORTES Y EXPORTACIÓN FINAL ---
 
@@ -364,6 +366,7 @@ export function useReportGenerator() {
     doc.save(`Rendicion_${viajeSeleccionadoInfo?.codigo_rendicion || 'General'}_${new Date().toISOString().split('T')[0]}.pdf`);
     console.log("useReportGenerator: PDF de rendición individual generado.");
   };
+  // src/composables/useReportGenerator.js - Bloque 5
 
   const generateGastosExcel = (gastos, viajeSeleccionadoInfo, userInfo, esAdminReport = false) => {
     console.log("useReportGenerator: generateGastosExcel - Iniciando con", gastos?.length, "gastos. Es Admin:", esAdminReport);
@@ -457,6 +460,7 @@ export function useReportGenerator() {
     XLSX.writeFile(workbook, `${fileNamePrefix}_${new Date().toISOString().split('T')[0]}.xlsx`);
     console.log("Resumen Detallado por Tipo (Excel) generado.");
   };
+  // src/composables/useReportGenerator.js - Bloque 6
 
   const generateAdminResumenTiposGastoPDF = (dataCalculada, fileNamePrefix = 'Admin_ResumenDetalladoTipo') => {
     const { body, foot } = dataCalculada;
@@ -607,9 +611,11 @@ export function useReportGenerator() {
     doc.save(`${fileNamePrefix}_${new Date().toISOString().split('T')[0]}.pdf`);
     console.log("useReportGenerator: Reporte Consolidado PDF generado.");
   };
+  // src/composables/useReportGenerator.js - Bloque 7 (CORREGIDO)
 
   const generateAdminReporteConsolidadoExcel = (gastos, filtrosAplicados = {}, fileNamePrefix = 'Reporte_Consolidado_Admin') => {
     console.log("useReportGenerator: Iniciando generateAdminReporteConsolidadoExcel con", gastos?.length, "gastos.");
+    // CORRECCIÓN: 'ifCl' cambiado a 'if'
     if (!gastos || gastos.length === 0) {
       alert('No hay gastos para generar el reporte consolidado Excel.');
       console.warn("generateAdminReporteConsolidadoExcel: No hay gastos.");
@@ -647,7 +653,7 @@ export function useReportGenerator() {
         const dataRowsDetalle = dataDetalleGastos.rawData.map(item => [
             item.fecha, item.n_comp, item.descripcion, item.responsable,
             item.neto, item.iva, item.total, item.moneda,
-            item.viaje_rendicion, item.estado_viaje // Nuevas columnas
+            item.viaje_rendicion, item.estado_viaje
         ]);
         const footerDetalle = [`TOTALES GENERALES (${dataDetalleGastos.totales.moneda})`, "", "", "", dataDetalleGastos.totales.neto, dataDetalleGastos.totales.iva, dataDetalleGastos.totales.bruto, "", "", ""];
         const wsDetalle = XLSX.utils.aoa_to_sheet([headersDetalle, ...dataRowsDetalle, footerDetalle]);
@@ -689,30 +695,97 @@ export function useReportGenerator() {
   };
   // --- FIN DEL BLOQUE 3 ---
 
-  return {
-    // Funciones auxiliares (si necesitas exponerlas, aunque usualmente son internas)
-    // getValoresMonetariosGasto, 
-    // getFechaMinMaxGastos,
-    // calculateResponsableConMasGasto,
+  // --- INICIO DEL CÓDIGO NUEVO ---
+  const generateUserReportPDF = (kpis, tableData, pieChartImage, lineChartImage, filterInfo) => {
+    console.log("Iniciando generación de PDF para reporte de usuario...");
+    const doc = new jsPDF({ orientation: 'p', unit: 'px', format: 'a4' });
+    const pageWidth = doc.internal.pageSize.getWidth();
+    const margin = 40;
+    let currentY = margin;
 
-    // Funciones de cálculo que los componentes pueden usar directamente
+    // --- Título y Período ---
+    doc.setFontSize(18);
+    doc.setFont(undefined, 'bold');
+    doc.text("Reporte de Gastos", pageWidth / 2, currentY, { align: 'center' });
+    currentY += 25;
+    
+    doc.setFontSize(11);
+    doc.setFont(undefined, 'normal');
+    const periodoStr = `Período del reporte: ${formatDate(filterInfo.fechaDesde)} al ${formatDate(filterInfo.fechaHasta)}`;
+    doc.text(periodoStr, pageWidth / 2, currentY, { align: 'center' });
+    currentY += 35;
+
+    // --- KPIs ---
+    doc.setFontSize(12);
+    doc.setFont(undefined, 'bold');
+    doc.text("Indicadores Clave", margin, currentY);
+    currentY += 20;
+    
+    doc.setFontSize(10);
+    doc.setFont(undefined, 'normal');
+    doc.text(`- Total Gastado en el Período: ${formatCurrency(kpis.total_gastado_periodo, 'ARS')}`, margin + 10, currentY);
+    currentY += 15;
+    doc.text(`- Rendiciones Abiertas Actualmente: ${kpis.rendiciones_abiertas}`, margin + 10, currentY);
+    currentY += 35;
+
+    // --- Gráficos ---
+    doc.setFontSize(12);
+    doc.setFont(undefined, 'bold');
+    doc.text("Visualización de Datos", margin, currentY);
+    currentY += 20;
+
+    const chartWidth = (pageWidth - (margin * 2) - 10) / 2;
+    const chartHeight = chartWidth * 0.75;
+
+    if (pieChartImage) {
+      doc.addImage(pieChartImage, 'PNG', margin, currentY, chartWidth, chartHeight);
+    }
+    if (lineChartImage) {
+      doc.addImage(lineChartImage, 'PNG', margin + chartWidth + 10, currentY, chartWidth, chartHeight);
+    }
+    currentY += chartHeight + 35;
+
+    // --- Tabla de Datos ---
+    doc.setFontSize(12);
+    doc.setFont(undefined, 'bold');
+    doc.text("Detalle de Gastos por Tipo", margin, currentY);
+    currentY += 20;
+
+    const head = [["Tipo de Gasto", "Monto Total"]];
+    const body = tableData.map(item => [
+      item.tipo_gasto_nombre,
+      formatCurrency(item.total_monto, 'ARS')
+    ]);
+
+    doc.autoTable({
+      head: head,
+      body: body,
+      startY: currentY,
+      theme: 'striped',
+      headStyles: { fillColor: [13, 47, 91] },
+      styles: { cellPadding: 4 },
+      columnStyles: { 1: { halign: 'right' } }
+    });
+
+    const fileName = `Reporte_Gastos_${new Date().toISOString().split('T')[0]}.pdf`;
+    doc.save(fileName);
+    console.log("PDF generado:", fileName);
+  };
+  // --- FIN DEL CÓDIGO NUEVO ---
+
+  return {
     calculateAdminGastosPorTipo,
     calculateResumenGerencialPorTipo,
     prepararDetalleGastosParaLibroIVA,
-
-    // Funciones de generación para reportes individuales (si las usas desde otros componentes)
     generateGastosPDF, 
     generateGastosExcel, 
-
-    // Funciones de generación para reportes granulares de Admin (usadas por AdminGastosListView)
     generateAdminResumenTiposGastoExcel,
     generateAdminResumenTiposGastoPDF,
     generateResumenGerencialTiposGastoExcel,
     generateResumenGerencialTiposGastoPDF,
-
-    // Funciones de reporte consolidado (usadas por AdminViajesListView)
     generateAdminReporteConsolidadoPDF,
     generateAdminReporteConsolidadoExcel,
+    generateUserReportPDF, // <-- Exportación de la nueva función
   };
   
 }
