@@ -1,229 +1,176 @@
 <script setup>
-import { ref, watch, onMounted } from 'vue';
-import { supabase } from '../../supabaseClient.js'; // Ajusta la ruta si tu supabaseClient está en otro lado
+import { ref, watch } from 'vue';
+import { supabase } from '../../supabaseClient.js';
 
 const props = defineProps({
-  formatoId: { // El ID del formato al que pertenece este campo
-    type: [Number, String],
-    required: true
-  },
-  campoAEditar: { // Objeto del campo si estamos editando
-    type: Object,
-    default: null
-  },
-  isEditMode: Boolean
+  formatoId: { type: [Number, String], required: true },
+  campoAEditar: Object,
+  isEditMode: Boolean,
 });
-
 const emit = defineEmits(['guardado', 'cancelar']);
 
-const form = ref({
-  id: null, // Solo para edición
-  formato_id: parseInt(props.formatoId), // Asegurarse que sea número
-  nombre_campo_tecnico: '',
-  etiqueta_visible: '',
-  tipo_dato: 'texto_corto', // Valor por defecto
-  es_obligatorio: false,
-  opciones_selector: '', // String separado por comas para las opciones
-  orden_visualizacion: 0,
-});
-
-const tiposDeDatoDisponibles = [
-  { value: 'texto_corto', label: 'Texto Corto (Input)' },
-  { value: 'texto_largo', label: 'Texto Largo (Textarea)' },
-  { value: 'numero', label: 'Número' },
-  { value: 'fecha', label: 'Fecha' },
-  { value: 'booleano', label: 'Sí/No (Checkbox)' },
-  { value: 'selector_simple', label: 'Selector Simple (Dropdown)' },
-  // { value: 'archivo_adjunto', label: 'Archivo Adjunto' }, // Lo manejaremos de forma especial en GastoForm
-];
-
+const form = ref({});
 const loading = ref(false);
 const errorMessage = ref('');
 const successMessage = ref('');
 
+// Lista definitiva de tipos de input que el sistema soporta
+const tiposDeInputDisponibles = ref([
+  { value: 'texto', label: 'Texto Corto' },
+  { value: 'numero', label: 'Número' },
+  { value: 'select_cliente', label: 'Selector de Clientes' },
+  { value: 'select_transporte', label: 'Selector de Transportes' },
+  { value: 'selector_simple', label: 'Selector con Opciones Manuales' },
+  // Futuros tipos: 'fecha', 'texto_largo', 'booleano'
+]);
+
+// Watcher para inicializar el formulario
 watch(() => props.campoAEditar, (newVal) => {
   if (newVal && props.isEditMode) {
-    form.value.id = newVal.id;
-    form.value.formato_id = parseInt(newVal.formato_id); // Asegurar que sea número
-    form.value.nombre_campo_tecnico = newVal.nombre_campo_tecnico;
-    form.value.etiqueta_visible = newVal.etiqueta_visible;
-    form.value.tipo_dato = newVal.tipo_dato;
-    form.value.es_obligatorio = newVal.es_obligatorio;
-    // Convertir array de opciones a string separado por comas para el input
-    form.value.opciones_selector = Array.isArray(newVal.opciones_selector) ? newVal.opciones_selector.join(', ') : '';
-    form.value.orden_visualizacion = newVal.orden_visualizacion || 0;
+    form.value = { ...newVal };
+    // Si las opciones son un array, las convertimos a string para el input
+    if (Array.isArray(newVal.opciones_selector)) {
+      form.value.opciones_selector_str = newVal.opciones_selector.join(', ');
+    }
   } else {
-    // Resetear para modo creación, manteniendo el formato_id
-    form.value.id = null;
-    form.value.formato_id = parseInt(props.formatoId);
-    form.value.nombre_campo_tecnico = '';
-    form.value.etiqueta_visible = '';
-    form.value.tipo_dato = 'texto_corto';
-    form.value.es_obligatorio = false;
-    form.value.opciones_selector = '';
-    form.value.orden_visualizacion = 0;
+    form.value = {
+      nombre_campo_tecnico: '',
+      etiqueta_visible: '',
+      tipo_input: 'texto',
+      es_obligatorio: false,
+      orden_visualizacion: 10,
+      opciones_selector_str: '', // Campo para el input de texto
+    };
   }
+  errorMessage.value = '';
+  successMessage.value = '';
 }, { immediate: true, deep: true });
 
-const generarNombreTecnico = () => {
-  if (form.value.etiqueta_visible && !props.isEditMode && !form.value.nombre_campo_tecnico) {
+// Autocompleta el nombre técnico a partir de la etiqueta visible
+function autocompletarNombreTecnico() {
+  if (!props.isEditMode && form.value.etiqueta_visible) {
     form.value.nombre_campo_tecnico = form.value.etiqueta_visible
       .toLowerCase()
-      .normalize("NFD").replace(/[\u0300-\u036f]/g, "") // Quitar acentos
-      .replace(/\s+/g, '_') // Reemplazar espacios con guiones bajos
-      .replace(/[^\w-]+/g, ''); // Quitar caracteres no alfanuméricos excepto guion bajo
+      .normalize("NFD").replace(/[\u0300-\u036f]/g, "")
+      .replace(/[^a-z0-9_]/g, '_')
+      .replace(/__+/g, '_');
   }
-};
+}
 
 const handleSubmit = async () => {
   loading.value = true;
   errorMessage.value = '';
   successMessage.value = '';
 
-  if (!form.value.nombre_campo_tecnico.trim() || !form.value.etiqueta_visible.trim() || !form.value.tipo_dato) {
-    errorMessage.value = 'Nombre técnico, etiqueta y tipo de dato son obligatorios.';
-    loading.value = false;
-    return;
+  if (!form.value.etiqueta_visible?.trim() || !form.value.nombre_campo_tecnico?.trim()) {
+    errorMessage.value = 'La Etiqueta y el Nombre Técnico son obligatorios.';
+    loading.value = false; return;
   }
-  // Validar que nombre_campo_tecnico no tenga espacios ni caracteres especiales (solo letras, números, guion bajo)
-   if (!/^[a-zA-Z0-9_]+$/.test(form.value.nombre_campo_tecnico.trim())) {
-     errorMessage.value = 'El nombre técnico solo puede contener letras, números y guiones bajos (sin espacios).';
-     loading.value = false;
-     return;
-   }
-
+  if (/\s/.test(form.value.nombre_campo_tecnico)) {
+    errorMessage.value = 'El Nombre Técnico no puede contener espacios.';
+    loading.value = false; return;
+  }
 
   try {
     const payload = {
-      formato_id: form.value.formato_id,
-      nombre_campo_tecnico: form.value.nombre_campo_tecnico.trim(),
-      etiqueta_visible: form.value.etiqueta_visible.trim(),
-      tipo_dato: form.value.tipo_dato,
+      formato_id: props.formatoId,
+      nombre_campo_tecnico: form.value.nombre_campo_tecnico,
+      etiqueta_visible: form.value.etiqueta_visible,
+      tipo_input: form.value.tipo_input,
       es_obligatorio: form.value.es_obligatorio,
-      // Convertir string de opciones a array JSON si es selector_simple
-      opciones_selector: form.value.tipo_dato === 'selector_simple' && form.value.opciones_selector.trim()
-        ? form.value.opciones_selector.split(',').map(opt => opt.trim()).filter(opt => opt) // Crea array y filtra vacíos
+      orden_visualizacion: form.value.orden_visualizacion,
+      // Procesamos las opciones del selector solo si el tipo es el correcto
+      opciones_selector: form.value.tipo_input === 'selector_simple'
+        ? form.value.opciones_selector_str.split(',').map(opt => opt.trim()).filter(Boolean)
         : null,
-      orden_visualizacion: parseInt(form.value.orden_visualizacion) || 0,
     };
 
-    let responseData;
-    let responseError;
+    const { data, error } = props.isEditMode
+      ? await supabase.from('campos_formato_config').update(payload).eq('id', form.value.id).select().single()
+      : await supabase.from('campos_formato_config').insert(payload).select().single();
 
-    if (props.isEditMode && form.value.id) {
-      const { data, error } = await supabase
-        .from('campos_formato_config')
-        .update(payload)
-        .eq('id', form.value.id)
-        .select()
-        .single();
-      responseData = data;
-      responseError = error;
-    } else {
-      const { data, error } = await supabase
-        .from('campos_formato_config')
-        .insert(payload)
-        .select()
-        .single();
-      responseData = data;
-      responseError = error;
-    }
+    if (error) throw error;
 
-    if (responseError) throw responseError;
+    successMessage.value = `¡Campo ${props.isEditMode ? 'actualizado' : 'creado'}!`;
+    emit('guardado', data);
 
-    successMessage.value = props.isEditMode ? '¡Campo actualizado!' : '¡Campo creado!';
-    emit('guardado', responseData);
-
-    if (!props.isEditMode) { // Resetear solo en modo creación
-      form.value.nombre_campo_tecnico = '';
-      form.value.etiqueta_visible = '';
-      form.value.tipo_dato = 'texto_corto';
-      form.value.es_obligatorio = false;
-      form.value.opciones_selector = '';
-      form.value.orden_visualizacion = 0;
-    }
   } catch (error) {
-    console.error('Error al guardar campo de formato:', error.message);
-    errorMessage.value = 'Error al guardar: ' + (error.details || error.message);
+    console.error('Error al guardar el campo:', error.message);
+    errorMessage.value = 'Error al guardar: ' + error.message;
   } finally {
     loading.value = false;
   }
 };
 </script>
-
 <template>
-  <form @submit.prevent="handleSubmit" class="space-y-4 p-4 border border-gray-300 rounded-lg bg-white shadow-sm">
-    <h4 class="text-md font-medium leading-6 text-districorr-primary border-b pb-2 mb-4">
-      {{ isEditMode ? 'Editar Campo del Formato' : 'Añadir Nuevo Campo al Formato' }}
-    </h4>
-
-    <div>
-      <label for="etiqueta_visible" class="block text-sm font-medium text-districorr-text-medium">Etiqueta Visible (cómo lo ve el usuario) <span class="text-red-500">*</span></label>
-      <input type="text" id="etiqueta_visible" v-model="form.etiqueta_visible" @blur="generarNombreTecnico" required
-             class="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-districorr-accent focus:border-districorr-accent sm:text-sm">
-    </div>
-
-    <div>
-      <label for="nombre_campo_tecnico" class="block text-sm font-medium text-districorr-text-medium">Nombre Técnico (sin espacios/especiales, ej: 'monto_hotel') <span class="text-red-500">*</span></label>
-      <input type="text" id="nombre_campo_tecnico" v-model="form.nombre_campo_tecnico" required pattern="^[a-zA-Z0-9_]+$"
-             title="Solo letras, números y guion bajo, sin espacios."
-             class="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm placeholder-gray-400 focus:outline-none focus:ring-districorr-accent focus:border-districorr-accent sm:text-sm">
-      <p class="mt-1 text-xs text-gray-500">Este será el nombre de la columna en la base de datos (dentro del JSON).</p>
-    </div>
-
-    <div>
-      <label for="tipo_dato" class="block text-sm font-medium text-districorr-text-medium">Tipo de Dato <span class="text-red-500">*</span></label>
-      <select id="tipo_dato" v-model="form.tipo_dato" required
-              class="mt-1 block w-full px-3 py-2 border border-gray-300 bg-white rounded-md shadow-sm focus:outline-none focus:ring-districorr-accent focus:border-districorr-accent sm:text-sm">
-        <option v-for="tipo in tiposDeDatoDisponibles" :key="tipo.value" :value="tipo.value">{{ tipo.label }}</option>
-      </select>
-    </div>
-
-    <div v-if="form.tipo_dato === 'selector_simple'">
-      <label for="opciones_selector" class="block text-sm font-medium text-districorr-text-medium">Opciones del Selector (separadas por coma)</label>
-      <input type="text" id="opciones_selector" v-model="form.opciones_selector"
-             class="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm placeholder-gray-400 focus:outline-none focus:ring-districorr-accent focus:border-districorr-accent sm:text-sm"
-             placeholder="Ej: Opción 1, Opción 2, Otra Opción">
-    </div>
-
-    <div class="flex items-start">
-      <div class="flex items-center h-5">
-        <input id="es_obligatorio" type="checkbox" v-model="form.es_obligatorio"
-               class="focus:ring-districorr-accent h-4 w-4 text-districorr-accent border-gray-300 rounded">
+  <form @submit.prevent="handleSubmit" class="space-y-4 p-4 border-2 border-dashed rounded-lg bg-white shadow-sm">
+    <h3 class="text-lg font-medium leading-6 text-districorr-primary">
+      {{ isEditMode ? `Editando Campo: ${campoAEditar.etiqueta_visible}` : 'Nuevo Campo para el Formato' }}
+    </h3>
+    
+    <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+      <div>
+        <label for="etiqueta_visible" class="form-label">Etiqueta Visible <span class="text-red-500">*</span></label>
+        <input type="text" id="etiqueta_visible" v-model="form.etiqueta_visible" @blur="autocompletarNombreTecnico" required class="form-input">
+        <p class="form-hint">El nombre que verá el usuario en el formulario.</p>
       </div>
-      <div class="ml-3 text-sm">
-        <label for="es_obligatorio" class="font-medium text-districorr-text-medium">¿Es obligatorio?</label>
+      <div>
+        <label for="nombre_campo_tecnico" class="form-label">Nombre Técnico (sin espacios) <span class="text-red-500">*</span></label>
+        <input type="text" id="nombre_campo_tecnico" v-model="form.nombre_campo_tecnico" required pattern="[a-z0-9_]+" class="form-input font-mono">
+        <p class="form-hint">La clave en la BD (ej: `numero_remito`).</p>
       </div>
     </div>
 
-     <div>
-      <label for="orden_visualizacion" class="block text-sm font-medium text-districorr-text-medium">Orden de Visualización</label>
-      <input type="number" id="orden_visualizacion" v-model.number="form.orden_visualizacion" min="0"
-             class="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-districorr-accent focus:border-districorr-accent sm:text-sm">
-       <p class="mt-1 text-xs text-gray-500">Un número menor aparece antes. Usar para ordenar los campos en el formulario final.</p>
+    <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+      <div>
+        <label for="tipo_input" class="form-label">Tipo de Input <span class="text-red-500">*</span></label>
+        <select id="tipo_input" v-model="form.tipo_input" required class="form-input">
+          <option v-for="tipo in tiposDeInputDisponibles" :key="tipo.value" :value="tipo.value">
+            {{ tipo.label }}
+          </option>
+        </select>
+        <p class="form-hint">Cómo se mostrará este campo en el formulario.</p>
+      </div>
+      <div>
+        <label for="orden_visualizacion" class="form-label">Orden de Visualización</label>
+        <input type="number" id="orden_visualizacion" v-model.number="form.orden_visualizacion" class="form-input">
+        <p class="form-hint">Un número más bajo aparece primero.</p>
+      </div>
     </div>
 
+    <!-- Campo condicional para las opciones del selector -->
+    <div v-if="form.tipo_input === 'selector_simple'">
+      <label for="opciones_selector" class="form-label">Opciones del Selector</label>
+      <input type="text" id="opciones_selector" v-model="form.opciones_selector_str" class="form-input" placeholder="Opción 1, Opción 2, Opción 3">
+      <p class="form-hint">Escribe las opciones separadas por comas.</p>
+    </div>
 
-    <div v-if="errorMessage" class="my-2 p-2 bg-red-100 border border-districorr-error text-districorr-error rounded-md text-sm">
+    <div class="flex items-center">
+      <input id="es_obligatorio" type="checkbox" v-model="form.es_obligatorio" class="h-4 w-4 text-districorr-accent border-gray-300 rounded focus:ring-districorr-accent">
+      <label for="es_obligatorio" class="ml-2 block text-sm text-gray-900">Este campo es obligatorio</label>
+    </div>
+
+    <div v-if="errorMessage" class="my-2 p-2 bg-red-100 border border-red-500 text-red-700 rounded-md text-sm">
       {{ errorMessage }}
     </div>
-    <div v-if="successMessage" class="my-2 p-2 bg-green-100 border border-districorr-success text-districorr-success rounded-md text-sm">
+    <div v-if="successMessage" class="my-2 p-2 bg-green-100 border border-green-500 text-green-700 rounded-md text-sm">
       {{ successMessage }}
     </div>
 
     <div class="flex justify-end space-x-3 pt-2">
-      <button type="button" @click="emit('cancelar')"
-              class="px-4 py-2 border border-gray-300 rounded-md shadow-sm text-sm font-medium text-gray-700 bg-white hover:bg-gray-50">
-        Cancelar
-      </button>
-      <button type="submit"
-              :disabled="loading"
-              class="px-4 py-2 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-districorr-accent hover:bg-opacity-80 disabled:opacity-50">
-        <span v-if="loading" class="animate-spin inline-block w-4 h-4 border-2 border-white border-t-transparent rounded-full mr-2"></span>
-        {{ loading ? 'Guardando...' : (isEditMode ? 'Actualizar Campo' : 'Añadir Campo') }}
+      <button type="button" @click="emit('cancelar')" class="btn btn-secondary">Cancelar</button>
+      <button type="submit" :disabled="loading" class="btn btn-primary">
+        {{ loading ? 'Guardando...' : (isEditMode ? 'Actualizar Campo' : 'Crear Campo') }}
       </button>
     </div>
   </form>
 </template>
 
-<style scoped></style>
+<style scoped>
+.form-label { @apply block text-sm font-medium text-gray-700; }
+.form-input { @apply mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-districorr-accent focus:border-districorr-accent sm:text-sm; }
+.form-hint { @apply mt-1 text-xs text-gray-500; }
+.btn { @apply px-4 py-2 border rounded-md shadow-sm text-sm font-medium disabled:opacity-50; }
+.btn-primary { @apply border-transparent text-white bg-districorr-accent hover:bg-opacity-90; }
+.btn-secondary { @apply border-gray-300 text-gray-700 bg-white hover:bg-gray-50; }
+</style>

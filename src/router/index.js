@@ -14,14 +14,14 @@ import PerfilView from '../views/PerfilView.vue';
 import ActualizarContrasenaView from '../views/ActualizarContrasenaView.vue';
 
 // Vistas de Administración
+import AdminLayout from '../views/admin/AdminLayout.vue';
 import AdminDashboardView from '../views/admin/AdminDashboardView.vue';
 import AdminTiposGastoGlobalesView from '../views/admin/AdminTiposGastoGlobalesView.vue';
-import AdminFormatosGastoView from '../views/admin/AdminFormatosGastoView.vue';
+import AdminGestionFormatos from '../views/admin/AdminGestionFormatos.vue';
 import AdminCamposFormatoView from '../views/admin/AdminCamposFormatoView.vue';
 import AdminAsignarUsuariosFormatoView from '../views/admin/AdminAsignarUsuariosFormatoView.vue';
 import AdminViajesListView from '../views/admin/AdminViajesListView.vue'; 
 import AdminGastosListView from '../views/admin/AdminGastosListView.vue';
-// import AdminUsuariosView from '../views/admin/AdminUsuariosView.vue'; // MANTENER COMENTADO SI NO ESTÁ LISTO
 
 console.log("router/index.js: Script INICIADO. Todas las vistas importadas.");
 
@@ -43,42 +43,38 @@ const routes = [
     path: '/actualizar-contrasena',
     name: 'ActualizarContrasena',
     component: ActualizarContrasenaView,
-    meta: { title: 'Actualizar Contraseña' } // Abierta, ya que se accede desde un token de correo
+    meta: { title: 'Actualizar Contraseña' }
   },
-  
-  // --- Rutas Principales de Usuario Autenticado ---
   {
     path: '/', 
     name: 'Dashboard', 
     component: DashboardView,
-    meta: { requiresAuth: true, title: 'Inicio' } // Título actualizado
+    meta: { requiresAuth: true, title: 'Inicio' }
   },
   {
     path: '/viajes',
     name: 'ViajesListUser', 
     component: ViajesListView,
-    meta: { requiresAuth: true, title: 'Mis Rendiciones' } // Título actualizado
+    meta: { requiresAuth: true, title: 'Mis Rendiciones' }
   },
-  // --- INICIO DEL CÓDIGO AÑADIDO ---
   {
     path: '/reportes',
     name: 'Reportes',
-    component: () => import('../views/ReportesView.vue'), // Importamos la nueva vista
+    component: () => import('../views/ReportesView.vue'),
     meta: { requiresAuth: true, title: 'Mis Reportes' }
   },
-  // --- FIN DEL CÓDIGO AÑADIDO ---
   {
     path: '/viajes/nuevo',
     name: 'ViajeCreate', 
     component: ViajeFormView,
-    meta: { requiresAuth: true, title: 'Nueva Rendición' } // Título actualizado
+    meta: { requiresAuth: true, title: 'Nueva Rendición' }
   },
   {
     path: '/viajes/editar/:id',
     name: 'ViajeEdit', 
     component: ViajeFormView,
     props: true,
-    meta: { requiresAuth: true, title: 'Editar Rendición' } // Título actualizado
+    meta: { requiresAuth: true, title: 'Editar Rendición' }
   },
   {
     path: '/gastos', 
@@ -100,88 +96,115 @@ const routes = [
     meta: { requiresAuth: true, title: 'Editar Gasto' }
   },
   {
+  path: '/notificaciones',
+  name: 'Notificaciones',
+  component: () => import('../views/NotificacionesView.vue'),
+  meta: { requiresAuth: true, title: 'Mis Notificaciones' }
+  },
+  {
     path: '/perfil',
     name: 'Perfil',
     component: PerfilView,
     meta: { requiresAuth: true, title: 'Mi Perfil' }
   },
-
-  // --- Rutas de Administración ---
+    // --- INICIO DE LA REESTRUCTURACIÓN DE RUTAS DE ADMINISTRACIÓN ---
   {
     path: '/admin',
-    name: 'AdminDashboard',
-    component: AdminDashboardView,
-    meta: { requiresAuth: true, requiresAdmin: true, title: 'Admin: Dashboard' }
+    component: AdminLayout, // El componente padre es el Layout
+    meta: { requiresAuth: true, requiresAdmin: true }, // Metadatos comunes para todos los hijos
+    children: [
+      {
+        path: '', // El path vacío coincide con /admin y muestra el Dashboard
+        name: 'AdminDashboard',
+        component: AdminDashboardView,
+        meta: { title: 'Admin: Dashboard' }
+      },
+      {
+        path: 'tipos-gasto', // path relativo, se convierte en /admin/tipos-gasto
+        name: 'AdminTiposGastoGlobales',
+        component: AdminTiposGastoGlobalesView,
+        meta: { title: 'Admin: Tipos de Gasto' }
+      },
+      {
+        path: 'formatos-gasto', // path relativo
+        name: 'AdminFormatosGasto',
+        component: AdminGestionFormatos, // Usando el componente renombrado
+        meta: { title: 'Admin: Formatos de Gasto' }
+      },
+      {
+        path: 'usuarios',
+        name: 'AdminUsuarios',
+        component: () => import('../views/admin/AdminUsuariosView.vue'),
+        meta: { title: 'Admin: Gestión de Usuarios' }
+      },
+      {
+        path: 'formatos-gasto/:formatoId/campos',
+        name: 'AdminCamposFormato',
+        component: AdminCamposFormatoView,
+        props: true,
+        meta: { title: 'Admin: Campos de Formato' }
+      },
+      {
+        path: 'formatos-gasto/:formatoId/asignar-usuarios',
+        name: 'AdminAsignarUsuariosFormato',
+        component: AdminAsignarUsuariosFormatoView,
+        props: true,
+        meta: { title: 'Admin: Asignar Formatos' }
+      },
+      { 
+        path: 'todos-los-viajes',
+        name: 'AdminViajesList',
+        component: AdminViajesListView,
+        meta: { title: 'Admin: Todas las Rendiciones' }
+      },
+      { 
+        path: 'gastos', 
+        name: 'AdminGastosList',
+        component: AdminGastosListView,
+        meta: { title: 'Admin: Todos los Gastos' }
+      },
+      {
+        path: 'analiticas',
+        name: 'AdminAnalytics',
+        component: () => import('../views/admin/AdminAnalyticsView.vue'),
+        meta: { title: 'Admin: Gráficos y Estadísticas' }
+      },
+      {
+        path: 'clientes',
+        name: 'AdminClientes',
+        component: () => import('../views/admin/AdminClientesView.vue'),
+        meta: { title: 'Admin: Clientes' }
+      },
+      {
+        path: 'transportes',
+        name: 'AdminTransportes',
+        component: () => import('../views/admin/AdminTransportesView.vue'),
+        meta: { title: 'Admin: Transportes' }
+      },
+    ]
   },
-  {
-    path: '/admin/tipos-gasto',
-    name: 'AdminTiposGastoGlobales',
-    component: AdminTiposGastoGlobalesView,
-    meta: { requiresAuth: true, requiresAdmin: true, title: 'Admin: Tipos de Gasto' }
-  },
-  {
-    path: '/admin/formatos-gasto',
-    name: 'AdminFormatosGasto',
-    component: AdminFormatosGastoView,
-    meta: { requiresAuth: true, requiresAdmin: true, title: 'Admin: Formatos de Gasto' }
-  },
-  {
-    path: '/admin/formatos-gasto/:formatoId/campos',
-    name: 'AdminCamposFormato',
-    component: AdminCamposFormatoView,
-    props: true,
-    meta: { requiresAuth: true, requiresAdmin: true, title: 'Admin: Campos de Formato' }
-  },
-  {
-    path: '/admin/formatos-gasto/:formatoId/asignar-usuarios',
-    name: 'AdminAsignarFormatoUsuarios',
-    component: AdminAsignarUsuariosFormatoView,
-    props: true,
-    meta: { requiresAuth: true, requiresAdmin: true, title: 'Admin: Asignar Formatos' }
-  },
-  { 
-    path: '/admin/todos-los-viajes',
-    name: 'AdminViajesList',
-    component: AdminViajesListView,
-    meta: { requiresAuth: true, requiresAdmin: true, title: 'Admin: Todas las Rendiciones' } // Título actualizado
-  },
-  { 
-    path: '/admin/gastos', 
-    name: 'AdminGastosList',
-    component: AdminGastosListView,
-    meta: { 
-      requiresAuth: true,
-      requiresAdmin: true,
-      title: 'Admin: Todos los Gastos'
-    }
-  },
-  // { // RUTA PARA ADMIN USUARIOS - MANTENER COMENTADA SI NO ESTÁ IMPLEMENTADA
-  //   path: '/admin/usuarios',
-  //   name: 'AdminUsuarios',
-  //   component: AdminUsuariosView, 
-  //   meta: { requiresAuth: true, requiresAdmin: true, title: 'Admin: Gestionar Usuarios' }
-  // },
+  // --- FIN DE LA REESTRUCTURACIÓN ---
+  ];
 
-  // --- Redirección para rutas no encontradas (Catch-all) ---
-  {
-    path: '/:pathMatch(.*)*', 
-    name: 'NotFound',
-    redirect: async (to) => { 
-      console.log(`Router (NotFound): Ruta no encontrada '${to.path}'. Redirigiendo...`);
-      try {
-        const { data: { session } } = await supabase.auth.getSession();
-        if (session?.user) {
-          console.log("Router (NotFound): Usuario con sesión, redirigiendo a Dashboard.");
-          return { name: 'Dashboard' }; 
-        }
-      } catch (e) {
-        console.error("Router (NotFound): Error obteniendo sesión para redirección:", e);
+// --- Redirección para rutas no encontradas (Catch-all) ---
+routes.push({
+  path: '/:pathMatch(.*)*', 
+  name: 'NotFound',
+  redirect: async (to) => { 
+    console.log(`Router (NotFound): Ruta no encontrada '${to.path}'. Redirigiendo...`);
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (session?.user) {
+        console.log("Router (NotFound): Usuario con sesión, redirigiendo a Dashboard.");
+        return { name: 'Dashboard' }; 
       }
-      console.log("Router (NotFound): Sin sesión o error, redirigiendo a Login.");
-      return { name: 'Login' }; 
+    } catch (e) {
+      console.error("Router (NotFound): Error obteniendo sesión para redirección:", e);
     }
+    console.log("Router (NotFound): Sin sesión o error, redirigiendo a Login.");
+    return { name: 'Login' }; 
   }
-];
+});
 
 const router = createRouter({
   history: createWebHistory(import.meta.env.BASE_URL),
@@ -227,7 +250,7 @@ router.beforeEach(async (to, from, next) => {
         .single();
       
       if (profileError && status !== 406) { 
-         console.warn("Router Guard: Error obteniendo rol del perfil desde BD:", profileError.message, `(Status: ${status})`);
+        console.warn("Router Guard: Error obteniendo rol del perfil desde BD:", profileError.message, `(Status: ${status})`);
       }
       if (profile) {
         userRole = profile.rol;

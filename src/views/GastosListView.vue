@@ -1,39 +1,30 @@
 <script setup>
 import { ref, onMounted, computed, watch, inject } from 'vue';
-import { supabase } from '../supabaseClient.js'; // Ajusta la ruta si es necesario
+import { supabase } from '../supabaseClient.js';
 import { useRouter, useRoute } from 'vue-router';
-import { useReportGenerator } from '../composables/useReportGenerator.js'; // Ajusta la ruta
-import { formatDate, formatCurrency } from '../utils/formatters.js';      // Ajusta la ruta
+import { useReportGenerator } from '../composables/useReportGenerator.js';
+import { formatDate, formatCurrency } from '../utils/formatters.js';
 
 const router = useRouter();
 const route = useRoute();
 const userProfile = inject('userProfile', ref(null));
 
-// Instancia del composable de reportes
-const { generateGastosPDF, generateGastosExcel } = useReportGenerator();
+// --- ACTUALIZADO: Importamos la nueva función ---
+const { generateGastosExcel, generateRendicionCompletaPDF } = useReportGenerator();
 
-// --- Refs para el estado del componente ---
 const gastos = ref([]);
-const viajeSeleccionadoInfo = ref(null); // Contendrá info del viaje, incluyendo .cerrado_en y .codigo_rendicion
+const viajeSeleccionadoInfo = ref(null);
 const loading = ref(true);
 const errorMessage = ref('');
-
-// Para los filtros dropdown
 const listaViajesParaFiltro = ref([]);
 const tiposDeGastoDisponibles = ref([]);
-
-// Para información del usuario (se pasará al composable de reportes)
 const currentUserEmail = ref('');
 const currentUserName = ref('');
-
-// Modelos para los inputs de filtro
 const filtroFechaDesde = ref('');
 const filtroFechaHasta = ref('');
 const filtroTipoGastoId = ref('');
-const filtroViajeId = ref(''); // Sincronizado con route.query.viajeId
+const filtroViajeId = ref('');
 
-
-// --- Propiedades Computadas para la UI (Resumen de Saldo) ---
 const totalGastadoBrutoFiltradoUI = computed(() => {
     if (!gastos.value || gastos.value.length === 0) return 0;
     return gastos.value.reduce((acc, gasto) => acc + (gasto.monto_total || 0), 0);
@@ -41,7 +32,6 @@ const totalGastadoBrutoFiltradoUI = computed(() => {
 
 const totalAdelantosEspecificosFiltradosUI = computed(() => {
     if (!gastos.value || gastos.value.length === 0) return 0;
-    // !!! VERIFICA que 'adelanto_especifico_aplicado' sea el nombre correcto de la columna en tu tabla 'gastos' !!!
     const nombreColumnaAdelantoGasto = 'adelanto_especifico_aplicado'; 
     return gastos.value.reduce((acc, gasto) => acc + (gasto[nombreColumnaAdelantoGasto] || 0), 0);
 });
@@ -61,88 +51,46 @@ const saldoActualViajeUI = computed(() => {
   return totalAdelantosDisponiblesViajeUI.value - totalGastadoBrutoFiltradoUI.value;
 });
 
-// Nueva computada para saber si el viaje actual está cerrado (para la UI)
 const isViajeActualCerrado = computed(() => {
     return !!viajeSeleccionadoInfo.value?.cerrado_en;
 });
-// --- Funciones de Carga de Datos ---
+
 const fetchDropdownData = async () => {
-  console.log("GastosListView: fetchDropdownData INICIO");
   try {
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) { 
         currentUserEmail.value = 'Usuario no autenticado'; 
         currentUserName.value = 'N/A'; 
-        console.warn('GastosListView: Usuario no autenticado en fetchDropdownData.');
         return; 
     }
     currentUserEmail.value = user.email || 'Email no disponible';
     if (userProfile.value && userProfile.value.nombre_completo) { 
         currentUserName.value = userProfile.value.nombre_completo; 
     } else {
-        const { data: profileData, error: profileError } = await supabase.from('perfiles').select('nombre_completo').eq('id', user.id).single();
-        if (profileError && profileError.code !== 'PGRST116') { console.error('Error obteniendo nombre del perfil:', profileError.message); }
+        const { data: profileData } = await supabase.from('perfiles').select('nombre_completo').eq('id', user.id).single();
         currentUserName.value = profileData?.nombre_completo || currentUserEmail.value;
     }
-
     const { data: tiposData, error: tiposError } = await supabase.from('tipos_gasto_config').select('id, nombre_tipo_gasto').eq('activo', true).order('nombre_tipo_gasto');
     if (tiposError) throw tiposError;
     tiposDeGastoDisponibles.value = tiposData || [];
-
-    const { data: viajesData, error: viajesError } = await supabase
-        .from('viajes')
-        .select('id, nombre_viaje, codigo_rendicion') // Traer codigo_rendicion para el dropdown
-        .eq('user_id', user.id)
-        .order('nombre_viaje', { ascending: true });
+    const { data: viajesData, error: viajesError } = await supabase.from('viajes').select('id, nombre_viaje, codigo_rendicion').eq('user_id', user.id).order('nombre_viaje', { ascending: true });
     if (viajesError) throw viajesError;
     listaViajesParaFiltro.value = viajesData || [];
-
-    console.log("GastosListView: fetchDropdownData FIN");
   } catch (error) { 
-    console.error('GastosListView fetchDropdownData Error:', error.message); 
     errorMessage.value = "Error cargando opciones de filtro."; 
   }
 };
 
 const fetchGastos = async () => {
-  console.log("GastosListView: fetchGastos INICIO. Filtro Viaje ID:", filtroViajeId.value);
   loading.value = true; 
   errorMessage.value = ''; 
-  // gastos.value = []; // No limpiar aquí para evitar parpadeo si la carga es solo una actualización.
-                     // Se limpiará en el catch o si la data es vacía.
-
   try {
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) throw new Error("Usuario no autenticado.");
 
-    // !!! VERIFICA que 'adelanto_especifico_aplicado' sea el nombre de columna correcto !!!
     const nombreColumnaAdelantoGastoSelect = 'adelanto_especifico_aplicado';
-
-    // SELECT CORREGIDO: Sin comentarios JS dentro del string
     let query = supabase.from('gastos')
-      .select(`
-        id, 
-        fecha_gasto, 
-        monto_total, 
-        moneda, 
-        descripcion_general, 
-        numero_factura, 
-        factura_url, 
-        monto_iva,
-        cliente_referido, 
-        ${nombreColumnaAdelantoGastoSelect}, 
-        viaje_id, 
-        viajes!inner( 
-          id, 
-          nombre_viaje, 
-          monto_adelanto, 
-          fecha_inicio, 
-          fecha_fin, 
-          cerrado_en, 
-          codigo_rendicion
-        ), 
-        tipos_gasto_config (id, nombre_tipo_gasto) 
-      `)
+      .select(`id, fecha_gasto, monto_total, moneda, descripcion_general, numero_factura, factura_url, monto_iva, cliente_referido, ${nombreColumnaAdelantoGastoSelect}, viaje_id, viajes!inner(id, nombre_viaje, monto_adelanto, fecha_inicio, fecha_fin, cerrado_en, codigo_rendicion), tipos_gasto_config (id, nombre_tipo_gasto)`)
       .eq('user_id', user.id);
 
     if (filtroFechaDesde.value) query = query.gte('fecha_gasto', filtroFechaDesde.value);
@@ -155,60 +103,39 @@ const fetchGastos = async () => {
     
     if (filtroViajeId.value) {
       query = query.eq('viaje_id', filtroViajeId.value);
-      const { data: viajeData, error: viajeError } = await supabase.from('viajes')
-        .select('id, nombre_viaje, monto_adelanto, fecha_inicio, fecha_fin, cerrado_en, codigo_rendicion') 
-        .eq('id', filtroViajeId.value).eq('user_id', user.id).single();
-      if (viajeError && viajeError.code !== 'PGRST116') console.warn("Error cargando info del viaje seleccionado:", viajeError.message);
+      const { data: viajeData } = await supabase.from('viajes').select('id, nombre_viaje, monto_adelanto, fecha_inicio, fecha_fin, cerrado_en, codigo_rendicion').eq('id', filtroViajeId.value).eq('user_id', user.id).single();
       viajeSeleccionadoInfo.value = viajeData || null;
     } else { 
       viajeSeleccionadoInfo.value = null; 
     }
 
-    query = query.order('fecha_gasto', { ascending: true }).order('created_at', { ascending: true });
-    const { data, error } = await query;
-
+    const { data, error } = await query.order('fecha_gasto', { ascending: true }).order('created_at', { ascending: true });
     if (error) throw error;
-    gastos.value = data || []; // Asignar data o array vacío
-    console.log("GastosListView: Gastos cargados:", gastos.value.length);
-    if (data) errorMessage.value = ''; // Limpiar error si la carga fue exitosa
-
+    gastos.value = data || [];
   } catch (error) { 
-    console.error('GastosListView fetchGastos Error:', error.message, error); 
     errorMessage.value = 'No se pudieron cargar los gastos: ' + error.message;
-    gastos.value = []; // Limpiar en caso de error
-  } 
-  finally { 
+    gastos.value = [];
+  } finally { 
     loading.value = false; 
-    console.log("GastosListView: fetchGastos FIN. Loading:", loading.value); 
   }
 };
 
-// --- Hooks de Ciclo de Vida y Watchers ---
 onMounted(() => { 
-  console.log("GastosListView: Componente MONTADO.");
   fetchDropdownData(); 
-  // fetchGastos() es llamado por el watcher de route.query.viajeId debido a immediate:true
 });
 
-watch(() => route.query.viajeId, (newViajeId, oldViajeId) => {
-    console.log(`GastosListView: Watcher route.query.viajeId cambió de ${oldViajeId} a ${newViajeId}`);
+watch(() => route.query.viajeId, (newViajeId) => {
     if (filtroViajeId.value !== (newViajeId || '')) {
         filtroViajeId.value = newViajeId || ''; 
     }
     fetchGastos(); 
 }, { immediate: true });
-// ... (Bloque 1 y 2 anteriores) ...
 
-// --- Funciones de Interacción UI (Filtros y Navegación) ---
 const aplicarFiltros = () => {
-  console.log("GastosListView: Aplicando filtros. FiltroViajeId (select):", filtroViajeId.value, "Route Query ViajeId:", route.query.viajeId);
   if (String(filtroViajeId.value || '') !== String(route.query.viajeId || '')) {
       router.push({ 
-        name: 'GastosList', 
-        query: { 
-          ...route.query, 
-          viajeId: filtroViajeId.value || undefined 
-        } 
+        name: 'GastosListUser',
+        query: { ...route.query, viajeId: filtroViajeId.value || undefined } 
       });
   } else {
       fetchGastos();
@@ -216,59 +143,41 @@ const aplicarFiltros = () => {
 };
 
 const limpiarFiltros = () => {
-  console.log("GastosListView: Limpiando filtros.");
   filtroFechaDesde.value = ''; 
   filtroFechaHasta.value = ''; 
   filtroTipoGastoId.value = '';
-  
   const teniaViajeIdEnRuta = !!route.query.viajeId;
-  const selectDeViajeTeníaValor = !!filtroViajeId.value;
   filtroViajeId.value = ''; 
 
-  if (teniaViajeIdEnRuta || selectDeViajeTeníaValor) {
-    const newQuery = { ...route.query };
-    delete newQuery.viajeId; 
-    router.push({ name: 'GastosList', query: newQuery });
+  if (teniaViajeIdEnRuta) {
+    router.push({ name: 'GastosListUser', query: {} });
   } else {
     fetchGastos(); 
   }
 };
 
 const goToNuevoGasto = () => {
-  // Usar la propiedad computada isViajeActualCerrado
   if (isViajeActualCerrado.value) {
     alert("No se pueden agregar nuevos gastos a un Viaje/Período que ya ha sido cerrado.");
     return;
   }
   const query = filtroViajeId.value ? { viajeId: filtroViajeId.value } : {};
-  router.push({ name: 'GastoNuevo', query }); 
+  router.push({ name: 'GastoFormCreate', query });
 };
 
 const editarGasto = (gasto) => { 
-  // La deshabilitación del botón en el template es la primera barrera.
-  // Esta es una verificación adicional por si se llama a la función de otra manera.
-  if (gasto.viajes && gasto.viajes.cerrado_en) { // Acceder a través del objeto gasto
+  if (gasto.viajes?.cerrado_en) {
     alert("No se puede editar un gasto de un período que ya ha sido cerrado.");
     return;
   }
-  if (viajeSeleccionadoInfo.value && viajeSeleccionadoInfo.value.cerrado_en && gasto.viaje_id === viajeSeleccionadoInfo.value.id) {
-     alert("No se puede editar un gasto de un período que ya ha sido cerrado (verificando por viaje seleccionado).");
-    return;
-  }
-  router.push({ name: 'GastoEditar', params: { id: gasto.id } });
+  router.push({ name: 'GastoFormEdit', params: { id: gasto.id } });
 };
 
 const eliminarGasto = async (gasto) => { 
-  // Similar a editarGasto, verificar usando la info del gasto o del viaje seleccionado.
-  if (gasto.viajes && gasto.viajes.cerrado_en) {
+  if (gasto.viajes?.cerrado_en) {
     alert("No se pueden eliminar gastos de un período que ya ha sido cerrado.");
     return;
   }
-   if (viajeSeleccionadoInfo.value && viajeSeleccionadoInfo.value.cerrado_en && gasto.viaje_id === viajeSeleccionadoInfo.value.id) {
-     alert("No se pueden eliminar gastos de un período que ya ha sido cerrado (verificando por viaje seleccionado).");
-    return;
-  }
-
   if (!confirm(`¿Estás seguro de que querés eliminar el gasto "${gasto.descripcion_general || 'Gasto sin descripción'}"? Esta acción no se puede deshacer.`)) return;
   
   loading.value = true; 
@@ -283,39 +192,53 @@ const eliminarGasto = async (gasto) => {
             if (bucketIndex !== -1 && bucketIndex < pathSegments.length -1) {
                 const filePathInBucket = pathSegments.slice(bucketIndex + 1).join('/');
                 if (filePathInBucket) { await supabase.storage.from(bucketNameInUrl).remove([filePathInBucket]); }
-            } else { console.warn("EliminarGasto: No se pudo determinar ruta de archivo en Storage:", gasto.factura_url); }
+            }
         } catch (e) { console.warn("EliminarGasto: Error al eliminar factura de Storage:", e.message); }
     }
-
     const { error } = await supabase.from('gastos').delete().eq('id', gasto.id);
     if (error) throw error;
-
     fetchGastos(); 
     alert('Gasto eliminado correctamente.');
-
   } catch (error) {
-    console.error('Error eliminando gasto:', error.message);
     errorMessage.value = 'Error al eliminar el gasto: ' + error.message;
   } finally {
     loading.value = false;
   }
 };
 
-// --- Funciones Wrapper para Exportación (usan el composable) ---
 const exportarAExcelWrapper = () => {
   if (gastos.value.length === 0) { alert('No hay gastos para exportar a Excel.'); return; }
   const userInfo = { nombre: currentUserName.value, email: currentUserEmail.value };
   generateGastosExcel(JSON.parse(JSON.stringify(gastos.value)), viajeSeleccionadoInfo.value, userInfo);
 };
 
-const exportarAPDFWrapper = () => {
-  if (gastos.value.length === 0 && !(viajeSeleccionadoInfo.value && viajeSeleccionadoInfo.value.monto_adelanto !== null)) {
-    alert('No hay datos suficientes para generar el reporte PDF.'); return;
+// --- NUEVA FUNCIÓN WRAPPER PARA LA RENDICIÓN COMPLETA ---
+const generarRendicionPDFWrapper = () => {
+  if (!viajeSeleccionadoInfo.value) {
+    alert('Por favor, selecciona un viaje/período desde los filtros para generar la rendición.');
+    return;
   }
-  const userInfo = { nombre: currentUserName.value, email: currentUserEmail.value };
-  generateGastosPDF(JSON.parse(JSON.stringify(gastos.value)), viajeSeleccionadoInfo.value, userInfo);
-};
+  if (gastos.value.length === 0) {
+    alert('No hay gastos en este período para generar la rendición.');
+    return;
+  }
 
+  const userInfo = { nombre: currentUserName.value, email: currentUserEmail.value };
+  const totales = {
+    gastosBruto: totalGastadoBrutoFiltradoUI.value,
+    adelantosExtras: totalAdelantosEspecificosFiltradosUI.value,
+    adelantosDisponibles: totalAdelantosDisponiblesViajeUI.value,
+    saldoFinal: saldoActualViajeUI.value
+  };
+
+  // Usamos la nueva función del composable
+  generateRendicionCompletaPDF(
+    JSON.parse(JSON.stringify(gastos.value)), 
+    viajeSeleccionadoInfo.value, 
+    userInfo,
+    totales
+  );
+};
 </script>
 <template>
   <div class="container mx-auto px-2 sm:px-4 lg:px-6 py-8">
@@ -329,7 +252,7 @@ const exportarAPDFWrapper = () => {
             <span v-if="viajeSeleccionadoInfo.codigo_rendicion" class="font-mono text-sm">(#{{ viajeSeleccionadoInfo.codigo_rendicion }})</span>
           </span>
         </h1>
-        <router-link v-if="filtroViajeId" :to="{ name: 'GastosList', query: { viajeId: undefined } }" 
+        <router-link v-if="filtroViajeId" :to="{ name: 'GastosListUser' }" 
                      class="text-sm text-districorr-accent hover:underline mt-1.5 inline-flex items-center group">
           <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="w-4 h-4 mr-1 group-hover:-translate-x-0.5 transition-transform duration-150"><path fill-rule="evenodd" d="M17 10a.75.75 0 01-.75.75H5.612l4.158 3.96a.75.75 0 11-1.04 1.08l-5.5-5.25a.75.75 0 010-1.08l5.5-5.25a.75.75 0 111.04 1.08L5.612 9.25H16.25A.75.75 0 0117 10z" clip-rule="evenodd" /></svg>
           Ver todos los gastos
@@ -388,19 +311,21 @@ const exportarAPDFWrapper = () => {
       </div>
     </div>
 
-    <!-- Sección de Exportación y Contador de Saldo (Actualizado con nuevos textos) -->
+    <!-- Sección de Exportación y Contador de Saldo -->
      <div v-if="!loading || gastos.length > 0" class="mb-6 flex flex-col md:flex-row gap-4 justify-between items-start">
         <div class="flex flex-wrap gap-3">
+            <!-- BOTÓN EXCEL ACTUALIZADO -->
             <button @click="exportarAExcelWrapper" :disabled="gastos.length === 0"
-                    class="bg-teal-600 hover:bg-teal-700 text-white font-semibold py-2 px-4 rounded-lg text-sm transition duration-150 ease-in-out shadow-md flex items-center justify-center disabled:opacity-60 disabled:cursor-not-allowed">
+                    class="btn btn-success flex items-center justify-center">
               <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4 mr-1.5" viewBox="0 0 20 20" fill="currentColor"> <path d="M2 4a2 2 0 012-2h12a2 2 0 012 2v12a2 2 0 01-2 2H4a2 2 0 01-2-2V4zm10 2.75a.75.75 0 00-1.5 0v1.5H9.25a.75.75 0 000 1.5h1.5v1.5a.75.75 0 001.5 0v-1.5h1.5a.75.75 0 000-1.5h-1.5V6.75zM5.5 11.5a.75.75 0 000 1.5h3a.75.75 0 000-1.5h-3zM5.5 15a.75.75 0 000 1.5h6a.75.75 0 000-1.5h-6z" /> </svg>
               Exportar Excel
             </button>
-            <button @click="exportarAPDFWrapper" 
-                    :disabled="gastos.length === 0 && !(viajeSeleccionadoInfo && viajeSeleccionadoInfo.monto_adelanto !== null)"
-                    class="bg-red-600 hover:bg-red-700 text-white font-semibold py-2 px-4 rounded-lg text-sm transition duration-150 ease-in-out shadow-md flex items-center justify-center disabled:opacity-60 disabled:cursor-not-allowed">
-              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="w-4 h-4 mr-1.5"><path fill-rule="evenodd" d="M5 2.25A2.25 2.25 0 017.25 0h5.5A2.25 2.25 0 0115 2.25v15A2.25 2.25 0 0112.75 20h-5.5A2.25 2.25 0 015 17.75V2.25zm4.75.75a.75.75 0 00-1.5 0v3.509l-.46-.46a.75.75 0 00-1.06 1.061l1.75 1.75a.75.75 0 001.06 0l1.75-1.75a.75.75 0 10-1.06-1.061l-.46.46V3zM7.25 11a.75.75 0 000 1.5h5.5a.75.75 0 000-1.5h-5.5z" clip-rule="evenodd" /></svg>
-              Exportar PDF
+            <!-- BOTÓN PDF ACTUALIZADO -->
+            <button @click="generarRendicionPDFWrapper" 
+                    v-if="viajeSeleccionadoInfo"
+                    class="btn btn-danger flex items-center justify-center">
+              <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4 mr-1.5" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M5 2.25A2.25 2.25 0 017.25 0h5.5A2.25 2.25 0 0115 2.25v15A2.25 2.25 0 0112.75 20h-5.5A2.25 2.25 0 015 17.75V2.25zm4.75.75a.75.75 0 00-1.5 0v3.509l-.46-.46a.75.75 0 00-1.06 1.061l1.75 1.75a.75.75 0 001.06 0l1.75-1.75a.75.75 0 10-1.06-1.061l-.46.46V3zM7.25 11a.75.75 0 000 1.5h5.5a.75.75 0 000-1.5h-5.5z" clip-rule="evenodd" /></svg>
+              Rendición a PDF
             </button>
         </div>
         
@@ -411,9 +336,7 @@ const exportarAPDFWrapper = () => {
               <span v-if="viajeSeleccionadoInfo.codigo_rendicion" class="font-mono text-xs">(#{{ viajeSeleccionadoInfo.codigo_rendicion }})</span>
             </p>
             <div v-if="isViajeActualCerrado" class="text-xs text-red-600 font-semibold text-center sm:text-right mb-1.5">PERÍODO CERRADO</div>
-            
             <hr class="my-2 border-blue-200/60">
-            
             <div class="flex justify-between items-center">
                 <span class="text-sm text-gray-600">Adelanto Inicial:</span>
                 <span class="font-semibold text-blue-700">{{ formatCurrency(viajeSeleccionadoInfo.monto_adelanto) }}</span>
@@ -422,7 +345,6 @@ const exportarAPDFWrapper = () => {
                 <span class="text-sm text-gray-600">(+) Adelantos Extras:</span>
                 <span class="font-semibold text-green-600">{{ formatCurrency(totalAdelantosEspecificosFiltradosUI) }}</span>
             </div>
-
             <hr class="my-1.5 border-blue-200/60">
             <div class="flex justify-between items-center">
                 <span class="text-sm text-gray-700 font-medium">(=) Total Adelantos Disponibles:</span>
@@ -432,9 +354,7 @@ const exportarAPDFWrapper = () => {
                 <span class="text-sm text-gray-600">(-) Total Gastos Brutos (lista):</span>
                 <span class="font-semibold text-red-600">{{ formatCurrency(totalGastadoBrutoFiltradoUI) }}</span>
             </div>
-            
             <hr class="my-1.5 border-blue-300 font-bold">
-            
             <div class="flex justify-between items-center">
                 <span class="text-lg font-bold" :class="saldoActualViajeUI !== null && saldoActualViajeUI >= 0 ? 'text-green-600' : 'text-red-600'">SALDO ACTUAL:</span>
                 <span class="text-lg font-bold" :class="saldoActualViajeUI !== null && saldoActualViajeUI >= 0 ? 'text-green-600' : 'text-red-600'">
@@ -484,7 +404,6 @@ const exportarAPDFWrapper = () => {
               <td class="px-4 py-3.5 whitespace-nowrap text-sm text-gray-500 hidden sm:table-cell">{{ gasto.numero_factura || '-' }}</td>
               <td class="px-4 py-3.5 whitespace-nowrap text-sm text-gray-800 text-right font-semibold sm:px-6">
                 <div>{{ formatCurrency(gasto.monto_total, gasto.moneda) }}</div>
-                <!-- !!! VERIFICA nombre de columna 'adelanto_especifico_aplicado' en el objeto gasto !!! -->
                 <div v-if="gasto.adelanto_especifico_aplicado && gasto.adelanto_especifico_aplicado > 0" 
                      class="text-xs text-green-700 font-normal" 
                      :title="`Adelanto Específico Aplicado: -${formatCurrency(gasto.adelanto_especifico_aplicado)}`">
@@ -512,7 +431,3 @@ const exportarAPDFWrapper = () => {
     </div>
   </div>
 </template>
-
-<style scoped>
-/* Estilos específicos para GastosListView si fueran necesarios */
-</style>

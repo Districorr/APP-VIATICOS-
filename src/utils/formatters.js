@@ -28,3 +28,24 @@ export const formatCurrency = (amount, currency = 'ARS') => {
   // Usar es-AR para el formato de moneda con $ y separadores correctos.
   return new Intl.NumberFormat('es-AR', { style: 'currency', currency: currency, minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(amount);
 };
+
+// --- ¡AÑADE ESTA NUEVA FUNCIÓN! ---
+export const parseCurrency = (value) => {
+  if (typeof value !== 'string') {
+    // Si no es un string, intenta convertirlo a número directamente, si falla, devuelve 0
+    const num = parseFloat(value);
+    return isNaN(num) ? 0 : num;
+  }
+
+  // 1. Quita el símbolo de peso y los espacios
+  const withoutSymbol = value.replace(/\$\s?/g, '');
+  // 2. Quita los puntos de miles
+  const withoutThousands = withoutSymbol.replace(/\./g, '');
+  // 3. Reemplaza la coma decimal por un punto
+  const withDot = withoutThousands.replace(',', '.');
+  // 4. Convierte el string a un número flotante
+  const number = parseFloat(withDot);
+
+  // Si el resultado no es un número válido (ej. un string vacío), devuelve 0
+  return isNaN(number) ? 0 : number;
+};

@@ -40,6 +40,13 @@ const opcionesEstadoViajeAdmin = ref([
   { valor: 'cerrado', etiqueta: 'Cerrados' },
 ]);
 
+// --- Refs para el Modal de Revisión ---
+const mostrarModalRevision = ref(false);
+const viajeARevisar = ref(null);
+const comentariosAdminInput = ref('');
+const loadingRevision = ref(false);
+const errorRevision = ref('');
+
 // --- Control de Vista (Tarjetas o Tabla para la lista de Viajes) ---
 const vistaActualAdmin = ref('tarjetas'); 
 
@@ -152,8 +159,10 @@ async function fetchTodosLosViajesConInfo() {
         observacion_cierre,
         user_id,
         responsable_nombre, 
-        responsable_email 
-      `); // SE ELIMINÓ 'moneda' DE ESTE SELECT
+        responsable_email,
+        estado_aprobacion,
+        comentarios_aprobacion
+      `);
 
     if (filtroResponsableIdAdmin.value) query = query.eq('user_id', filtroResponsableIdAdmin.value);
     if (filtroEstadoViajeAdmin.value === 'en_curso') query = query.is('cerrado_en', null);
@@ -209,7 +218,7 @@ async function fetchTodosLosViajesConInfo() {
         
         return {
           ...viaje,
-          moneda: 'ARS', // SE ASIGNA 'ARS' DIRECTAMENTE
+          moneda: 'ARS',
           total_gastado_bruto_viaje: totalGastadoBrutoViaje,
           saldo_adelanto_viaje: saldoCalculado
         };
@@ -247,6 +256,63 @@ const limpiarFiltrosAdmin = () => {
   filtroFechaHastaReporteGastos.value = '';
   fetchGastosParaReporteAdmin();
 };
+
+// --- Lógica para el Flujo de Aprobación ---
+const abrirModalParaRevisar = (viaje) => {
+  viajeARevisar.value = { ...viaje };
+  comentariosAdminInput.value = viaje.comentarios_aprobacion || '';
+  errorRevision.value = '';
+  mostrarModalRevision.value = true;
+};
+
+const cerrarModalRevision = () => {
+  mostrarModalRevision.value = false;
+  viajeARevisar.value = null;
+};
+
+const handleDecisionRendicion = async (nuevoEstado) => {
+  if (!viajeARevisar.value) return;
+  if (nuevoEstado === 'rechazado' && !comentariosAdminInput.value.trim()) {
+    errorRevision.value = 'Es obligatorio añadir un comentario para rechazar la rendición.';
+    return;
+  }
+
+  loadingRevision.value = true;
+  errorRevision.value = '';
+
+  try {
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) throw new Error('Administrador no autenticado.');
+
+    const { error } = await supabase.rpc('aprobar_rechazar_rendicion', {
+      p_viaje_id: viajeARevisar.value.id,
+      p_nuevo_estado: nuevoEstado,
+      p_comentarios: comentariosAdminInput.value,
+      p_admin_id: user.id
+    });
+
+    if (error) throw error;
+
+    alert(`La rendición #${viajeARevisar.value.codigo_rendicion} ha sido marcada como: ${nuevoEstado}.`);
+    cerrarModalRevision();
+    fetchTodosLosViajesConInfo(); // Recargar la lista para ver el cambio
+
+  } catch (e) {
+    console.error('Error al procesar la decisión de la rendición:', e);
+    errorRevision.value = `Error: ${e.message}`;
+  } finally {
+    loadingRevision.value = false;
+  }
+};
+
+const estadoAprobacionClass = computed(() => (estado) => {
+  switch (estado) {
+    case 'aprobado': return 'bg-green-100 text-green-800';
+    case 'pendiente_aprobacion': return 'bg-yellow-100 text-yellow-800 animate-pulse';
+    case 'rechazado': return 'bg-red-100 text-red-800';
+    default: return 'bg-gray-100 text-gray-800';
+  }
+});
 
 // --- Hooks de Ciclo de Vida ---
 onMounted(() => {
@@ -335,7 +401,7 @@ console.log("AdminViajesListView.vue: Script setup FINALIZADO");
     <!-- Encabezado y Controles de Vista/Reportes -->
     <div class="flex flex-col sm:flex-row justify-between items-start sm:items-center mb-6 gap-4">
       <h1 class="text-2xl sm:text-3xl font-bold text-districorr-primary tracking-tight">
-        Panel de Admin - Todos los Viajes / Períodos
+        Panel de Admin - Todas las Rendiciones
       </h1>
       <div class="flex items-center gap-3 flex-wrap justify-start sm:justify-end w-full sm:w-auto">
         <!-- Selector de Vista -->
@@ -477,7 +543,6 @@ console.log("AdminViajesListView.vue: Script setup FINALIZADO");
            class="bg-white rounded-xl shadow-lg overflow-hidden flex flex-col justify-between hover:shadow-2xl transition-shadow duration-300 ease-in-out border-l-4"
            :class="viaje.cerrado_en ? 'border-red-500' : 'border-green-500'" >
         <div class="p-5 flex-grow">
-          <!-- ... (contenido interno de la tarjeta sin cambios de estilo de botones) ... -->
           <div class="sm:flex sm:justify-between sm:items-start mb-2">
             <div>
               <h2 class="text-lg font-semibold text-districorr-primary truncate flex-1 mr-2 leading-tight" :title="viaje.nombre_viaje"> {{ viaje.nombre_viaje }} </h2>
@@ -485,12 +550,18 @@ console.log("AdminViajesListView.vue: Script setup FINALIZADO");
             </div>
             <span v-if="viaje.codigo_rendicion" class="text-sm font-mono bg-gray-200 text-gray-800 px-3 py-1 rounded-full font-semibold shadow-sm whitespace-nowrap">ID: #{{ viaje.codigo_rendicion }}</span>
           </div>
-          <p class="text-xs font-bold mb-3 uppercase tracking-wider flex items-center" :class="viaje.cerrado_en ? 'text-red-600' : 'text-green-600'">
+          <p class="text-xs font-bold mb-1 uppercase tracking-wider flex items-center" :class="viaje.cerrado_en ? 'text-red-600' : 'text-green-600'">
             <svg v-if="viaje.cerrado_en" xmlns="http://www.w3.org/2000/svg" class="h-4 w-4 mr-1.5 flex-shrink-0" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M10 1a4.5 4.5 0 00-4.5 4.5V9H5a2 2 0 00-2 2v6a2 2 0 002 2h10a2 2 0 002-2v-6a2 2 0 00-2-2h-.5V5.5A4.5 4.5 0 0010 1zm3 8V5.5a3 3 0 10-6 0V9h6z" clip-rule="evenodd" /></svg>
             <svg v-else xmlns="http://www.w3.org/2000/svg" class="h-4 w-4 mr-1.5 flex-shrink-0" viewBox="0 0 20 20" fill="currentColor"><path d="M10 2a5 5 0 00-5 5v3H4a2 2 0 00-2 2v5a2 2 0 002 2h12a2 2 0 002-2v-5a2 2 0 00-2-2h-1V7a5 5 0 00-5-5zm0 2.5a2.5 2.5 0 00-2.5 2.5V9h5V7a2.5 2.5 0 00-2.5-2.5z" /></svg>
             {{ getEstadoViajeTextoAdmin(viaje) }}
           </p>
-          <div class="text-xs space-y-1 text-gray-600">
+          <p class="text-xs font-medium mt-1">
+            <span class="font-semibold">Aprobación:</span>
+            <span class="px-2 py-0.5 ml-1 inline-flex text-xs leading-5 font-semibold rounded-full" :class="estadoAprobacionClass(viaje.estado_aprobacion)">
+              {{ (viaje.estado_aprobacion || 'N/A').replace('_', ' ') }}
+            </span>
+          </p>
+          <div class="text-xs space-y-1 text-gray-600 mt-3">
             <p><span class="font-medium">Inicio:</span> {{ formatDate(viaje.fecha_inicio) }} <span class="font-medium ml-2">Fin:</span> {{ formatDate(viaje.fecha_fin) || 'N/A' }}</p>
             <p><span class="font-medium">Adelanto Viaje:</span> <span class="font-semibold">{{ formatCurrency(viaje.monto_adelanto, viaje.moneda) }}</span></p>
             <p><span class="font-medium">Gastos Brutos (del viaje):</span> <span class="font-semibold">{{ formatCurrency(viaje.total_gastado_bruto_viaje, viaje.moneda) }}</span></p>
@@ -499,6 +570,7 @@ console.log("AdminViajesListView.vue: Script setup FINALIZADO");
           </div>
         </div>
         <div class="bg-gray-50 px-4 py-3 border-t border-gray-200 flex flex-wrap gap-2 justify-end items-center">
+          <button v-if="viaje.estado_aprobacion === 'pendiente_aprobacion'" @click="abrirModalParaRevisar(viaje)" class="btn btn-admin-action btn-success">Revisar</button>
           <button @click="verGastosDelViaje(viaje)" class="btn btn-admin-action btn-blue">Ver Gastos</button>
           <button v-if="esViajeAbierto(viaje)" @click="adminCerrarRendicion(viaje)" class="btn btn-admin-action btn-orange">Cerrar (Admin)</button>
           <button @click="adminEditarViaje(viaje)" class="btn btn-admin-action btn-yellow">Editar (Admin)</button>
@@ -516,9 +588,8 @@ console.log("AdminViajesListView.vue: Script setup FINALIZADO");
               <th class="table-th">Concepto</th>
               <th class="table-th">Responsable</th>
               <th class="table-th">Inicio</th>
-              <th class="table-th">Fin</th>
               <th class="table-th">Estado</th>
-              <th class="table-th text-right">Adelanto</th>
+              <th class="table-th">Estado Aprobación</th>
               <th class="table-th text-right">Saldo Viaje</th>
               <th class="table-th text-center">Acciones</th>
             </tr>
@@ -529,15 +600,19 @@ console.log("AdminViajesListView.vue: Script setup FINALIZADO");
               <td class="table-td text-sm max-w-xs truncate" :title="viaje.nombre_viaje">{{ viaje.nombre_viaje }}</td>
               <td class="table-td text-sm text-gray-500 truncate max-w-[150px]" :title="viaje.responsable_email">{{ viaje.responsable_nombre }}</td>
               <td class="table-td whitespace-nowrap text-sm">{{ formatDate(viaje.fecha_inicio) }}</td>
-              <td class="table-td whitespace-nowrap text-sm">{{ formatDate(viaje.fecha_fin) || 'N/A' }}</td>
               <td class="table-td whitespace-nowrap text-xs">
                 <span class="px-2 py-0.5 inline-flex leading-5 font-semibold rounded-full" :class="viaje.cerrado_en ? 'bg-red-100 text-red-800':'bg-green-100 text-green-800'">
                   {{ getEstadoViajeTextoAdmin(viaje).replace(/CERRADO EL.*|EN CURSO/g, (match) => match === 'EN CURSO' ? 'En Curso' : 'Cerrado') }}
                 </span>
               </td>
-              <td class="table-td whitespace-nowrap text-sm text-right">{{ formatCurrency(viaje.monto_adelanto, viaje.moneda) }}</td>
+              <td class="table-td whitespace-nowrap text-center">
+                <span class="px-2 py-0.5 inline-flex text-xs leading-5 font-semibold rounded-full" :class="estadoAprobacionClass(viaje.estado_aprobacion)">
+                  {{ (viaje.estado_aprobacion || 'N/A').replace('_', ' ') }}
+                </span>
+              </td>
               <td class="table-td whitespace-nowrap text-sm font-semibold text-right" :class="viaje.saldo_adelanto_viaje >=0 ? 'text-green-600':'text-red-600'">{{ formatCurrency(viaje.saldo_adelanto_viaje, viaje.moneda) }}</td>
               <td class="table-td whitespace-nowrap text-center text-xs space-x-1">
+                 <button v-if="viaje.estado_aprobacion === 'pendiente_aprobacion'" @click="abrirModalParaRevisar(viaje)" class="btn btn-admin-action-xs btn-success">Revisar</button>
                  <button @click="verGastosDelViaje(viaje)" class="btn btn-admin-action-xs btn-blue">Ver Gastos</button>
                  <button v-if="esViajeAbierto(viaje)" @click="adminCerrarRendicion(viaje)" class="btn btn-admin-action-xs btn-orange">Cerrar</button>
                  <button @click="adminEditarViaje(viaje)" class="btn btn-admin-action-xs btn-yellow">Editar</button>
@@ -547,5 +622,46 @@ console.log("AdminViajesListView.vue: Script setup FINALIZADO");
         </table>
       </div>
     </div>
+
+    <!-- Modal para Revisión de Rendición -->
+    <div v-if="mostrarModalRevision" class="fixed inset-0 bg-gray-800 bg-opacity-75 z-50 flex items-center justify-center p-4">
+      <div class="bg-white rounded-lg shadow-2xl w-full max-w-lg">
+        <div class="p-6">
+          <h3 class="text-xl font-bold text-gray-900">Revisar Rendición #{{ viajeARevisar.codigo_rendicion }}</h3>
+          <p class="text-sm text-gray-600 mt-1">Responsable: {{ viajeARevisar.responsable_nombre }}</p>
+          <a @click.prevent="verGastosDelViaje(viajeARevisar)" href="#" class="text-sm text-blue-600 hover:underline">Ver detalle de gastos</a>
+          
+          <div class="mt-4">
+            <label for="comentariosAdminInput" class="block text-sm font-medium text-gray-700">Comentarios de la Revisión</label>
+            <textarea 
+              v-model="comentariosAdminInput" 
+              id="comentariosAdminInput" 
+              rows="4" 
+              class="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:ring-indigo-500 focus:border-indigo-500"
+              placeholder="Añade un comentario (obligatorio si se rechaza)..."
+            ></textarea>
+          </div>
+          
+          <div v-if="errorRevision" class="mt-3 p-2 bg-red-100 text-red-700 text-sm rounded-md">
+            {{ errorRevision }}
+          </div>
+        </div>
+        
+        <div class="bg-gray-50 px-6 py-4 flex justify-between items-center rounded-b-lg">
+          <button @click="cerrarModalRevision" :disabled="loadingRevision" class="btn btn-secondary-outline">Cancelar</button>
+          <div class="space-x-3">
+            <button @click="handleDecisionRendicion('rechazado')" :disabled="loadingRevision" class="btn btn-danger">
+              <span v-if="loadingRevision">...</span>
+              <span v-else>Rechazar</span>
+            </button>
+            <button @click="handleDecisionRendicion('aprobado')" :disabled="loadingRevision" class="btn btn-success">
+              <span v-if="loadingRevision">...</span>
+              <span v-else>Aprobar</span>
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+
   </div>
 </template>

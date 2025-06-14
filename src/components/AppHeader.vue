@@ -1,8 +1,8 @@
 <script setup>
-import { ref, computed, onMounted, watch } from 'vue';
+import { ref, computed, onMounted, onUnmounted, watch } from 'vue';
 import { RouterLink, useRouter } from 'vue-router';
-import { supabase } from '../supabaseClient.js'; // Importamos supabase
-import { formatDate } from '../utils/formatters.js'; // Asumimos que tienes un formatter de fecha
+import { supabase } from '../supabaseClient.js';
+import { formatDate } from '../utils/formatters.js';
 
 const props = defineProps({ user: Object, profile: Object });
 const emit = defineEmits(['logout-event']);
@@ -11,11 +11,12 @@ const router = useRouter();
 // --- Estados de los menús ---
 const isMobileMenuOpen = ref(false);
 const isProfileMenuOpen = ref(false);
-const isNotificationsMenuOpen = ref(false); // Nuevo menú
+const isNotificationsMenuOpen = ref(false);
 
 // --- Estados de Notificaciones ---
 const notifications = ref([]);
 const notificationCount = computed(() => notifications.value.filter(n => !n.leido).length);
+let notificationListener = null; // Para guardar la suscripción y poder limpiarla
 
 // --- Propiedades Computadas ---
 const isLoggedIn = computed(() => !!props.user);
@@ -38,13 +39,41 @@ async function fetchNotifications() {
       .select('*')
       .eq('user_id', props.user.id)
       .order('created_at', { ascending: false })
-      .limit(10); // Traemos las 10 más recientes
+      .limit(10);
 
     if (error) throw error;
     notifications.value = data;
   } catch (e) {
     console.error("Error al obtener notificaciones:", e.message);
   }
+}
+
+// --- Lógica de Tiempo Real ---
+function subscribeToNotifications() {
+  // Si ya existe una suscripción, la eliminamos para evitar duplicados
+  if (notificationListener) {
+    supabase.removeChannel(notificationListener);
+  }
+  // Si no hay usuario, no hacemos nada
+  if (!props.user) return;
+
+  // Creamos el canal de suscripción específico para este usuario
+  notificationListener = supabase
+    .channel(`public:notificaciones:user_id=eq.${props.user.id}`)
+    .on(
+      'postgres_changes',
+      { event: '*', schema: 'public', table: 'notificaciones', filter: `user_id=eq.${props.user.id}` },
+      (payload) => {
+        console.log('¡Notificación en tiempo real recibida!', payload);
+        // Cuando hay un cambio, la forma más simple y robusta es volver a pedir los datos.
+        fetchNotifications();
+      }
+    )
+    .subscribe((status) => {
+      if (status === 'SUBSCRIBED') {
+        console.log(`Suscrito exitosamente al canal de notificaciones para el usuario: ${props.user.id}`);
+      }
+    });
 }
 
 async function markAsRead(notificationId) {
@@ -54,11 +83,27 @@ async function markAsRead(notificationId) {
       .update({ leido: true })
       .eq('id', notificationId);
     if (error) throw error;
-    // Actualizamos el estado local para que el cambio sea instantáneo
     const notif = notifications.value.find(n => n.id === notificationId);
     if (notif) notif.leido = true;
   } catch (e) {
     console.error("Error al marcar notificación como leída:", e.message);
+  }
+}
+
+async function markAllAsRead() {
+  if (!props.user || notificationCount.value === 0) return;
+  try {
+    const { error } = await supabase
+      .from('notificaciones')
+      .update({ leido: true })
+      .eq('user_id', props.user.id)
+      .eq('leido', false);
+    if (error) throw error;
+    notifications.value.forEach(n => {
+      if (!n.leido) n.leido = true;
+    });
+  } catch (e) {
+    console.error("Error al marcar todas como leídas:", e.message);
   }
 }
 
@@ -96,17 +141,29 @@ const handleLogout = () => { closeAllMenus(); emit('logout-event'); };
 const handleNavLinkClick = () => { closeAllMenus(); };
 
 // --- Ciclo de Vida ---
-onMounted(() => {
-  if (isLoggedIn.value) {
-    fetchNotifications();
-  }
-});
-
+// Usamos un watcher en la prop 'user' para reaccionar a los cambios de sesión.
+// 'immediate: true' hace que se ejecute una vez al inicio.
 watch(() => props.user, (newUser) => {
   if (newUser) {
+    // Si hay un nuevo usuario (login), obtenemos sus notificaciones y nos suscribimos.
     fetchNotifications();
+    subscribeToNotifications();
   } else {
-    notifications.value = []; // Limpiamos las notificaciones al hacer logout
+    // Si el usuario se va (logout), limpiamos todo.
+    notifications.value = [];
+    if (notificationListener) {
+      supabase.removeChannel(notificationListener);
+      notificationListener = null;
+    }
+  }
+}, { immediate: true });
+
+// onMounted ya no es necesario para la carga inicial gracias al watcher.
+
+// Es una buena práctica limpiar la suscripción cuando el componente se destruye.
+onUnmounted(() => {
+  if (notificationListener) {
+    supabase.removeChannel(notificationListener);
   }
 });
 </script>

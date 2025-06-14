@@ -1,6 +1,6 @@
 <script setup>
 import { ref, watch } from 'vue';
-import { supabase } from '../../supabaseClient.js'; // Ajusta la ruta si es necesario
+import { supabase } from '../../supabaseClient.js';
 
 const props = defineProps({
   formatoAEditar: Object,
@@ -50,32 +50,14 @@ const handleSubmit = async () => {
       activo: form.value.activo,
     };
 
-    let responseData;
-    let responseError;
+    const { data, error } = props.isEditMode
+      ? await supabase.from('formatos_gasto_config').update(payload).eq('id', form.value.id).select().single()
+      : await supabase.from('formatos_gasto_config').insert(payload).select().single();
 
-    if (props.isEditMode && form.value.id) {
-      const { data, error } = await supabase
-        .from('formatos_gasto_config')
-        .update(payload)
-        .eq('id', form.value.id)
-        .select()
-        .single();
-      responseData = data;
-      responseError = error;
-    } else {
-      const { data, error } = await supabase
-        .from('formatos_gasto_config')
-        .insert(payload)
-        .select()
-        .single();
-      responseData = data;
-      responseError = error;
-    }
+    if (error) throw error;
 
-    if (responseError) throw responseError;
-
-    successMessage.value = props.isEditMode ? '¡Formato actualizado!' : '¡Formato creado!';
-    emit('guardado', responseData);
+    successMessage.value = `¡Formato ${props.isEditMode ? 'actualizado' : 'creado'}!`;
+    emit('guardado', data);
 
     if (!props.isEditMode) {
       form.value.nombre_formato = '';
@@ -93,29 +75,29 @@ const handleSubmit = async () => {
 
 <template>
   <form @submit.prevent="handleSubmit" class="space-y-4 p-4 border rounded-lg bg-white shadow">
-    <h3 class="text-lg font-medium leading-6 text-districorr-primary">
+    <h3 class="text-lg font-medium leading-6 text-gray-800">
       {{ isEditMode ? 'Editar Formato de Gasto' : 'Nuevo Formato de Gasto' }}
     </h3>
     <div>
-      <label for="nombre_formato" class="block text-sm font-medium text-districorr-text-medium">Nombre del Formato <span class="text-red-500">*</span></label>
+      <label for="nombre_formato" class="block text-sm font-medium text-gray-700">Nombre del Formato <span class="text-red-500">*</span></label>
       <input type="text" id="nombre_formato" v-model="form.nombre_formato" required
-             class="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-districorr-accent focus:border-districorr-accent sm:text-sm">
+             class="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm">
     </div>
     <div>
-      <label for="descripcion_formato" class="block text-sm font-medium text-districorr-text-medium">Descripción (Opcional)</label>
+      <label for="descripcion_formato" class="block text-sm font-medium text-gray-700">Descripción (Opcional)</label>
       <textarea id="descripcion_formato" v-model="form.descripcion" rows="3"
-                class="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-districorr-accent focus:border-districorr-accent sm:text-sm"></textarea>
+                class="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm"></textarea>
     </div>
     <div class="flex items-center">
       <input id="activo_formato" type="checkbox" v-model="form.activo"
-             class="h-4 w-4 text-districorr-accent border-gray-300 rounded focus:ring-districorr-accent">
-      <label for="activo_formato" class="ml-2 block text-sm text-districorr-text-medium">Activo</label>
+             class="h-4 w-4 text-indigo-600 border-gray-300 rounded focus:ring-indigo-500">
+      <label for="activo_formato" class="ml-2 block text-sm text-gray-700">Activo</label>
     </div>
 
-    <div v-if="errorMessage" class="my-2 p-2 bg-red-100 border border-districorr-error text-districorr-error rounded-md text-sm">
+    <div v-if="errorMessage" class="my-2 p-2 bg-red-100 border border-red-400 text-red-700 rounded-md text-sm">
       {{ errorMessage }}
     </div>
-    <div v-if="successMessage" class="my-2 p-2 bg-green-100 border border-districorr-success text-districorr-success rounded-md text-sm">
+    <div v-if="successMessage" class="my-2 p-2 bg-green-100 border border-green-400 text-green-700 rounded-md text-sm">
       {{ successMessage }}
     </div>
 
@@ -126,12 +108,10 @@ const handleSubmit = async () => {
       </button>
       <button type="submit"
               :disabled="loading"
-              class="px-4 py-2 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-districorr-accent hover:bg-opacity-80 disabled:opacity-50">
+              class="px-4 py-2 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 disabled:opacity-50">
         <span v-if="loading" class="animate-spin inline-block w-4 h-4 border-2 border-white border-t-transparent rounded-full mr-2"></span>
         {{ loading ? 'Guardando...' : (isEditMode ? 'Actualizar Formato' : 'Crear Formato') }}
       </button>
     </div>
   </form>
 </template>
-
-<style scoped></style>

@@ -1,791 +1,474 @@
 <script setup>
-import { ref, onMounted, watch, computed } from 'vue';
+import { ref, reactive, onMounted, computed, watch } from 'vue';
 import { supabase } from '../supabaseClient.js';
-import { useRouter } from 'vue-router'; // Importar useRouter para el enlace de "crear viaje"
+import { formatCurrency, parseCurrency } from '../utils/formatters.js';
+import vSelect from 'vue-select';
+import 'vue-select/dist/vue-select.css';
 
+// --- Props y Emits ---
 const props = defineProps({
-  gastoId: String,
-  viajeIdPredeterminado: [String, Number, null],
-  formatoIdUsuario: [Number, String, null]
+  formatoId: { type: [Number, String], required: true },
+  nombreFormato: { type: String, default: 'Formulario de Gasto' },
+  gastoId: { type: [Number, String], default: null },
+  viajeIdPredeterminado: { type: [Number, String], default: null }
 });
-const emit = defineEmits(['gastoGuardado', 'cancelar']);
-const router = useRouter(); // Instancia de useRouter
+const emit = defineEmits(['gasto-guardado', 'cancelar']);
 
-const form = ref({
-  id: null,
-  fecha_gasto: new Date().toISOString().split('T')[0],
-  tipo_gasto_id: null,
-  monto_total: null,
-  moneda: 'ARS',
-  descripcion_general: '',
-  viaje_id: null,
-  numero_factura: '',
-  factura_url: null,
-  adelanto_especifico_aplicado: null, // RENOMBRADO (antes monto_adelanto)
-  cliente_referido: '', // Ahora obligatorio
-  monto_iva: null,
-  formato_id: null,
-  datos_adicionales: {},
-});
-
-const facturaFile = ref(null);
-const facturaPreview = ref(null);
-const viajes = ref([]);
-const tiposDeGastoDisponibles = ref([]);
-const loading = ref(false);
+// --- Estado del Componente ---
+const loading = ref(true);
 const errorMessage = ref('');
 const successMessage = ref('');
-const tipoMontoIngresado = ref('bruto'); // 'bruto', 'neto', 'sin_factura'
-const tasaIVA = 0.21;
+const isEditMode = computed(() => !!props.gastoId);
 
-const clientesSugeridos = ref([]); // Para sugerencias de clientes
-// --- Lógica para Campos Dinámicos ---
-const camposDinamicosConfig = ref([]);
-const cargandoCamposDinamicos = ref(false);
-
-async function fetchCamposFormato(formatoId) {
-  if (!formatoId) {
-    camposDinamicosConfig.value = [];
-    if (!props.gastoId) { // Solo limpiar para nuevos gastos si no hay formato
-        form.value.datos_adicionales = {};
-    }
-    return;
-  }
-  cargandoCamposDinamicos.value = true;
-  try {
-    const { data, error } = await supabase
-      .from('campos_formato_config')
-      .select('*')
-      .eq('formato_id', formatoId)
-      .order('orden_visualizacion', { ascending: true });
-
-    if (error) throw error;
-    camposDinamicosConfig.value = data || [];
-    
-    if (form.value.datos_adicionales === null || form.value.datos_adicionales === undefined) {
-        form.value.datos_adicionales = {};
-    }
-    
-    (data || []).forEach(campoConfig => {
-      if (!(campoConfig.nombre_campo_tecnico in form.value.datos_adicionales)) {
-        if (campoConfig.tipo_dato === 'booleano') {
-          form.value.datos_adicionales[campoConfig.nombre_campo_tecnico] = false; 
-        } else if (campoConfig.tipo_dato === 'selector' && !campoConfig.es_obligatorio) {
-            form.value.datos_adicionales[campoConfig.nombre_campo_tecnico] = null;
-        }
-        else {
-            form.value.datos_adicionales[campoConfig.nombre_campo_tecnico] = undefined;
-        }
-      }
-    });
-  } catch (error) {
-    console.error('Error cargando campos dinámicos del formato:', error.message);
-    errorMessage.value = (errorMessage.value ? errorMessage.value + '\n' : '') + 'No se pudieron cargar los campos específicos del formato.';
-    camposDinamicosConfig.value = [];
-  } finally {
-    cargandoCamposDinamicos.value = false;
-  }
-}
-// --- Fin Lógica para Campos Dinámicos ---
-
-const montoNetoCalculado = computed(() => {
-  if (tipoMontoIngresado.value === 'sin_factura' || form.value.monto_total === null || form.value.monto_total === undefined || isNaN(parseFloat(form.value.monto_total))) return null;
-  const montoIngresado = parseFloat(form.value.monto_total);
-  if (tipoMontoIngresado.value === 'bruto') {
-    return parseFloat((montoIngresado / (1 + tasaIVA)).toFixed(2));
-  }
-  return parseFloat(montoIngresado.toFixed(2));
+// --- Estado del Formulario ---
+const formState = reactive({});
+const formattedMontoTotal = ref('');
+const opcionesSelect = ref({
+  viajes: [],
+  tipos_gasto: [],
+  clientes: [],
+  transportes: []
 });
+const tipoMontoIngresado = ref('bruto');
+const facturaFile = ref(null);
+const facturaPreview = ref(null);
+const sugerenciasGastos = ref([]);
 
-const montoIVACalculado = computed(() => {
-  if (tipoMontoIngresado.value === 'sin_factura' || form.value.monto_total === null || form.value.monto_total === undefined || isNaN(parseFloat(form.value.monto_total))) {
-    return tipoMontoIngresado.value === 'sin_factura' ? 0 : null;
-  }
-  const montoIngresado = parseFloat(form.value.monto_total);
-  if (tipoMontoIngresado.value === 'bruto') {
-    if (montoNetoCalculado.value === null && tipoMontoIngresado.value !== 'sin_factura') return null; // Evitar error si montoNeto es null
-    return parseFloat((montoIngresado - (montoNetoCalculado.value || 0)).toFixed(2)); // Usar 0 si montoNetoCalculado es null
-  } else { // tipoMontoIngresado es 'neto'
-    return parseFloat((montoIngresado * tasaIVA).toFixed(2));
-  }
-});
+// --- Lógica de Campos Dinámicos ---
+const camposObligatorios = ref([]);
+const camposOpcionales = ref([]);
+const camposOpcionalesVisibles = ref(new Set());
 
-watch([() => form.value.monto_total, tipoMontoIngresado], () => {
-  if (tipoMontoIngresado.value === 'sin_factura') {
-    form.value.monto_iva = 0;
-  } else if (form.value.monto_total !== null && !isNaN(parseFloat(form.value.monto_total))) {
-    form.value.monto_iva = montoIVACalculado.value;
-  } else {
-    form.value.monto_iva = null;
-  }
-}, { deep: true });
-
-async function fetchClientesSugeridos() {
+// --- Lógica de Carga ---
+async function cargarConfiguracionYDatos() {
+  loading.value = true;
+  errorMessage.value = '';
   try {
-    const { data: { user } } = await supabase.auth.getUser();
-    if (!user) return;
-    const { data, error } = await supabase
-      .from('clientes_referidos_usuario')
-      .select('nombre_cliente')
-      .eq('user_id', user.id)
-      .order('nombre_cliente', { ascending: true })
-      .limit(100); 
+    const [camposResult, _, sugerenciasResult] = await Promise.all([
+      supabase.from('campos_formato_config').select('*').eq('formato_id', props.formatoId).order('orden_visualizacion'),
+      cargarOpcionesParaSelects(),
+      supabase.rpc('get_sugerencias_gastos_usuario')
+    ]);
 
-    if (error) {
-      console.error("Error cargando clientes sugeridos:", error.message);
-      return; 
-    }
-    clientesSugeridos.value = data.map(c => c.nombre_cliente);
-  } catch (e) {
-    console.error("Excepción al cargar clientes sugeridos:", e.message);
-  }
-}
-const fetchDropdownData = async () => {
-  try {
-    const { data: { user } } = await supabase.auth.getUser();
-    if (!user) {
-        console.warn('GastoForm: Usuario no autenticado en fetchDropdownData.');
-        return;
-    }
-    const { data: tiposData, error: tiposError } = await supabase
-      .from('tipos_gasto_config')
-      .select('id, nombre_tipo_gasto')
-      .eq('activo', true)
-      .order('nombre_tipo_gasto');
-    if (tiposError) throw tiposError;
-    tiposDeGastoDisponibles.value = tiposData || [];
+    if (camposResult.error) throw camposResult.error;
+    const todosLosCampos = camposResult.data || [];
+    camposObligatorios.value = todosLosCampos.filter(c => c.es_obligatorio);
+    camposOpcionales.value = todosLosCampos.filter(c => !c.es_obligatorio);
 
-    const { data: viajesData, error: viajesError } = await supabase
-      .from('viajes')
-      .select('id, nombre_viaje')
-      .eq('user_id', user.id)
-      .order('fecha_inicio', { ascending: false });
-    if (viajesError) throw viajesError;
-    viajes.value = viajesData || [];
-  } catch (error) {
-    console.error('GastoForm fetchDropdownData: Error cargando datos de selectores:', error.message);
-    errorMessage.value = (errorMessage.value ? errorMessage.value + '\n' : '') + "No se pudieron cargar opciones para el formulario (tipos de gasto/viajes).";
-  }
-};
-
-onMounted(async () => {
-  loading.value = true; 
-  errorMessage.value = ''; 
-  successMessage.value = '';
-
-  // Cargar datos para selectores y sugerencias de clientes
-  const loadingPromises = [fetchDropdownData(), fetchClientesSugeridos()]; 
-
-  if (props.gastoId) { // Modo Edición
-    console.log('GastoForm: Modo Edición, ID:', props.gastoId);
-    try {
-      const { data: gastoData, error } = await supabase.from('gastos').select('*').eq('id', props.gastoId).single();
-      if (error) {
-        console.error("Error cargando gasto para editar:", error);
-        throw error; // Esto será atrapado por el catch más abajo
-      }
-      if (gastoData) {
-        // Mapear adelanto_especifico_aplicado si la columna se renombró
-        // Si la columna en BD aún es monto_adelanto, esto necesita ajustarse o la BD renombrarse.
-        // Asumimos que gastoData.adelanto_especifico_aplicado existe o es null.
-        form.value = { 
-            ...gastoData, 
-            fecha_gasto: gastoData.fecha_gasto.split('T')[0],
-            datos_adicionales: gastoData.datos_adicionales || {},
-            // Si la columna en BD se llama 'monto_adelanto' pero en el form es 'adelanto_especifico_aplicado':
-            adelanto_especifico_aplicado: gastoData.monto_adelanto // O el nombre correcto de tu columna renombrada
-        };
-        
-        // Heurística para tipoMontoIngresado y valor de form.value.monto_total (input)
-        // Asumimos que gastoData.monto_total es el BRUTO FINAL guardado en BD.
-        if (gastoData.monto_iva !== null && gastoData.monto_total !== null && gastoData.monto_iva >= 0) {
-            // Si el gasto fue 'sin_factura' (IVA = 0 pero no null)
-            if (gastoData.monto_iva === 0 && gastoData.monto_total > 0) {
-                 // Podríamos tener un campo extra en BD para 'tipo_monto_ingresado_original'
-                 // o inferir. Si IVA es 0, es probable que fuera 'sin_factura'.
-                 // O si no hay factura_url y no hay numero_factura.
-                 // Por ahora, si IVA es 0, lo tratamos como si se hubiera ingresado bruto (el monto total)
-                 // y se selecciona 'sin_factura'
-                 // Esta heurística puede mejorarse si se guarda el tipoMontoIngresado original.
-                 // Una heurística simple: si el IVA es exactamente 0, fue "sin factura"
-                 if (Math.abs(gastoData.monto_iva) < 0.001) {
-                    tipoMontoIngresado.value = 'sin_factura';
-                 } else {
-                    const ivaCalculadoDesdeBrutoGuardado = parseFloat((gastoData.monto_total / (1 + tasaIVA) * tasaIVA).toFixed(2));
-                    if (Math.abs(gastoData.monto_iva - ivaCalculadoDesdeBrutoGuardado) < 0.015) {
-                        tipoMontoIngresado.value = 'bruto';
-                    } else {
-                        tipoMontoIngresado.value = 'neto';
-                        form.value.monto_total = parseFloat((gastoData.monto_total / (1 + tasaIVA)).toFixed(2));
-                    }
-                 }
-            } else { // IVA > 0
-                const ivaCalculadoDesdeBrutoGuardado = parseFloat((gastoData.monto_total / (1 + tasaIVA) * tasaIVA).toFixed(2));
-                if (Math.abs(gastoData.monto_iva - ivaCalculadoDesdeBrutoGuardado) < 0.015) {
-                    tipoMontoIngresado.value = 'bruto';
-                } else {
-                    tipoMontoIngresado.value = 'neto';
-                    form.value.monto_total = parseFloat((gastoData.monto_total / (1 + tasaIVA)).toFixed(2));
-                }
-            }
-        } else if (gastoData.monto_total !== null) { 
-            tipoMontoIngresado.value = 'bruto'; 
-        } else { 
-            tipoMontoIngresado.value = 'bruto';
-        }
-
-        if (gastoData.factura_url) {
-          facturaPreview.value = gastoData.factura_url;
-        }
-        
-        if (form.value.formato_id) {
-          loadingPromises.push(fetchCamposFormato(form.value.formato_id));
-        } else {
-             console.warn("GastoForm: Gasto en edición no tiene formato_id. No se cargarán campos dinámicos.");
-             camposDinamicosConfig.value = [];
-        }
-      } else {
-        errorMessage.value = `GastoForm: No se encontró el gasto con ID: ${props.gastoId}.`;
-      }
-    } catch (e) { 
-      errorMessage.value = 'GastoForm: Error al cargar el gasto para editar: ' + e.message; 
-      console.error(e); 
-    }
-  } else { // Modo Creación
-    console.log('GastoForm: Modo Creación.');
-    form.value.formato_id = props.formatoIdUsuario ? parseInt(props.formatoIdUsuario) : null;
-    form.value.viaje_id = props.viajeIdPredeterminado ? parseInt(props.viajeIdPredeterminado) : null;
-    form.value.datos_adicionales = {}; 
-
-    if (form.value.formato_id) {
-      loadingPromises.push(fetchCamposFormato(form.value.formato_id));
+    if (sugerenciasResult.error) {
+      console.warn("No se pudieron cargar las sugerencias:", sugerenciasResult.error.message);
     } else {
-      console.warn('GastoForm (Nuevo): No se proporcionó formatoIdUsuario. No se cargarán campos dinámicos si no se establece uno.');
-      camposDinamicosConfig.value = [];
+      sugerenciasGastos.value = sugerenciasResult.data || [];
     }
-  }
-  
-  try {
-      await Promise.all(loadingPromises);
+
+    inicializarFormState();
+
+    if (isEditMode.value) {
+      await cargarGastoParaEditar();
+    } else {
+      if (props.viajeIdPredeterminado) {
+        formState.viaje_id = parseInt(props.viajeIdPredeterminado);
+      }
+    }
   } catch (e) {
-      console.error("GastoForm: Error durante la carga inicial de datos del formulario (onMounted):", e);
+    console.error("Error al cargar la configuración del formulario:", e);
+    errorMessage.value = `No se pudo cargar el formulario: ${e.message}`;
   } finally {
-      loading.value = false;
+    loading.value = false;
   }
-});
+}
 
-watch(() => props.formatoIdUsuario, (newFormatoIdProp) => {
-    if (!props.gastoId && newFormatoIdProp && newFormatoIdProp !== form.value.formato_id) {
-        console.log("GastoForm: props.formatoIdUsuario cambió a", newFormatoIdProp, ". Actualizando form y recargando campos.");
-        form.value.formato_id = parseInt(newFormatoIdProp);
+function inicializarFormState() {
+  const camposFijos = {
+    fecha_gasto: new Date().toISOString().split('T')[0],
+    monto_total: null,
+    monto_iva: null,
+    moneda: 'ARS',
+    descripcion_general: '',
+    numero_factura: '',
+    viaje_id: null,
+    tipo_gasto_id: null,
+    cliente_id: null,
+    transporte_id: null,
+    adelanto_especifico_aplicado: null,
+    factura_url: null,
+  };
+
+  const camposDinamicos = {};
+  [...camposObligatorios.value, ...camposOpcionales.value].forEach(campo => {
+    camposDinamicos[campo.nombre_campo_tecnico] = campo.valor_por_defecto || null;
+  });
+
+  Object.assign(formState, { ...camposFijos, ...camposDinamicos });
+
+  if (!isEditMode.value) {
+    if (opcionesSelect.value.viajes.length === 1) {
+      formState.viaje_id = opcionesSelect.value.viajes[0].id;
     }
+  }
+}
+
+async function cargarGastoParaEditar() {
+  const { data: gastoData, error: gastoError } = await supabase
+    .from('gastos')
+    .select('*, datos_adicionales, cliente_id(id, nombre_cliente), transporte_id(id, nombre)')
+    .eq('id', props.gastoId)
+    .single();
+  if (gastoError) throw gastoError;
+
+  Object.assign(formState, gastoData, gastoData.datos_adicionales);
+  
+  if (gastoData.cliente_id) {
+    formState.cliente_id = { label: gastoData.cliente_id.nombre_cliente, value: gastoData.cliente_id.id };
+  }
+  if (gastoData.transporte_id) {
+    formState.transporte_id = { label: gastoData.transporte_id.nombre, value: gastoData.transporte_id.id };
+  }
+
+  if (gastoData.factura_url) {
+    facturaPreview.value = gastoData.factura_url;
+  }
+  if (gastoData.monto_iva === 0) {
+    tipoMontoIngresado.value = 'sin_factura';
+  } else {
+    tipoMontoIngresado.value = 'bruto';
+  }
+
+  formattedMontoTotal.value = formatCurrency(formState.monto_total);
+
+  camposOpcionales.value.forEach(campo => {
+    const campoTecnico = campo.nombre_campo_tecnico;
+    if (formState[campoTecnico] !== null && formState[campoTecnico] !== undefined && formState[campoTecnico] !== '') {
+      camposOpcionalesVisibles.value.add(campoTecnico);
+    }
+  });
+}
+
+async function cargarOpcionesParaSelects() {
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return;
+
+  const [viajes, tipos, clientes, transportes] = await Promise.all([
+    supabase.from('viajes').select('id, nombre_viaje').eq('user_id', user.id).is('cerrado_en', null),
+    supabase.from('tipos_gasto_config').select('id, nombre_tipo_gasto').eq('activo', true),
+    supabase.from('clientes').select('id, nombre_cliente'),
+    supabase.from('transportes').select('id, nombre')
+  ]);
+
+  opcionesSelect.value = {
+    viajes: viajes.data || [],
+    tipos_gasto: tipos.data || [],
+    clientes: (clientes.data || []).map(c => ({ label: c.nombre_cliente, value: c.id })),
+    transportes: (transportes.data || []).map(t => ({ label: t.nombre, value: t.id }))
+  };
+}
+
+onMounted(cargarConfiguracionYDatos);
+
+function agregarCampoOpcional(campo) {
+  camposOpcionalesVisibles.value.add(campo.nombre_campo_tecnico);
+}
+
+function quitarCampoOpcional(campo) {
+  const campoTecnico = campo.nombre_campo_tecnico;
+  camposOpcionalesVisibles.value.delete(campoTecnico);
+  formState[campoTecnico] = null;
+}
+
+watch(formattedMontoTotal, (newVal) => {
+  const numericValue = parseCurrency(newVal);
+  if (formState.monto_total !== numericValue) {
+    formState.monto_total = numericValue;
+  }
 });
 
-watch(() => form.value.formato_id, (newFormatoIdForm, oldFormatoIdForm) => {
-  if (newFormatoIdForm !== oldFormatoIdForm) {
-     console.log("GastoForm: form.value.formato_id cambió de", oldFormatoIdForm, "a", newFormatoIdForm, ". Recargando campos dinámicos.");
-     // Al cambiar de formato, resetear los datos adicionales que pudieran existir del formato anterior
-     if (!props.gastoId) { // Solo para nuevos gastos, en edición los datos adicionales vienen con el gasto
-         form.value.datos_adicionales = {};
-     }
-     fetchCamposFormato(newFormatoIdForm);
+watch(() => formState.monto_total, (newVal) => {
+  if (tipoMontoIngresado.value === 'bruto') {
+    formState.monto_iva = parseFloat((newVal / 1.21 * 0.21).toFixed(2));
+  } else if (tipoMontoIngresado.value === 'neto') {
+    formState.monto_iva = parseFloat((newVal * 0.21).toFixed(2));
+  } else {
+    formState.monto_iva = 0;
   }
-}, { immediate: false });
+});
+
+const montoBrutoFinal = computed(() => {
+  if (tipoMontoIngresado.value === 'neto') {
+    return (formState.monto_total || 0) + (formState.monto_iva || 0);
+  }
+  return formState.monto_total || 0;
+});
 
 const handleFacturaChange = (event) => {
   const file = event.target.files[0];
-  const facturaInput = event.target;
   if (file) {
     facturaFile.value = file;
-    if (file.type.startsWith('image/')) {
-      const reader = new FileReader();
-      reader.onload = (e) => facturaPreview.value = e.target.result;
-      reader.readAsDataURL(file);
-    } else if (file.type === 'application/pdf') {
-      facturaPreview.value = null; // O un ícono de PDF, o el nombre del archivo.
-      console.log("GastoForm: Archivo PDF seleccionado:", file.name);
-    } else {
-      facturaPreview.value = null;
-    }
-  } else {
-    facturaFile.value = null;
-    if (props.gastoId && form.value.factura_url) {
-        facturaPreview.value = form.value.factura_url;
-    } else {
-        facturaPreview.value = null;
-    }
-    if (facturaInput) facturaInput.value = null;
+    facturaPreview.value = URL.createObjectURL(file);
   }
 };
 
-const handleSubmit = async () => {
-  loading.value = true; 
+function aplicarSugerencia() {
+  const desc = formState.descripcion_general;
+  const sugerenciaEncontrada = sugerenciasGastos.value.find(s => s.descripcion_general === desc);
+  if (sugerenciaEncontrada) {
+    formState.tipo_gasto_id = sugerenciaEncontrada.tipo_gasto_id;
+  }
+}
+
+async function handleSubmit() {
+  loading.value = true;
   errorMessage.value = '';
-  successMessage.value = '';
-  
-  // Validaciones básicas de campos fijos
-  if (!form.value.formato_id) {
-      errorMessage.value = 'Error: No se ha definido un formato para el gasto.';
-      loading.value = false; return;
-  }
-  if (!form.value.tipo_gasto_id) {
-    errorMessage.value = 'Selecciona un tipo de gasto.';
-    loading.value = false; return;
-  }
-  if (form.value.monto_total === null || form.value.monto_total <= 0 || isNaN(parseFloat(form.value.monto_total))) {
-    errorMessage.value = 'Ingresa un monto total válido y mayor a cero.';
-    loading.value = false; return;
-  }
-  if (!form.value.fecha_gasto) {
-    errorMessage.value = 'La fecha del gasto es obligatoria.';
-    loading.value = false; return;
-  }
-  if (!form.value.viaje_id) {
-    errorMessage.value = 'Debes asociar este gasto a un Viaje / Período de Rendición.';
-    loading.value = false; return;
-  }
-  // Nueva validación: Cliente Referido es obligatorio
-  if (!form.value.cliente_referido || form.value.cliente_referido.trim() === '') {
-    errorMessage.value = 'El campo "Cliente Referido" es obligatorio.';
-    loading.value = false;
-    // Opcional: document.getElementById('cliente_referido')?.focus();
-    return;
-  }
-
-  // Validar campos dinámicos obligatorios
-  if (camposDinamicosConfig.value && camposDinamicosConfig.value.length > 0) {
-    for (const campoConfig of camposDinamicosConfig.value) {
-      if (campoConfig.es_obligatorio) {
-        const valorCampo = form.value.datos_adicionales[campoConfig.nombre_campo_tecnico];
-        let esInvalido = false;
-        if (valorCampo === null || valorCampo === undefined) {
-          esInvalido = true;
-        } else if (typeof valorCampo === 'string' && valorCampo.trim() === '') {
-          esInvalido = true;
-        } else if (campoConfig.tipo_dato === 'booleano' && typeof valorCampo !== 'boolean') {
-          if (valorCampo === undefined) esInvalido = true; 
-        }
-        if (esInvalido) {
-          errorMessage.value = `El campo "${campoConfig.etiqueta_visible}" (del formato) es obligatorio.`;
-          loading.value = false;
-          const elCampo = document.getElementById(`campo_dinamico_${campoConfig.nombre_campo_tecnico}`);
-          if (elCampo) elCampo.focus();
-          return;
-        }
-      }
-    }
-  }
-
   try {
     const { data: { user } } = await supabase.auth.getUser();
-    if (!user) throw new Error('Usuario no autenticado. Por favor, inicia sesión de nuevo.');
+    if (!user) throw new Error("Usuario no autenticado.");
 
-    let finalFacturaUrl = form.value.factura_url;
+    let finalFacturaUrl = formState.factura_url;
     if (facturaFile.value) {
-      if (props.gastoId && form.value.factura_url) {
-        try { /* ... tu lógica de borrado de factura anterior ... */ }
-        catch (e) { console.warn('No se pudo borrar factura anterior del storage:', e.message); }
-      }
-      const nameParts = facturaFile.value.name.split('.');
-      const fileExt = nameParts.length > 1 ? nameParts.pop().toLowerCase() : '';
-      const baseName = nameParts.join('.');
-      const cleanBaseName = baseName.replace(/[^a-zA-Z0-9_.-]/g, '_');
-      const filePath = `${user.id}/${Date.now()}_${cleanBaseName}${fileExt ? '.' + fileExt : ''}`;
-      
+      const filePath = `${user.id}/${Date.now()}-${facturaFile.value.name}`;
       const { error: uploadError } = await supabase.storage.from('facturas').upload(filePath, facturaFile.value);
       if (uploadError) throw uploadError;
-      const { data: urlData } = supabase.storage.from('facturas').getPublicUrl(filePath);
-      finalFacturaUrl = urlData.publicUrl;
+      finalFacturaUrl = supabase.storage.from('facturas').getPublicUrl(filePath).data.publicUrl;
     }
 
-    let montoBrutoFinalAGuardar = parseFloat(form.value.monto_total) || 0;
-    let ivaParaGuardar = form.value.monto_iva;
-
-    if (tipoMontoIngresado.value === 'sin_factura') {
-        ivaParaGuardar = 0; // O null, consistente con cómo lo muestras/calculas
-        // montoBrutoFinalAGuardar ya es el monto ingresado
-    } else if (tipoMontoIngresado.value === 'neto') {
-        montoBrutoFinalAGuardar = parseFloat((montoBrutoFinalAGuardar + (ivaParaGuardar || 0)).toFixed(2));
-    }
-    // Si es 'bruto', montoBrutoFinalAGuardar ya es el bruto.
-
-    const datosAdicionalesParaGuardar = { ...form.value.datos_adicionales };
-    for (const key in datosAdicionalesParaGuardar) {
-        if (datosAdicionalesParaGuardar[key] === undefined) {
-            datosAdicionalesParaGuardar[key] = null; 
-        }
-    }
-
-    const gastoPayload = {
+    const payloadFijo = {
       user_id: user.id,
-      formato_id: parseInt(form.value.formato_id),
-      viaje_id: parseInt(form.value.viaje_id),
-      fecha_gasto: form.value.fecha_gasto,
-      tipo_gasto_id: parseInt(form.value.tipo_gasto_id),
-      monto_total: montoBrutoFinalAGuardar,
-      moneda: form.value.moneda,
-      descripcion_general: form.value.descripcion_general,
-      numero_factura: tipoMontoIngresado.value === 'sin_factura' ? null : form.value.numero_factura, // Nulo si es sin factura
+      formato_id: props.formatoId,
+      fecha_gasto: formState.fecha_gasto,
+      monto_total: montoBrutoFinal.value,
+      monto_iva: formState.monto_iva,
+      moneda: formState.moneda,
+      descripcion_general: formState.descripcion_general,
+      numero_factura: formState.numero_factura,
+      viaje_id: formState.viaje_id,
+      tipo_gasto_id: formState.tipo_gasto_id,
+      cliente_id: formState.cliente_id?.value || formState.cliente_id || null,
+      transporte_id: formState.transporte_id?.value || formState.transporte_id || null,
+      adelanto_especifico_aplicado: formState.adelanto_especifico_aplicado,
       factura_url: finalFacturaUrl,
-      adelanto_especifico_aplicado: form.value.adelanto_especifico_aplicado ? parseFloat(form.value.adelanto_especifico_aplicado) : null, // Usar nuevo nombre
-      cliente_referido: form.value.cliente_referido.trim() || null, // Guardar trim o null
-      monto_iva: ivaParaGuardar !== null ? parseFloat(ivaParaGuardar.toFixed(2)) : null,
-      datos_adicionales: datosAdicionalesParaGuardar,
     };
 
-    let dataResponse, errorResponse;
-    if (props.gastoId) {
-      const { user_id, created_at, id, ...updatePayload } = gastoPayload; 
-      delete updatePayload.formato_id; 
-      const { data, error } = await supabase.from('gastos').update(updatePayload).eq('id', props.gastoId).select().single();
-      dataResponse = data; errorResponse = error;
-    } else {
-      const { data, error } = await supabase.from('gastos').insert(gastoPayload).select().single();
-      dataResponse = data; errorResponse = error;
-    }
-
-    if (errorResponse) throw errorResponse;
-
-    // Guardar/Actualizar Cliente Referido para Sugerencias
-    if (form.value.cliente_referido && form.value.cliente_referido.trim() !== '' && user) {
-      const clienteTrimmed = form.value.cliente_referido.trim();
-      try {
-        const { error: clienteUpsertError } = await supabase
-          .from('clientes_referidos_usuario')
-          .upsert({ 
-            user_id: user.id, 
-            nombre_cliente: clienteTrimmed,
-            ultima_vez_usado: new Date().toISOString() 
-          }, { 
-            onConflict: 'user_id, nombre_cliente'
-          });
-        if (clienteUpsertError) {
-          console.warn("Advertencia al guardar/actualizar cliente sugerido:", clienteUpsertError.message);
-        } else {
-          if (!clientesSugeridos.value.includes(clienteTrimmed)) {
-              clientesSugeridos.value.push(clienteTrimmed);
-              clientesSugeridos.value.sort((a, b) => a.localeCompare(b));
-          }
-        }
-      } catch (e) { console.warn("Excepción al guardar/actualizar cliente sugerido:", e.message); }
-    }
-
-    successMessage.value = props.gastoId ? '¡Gasto actualizado exitosamente!' : '¡Gasto guardado exitosamente!';
-    
-    if (!props.gastoId) { // Resetear formulario si fue creación
-      const formatoIdAlResetear = form.value.formato_id;
-      const viajeIdAlResetear = props.viajeIdPredeterminado ? form.value.viaje_id : null;
-      form.value = { 
-        fecha_gasto: new Date().toISOString().split('T')[0],
-        tipo_gasto_id: null, monto_total: null, moneda: 'ARS',
-        descripcion_general: '',
-        viaje_id: viajeIdAlResetear, 
-        numero_factura: '', factura_url: null, 
-        adelanto_especifico_aplicado: null, // Usar nuevo nombre
-        cliente_referido: '', // Resetear cliente
-        monto_iva: null,
-        formato_id: formatoIdAlResetear, 
-        datos_adicionales: {},
-      };
-      if (formatoIdAlResetear && camposDinamicosConfig.value.length > 0) {
-          camposDinamicosConfig.value.forEach(campoConfig => { /* ... lógica de reseteo de datos_adicionales ... */ });
+    const datosAdicionales = {};
+    const todosLosCampos = [...camposObligatorios.value, ...camposOpcionales.value];
+    todosLosCampos.forEach(campo => {
+      if (!payloadFijo.hasOwnProperty(campo.nombre_campo_tecnico)) {
+        datosAdicionales[campo.nombre_campo_tecnico] = formState[campo.nombre_campo_tecnico];
       }
-      facturaFile.value = null; facturaPreview.value = null; tipoMontoIngresado.value = 'bruto';
-      const elFileInput = document.getElementById('factura_file'); 
-      if (elFileInput) elFileInput.value = null;
-    }
-    emit('gastoGuardado', dataResponse);
+    });
+    payloadFijo.datos_adicionales = datosAdicionales;
 
-  } catch (error) {
-    console.error('GastoForm handleSubmit: Error general al procesar el gasto:', error);
-    errorMessage.value = 'Error al procesar el gasto: ' + (error.details || error.message || 'Error desconocido.');
+    const { data, error } = isEditMode.value
+      ? await supabase.from('gastos').update(payloadFijo).eq('id', props.gastoId).select().single()
+      : await supabase.from('gastos').insert(payloadFijo).select().single();
+
+    if (error) throw error;
+
+    successMessage.value = `Gasto ${isEditMode.value ? 'actualizado' : 'registrado'} con éxito.`;
+    setTimeout(() => {
+      emit('gasto-guardado', data);
+    }, 1000);
+
+  } catch (e) {
+    console.error("Error al guardar el gasto:", e);
+    errorMessage.value = `Error al guardar: ${e.message}`;
   } finally {
     loading.value = false;
   }
-};
-
+}
 </script>
-
 <template>
-  <form @submit.prevent="handleSubmit" class="space-y-6 bg-white p-6 sm:p-8 rounded-xl shadow-2xl">
-    <div class="text-center mb-8">
-      <h3 class="text-2xl sm:text-3xl font-bold text-districorr-primary leading-tight">
-        {{ gastoId ? 'Editar Gasto Registrado' : 'Registrar Nuevo Gasto' }}
-      </h3>
-      <p v-if="!gastoId && form.formato_id && camposDinamicosConfig.length > 0 && !cargandoCamposDinamicos" class="text-sm text-gray-500 mt-1.5">
-        Utilizando campos específicos del formato.
-      </p>
-      <p v-else-if="!gastoId && form.formato_id && !cargandoCamposDinamicos && camposDinamicosConfig.length === 0" class="text-sm text-gray-500 mt-1.5">
-        Este formato no tiene campos adicionales.
-      </p>
-       <p v-else-if="!gastoId && !form.formato_id && !cargandoCamposDinamicos" class="text-sm text-orange-600 mt-1.5">
-        No se ha definido un formato. Se usarán campos generales.
+  <div v-if="loading" class="text-center py-12">
+    <svg class="animate-spin h-10 w-10 text-blue-600 mx-auto" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg>
+    <p class="mt-3 text-gray-600">Cargando formulario...</p>
+  </div>
+  <div v-else-if="errorMessage" class="bg-red-100 p-4 rounded-md text-red-700">{{ errorMessage }}</div>
+  
+  <form v-else @submit.prevent="handleSubmit" class="space-y-8 bg-white p-6 sm:p-8 rounded-xl shadow-lg border">
+    
+    <!-- ENCABEZADO DEL FORMULARIO -->
+    <div class="border-b border-gray-200 pb-5">
+      <h2 class="text-2xl font-bold leading-7 text-gray-900">
+        {{ isEditMode ? 'Editar Gasto' : 'Registrar Nuevo Gasto' }}
+      </h2>
+      <p class="mt-1 text-sm leading-6 text-gray-600">
+        Usando el formato: <span class="font-semibold text-indigo-600">{{ nombreFormato }}</span>
       </p>
     </div>
 
-    <!-- FILA 1: Fecha y Tipo de Gasto -->
-    <div class="grid grid-cols-1 md:grid-cols-2 gap-x-6 gap-y-5">
-      <div>
-        <label for="fecha_gasto" class="block text-sm font-medium text-districorr-text-medium mb-1.5">Fecha del Gasto <span class="text-red-500">*</span></label>
-        <input type="date" id="fecha_gasto" v-model="form.fecha_gasto" required
-               class="appearance-none block w-full px-3.5 py-2.5 border border-gray-300 rounded-lg shadow-sm focus:outline-none focus:ring-2 focus:ring-districorr-accent focus:border-districorr-accent sm:text-sm transition-colors duration-150 ease-in-out">
-      </div>
-      <div>
-        <label for="tipo_gasto_id" class="block text-sm font-medium text-districorr-text-medium mb-1.5">Tipo de Gasto <span class="text-red-500">*</span></label>
-        <select id="tipo_gasto_id" v-model.number="form.tipo_gasto_id" required
-                class="block w-full px-3.5 py-2.5 border border-gray-300 bg-white rounded-lg shadow-sm focus:outline-none focus:ring-2 focus:ring-districorr-accent focus:border-districorr-accent sm:text-sm transition-colors duration-150 ease-in-out">
-          <option :value="null" disabled>-- Seleccione un tipo --</option>
-          <option v-for="tipo in tiposDeGastoDisponibles" :key="tipo.id" :value="tipo.id">{{ tipo.nombre_tipo_gasto }}</option>
-        </select>
-      </div>
-    </div>
-
-    <!-- FILA 2: Montos e IVA -->
-    <fieldset class="border border-gray-300 p-4 rounded-lg shadow-sm">
-        <legend class="text-sm font-medium text-districorr-text-dark px-2">Información de Montos</legend>
-        <div class="grid grid-cols-1 md:grid-cols-3 gap-x-6 gap-y-5 items-end mt-2">
-            <div>
-                <label for="monto_total_input" class="block text-sm font-medium text-districorr-text-medium mb-1.5">Monto Ingresado <span class="text-red-500">*</span></label>
-                <input type="number" id="monto_total_input" v-model.number="form.monto_total" step="0.01" required
-                    class="appearance-none block w-full px-3.5 py-2.5 border border-gray-300 rounded-lg shadow-sm placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-districorr-accent focus:border-districorr-accent sm:text-sm transition-colors duration-150 ease-in-out"
-                    placeholder="0.00">
+    <!-- SECCIÓN DE MONTOS -->
+    <fieldset>
+      <legend class="form-legend">Información de Montos</legend>
+      <div class="grid grid-cols-1 sm:grid-cols-2 gap-6">
+        <div>
+          <label for="monto_total" class="form-label">Monto Total <span class="text-red-500">*</span></label>
+          <div class="relative mt-1">
+            <div class="pointer-events-none absolute inset-y-0 left-0 flex items-center pl-3">
+              <span class="text-gray-500 sm:text-sm">$</span>
             </div>
-            <div>
-                <label for="tipo_monto_ingresado" class="block text-sm font-medium text-districorr-text-medium mb-1.5">Tipo Monto Ingresado</label>
-                <select id="tipo_monto_ingresado" v-model="tipoMontoIngresado" class="block w-full px-3.5 py-2.5 border border-gray-300 bg-white rounded-lg shadow-sm focus:outline-none focus:ring-2 focus:ring-districorr-accent focus:border-districorr-accent sm:text-sm transition-colors duration-150 ease-in-out">
-                  <option value="bruto">Bruto (IVA Incluido)</option>
-                  <option value="neto">Neto (Sin IVA)</option>
-                  <option value="sin_factura">Sin Factura / No Gravado</option>
-                </select>
-            </div>
-            <div>
-                <label for="monto_iva_calculado" class="block text-sm font-medium text-districorr-text-medium mb-1.5">IVA ({{ tasaIVA * 100 }}%) Calculado</label>
-                <input type="number" id="monto_iva_calculado" 
-                       :value="tipoMontoIngresado === 'sin_factura' ? '0.00' : (form.monto_iva !== null ? form.monto_iva.toFixed(2) : '0.00')" 
-                       step="0.01" readonly
-                       :disabled="tipoMontoIngresado === 'sin_factura'"
-                       class="block w-full px-3.5 py-2.5 border border-gray-300 rounded-lg shadow-sm bg-gray-100 sm:text-sm cursor-not-allowed disabled:opacity-70"
-                       placeholder="0.00">
-            </div>
+            <input 
+              type="text" 
+              id="monto_total" 
+              v-model="formattedMontoTotal" 
+              @blur="formattedMontoTotal = formatCurrency(parseCurrency($event.target.value))"
+              required 
+              class="form-input pl-7"
+            >
+          </div>
         </div>
-         <div class="mt-5">
-            <label for="moneda" class="block text-sm font-medium text-districorr-text-medium mb-1.5">Moneda</label>
-            <input type="text" id="moneda" v-model="form.moneda" required
-                  class="block w-full max-w-xs px-3.5 py-2.5 border border-gray-300 rounded-lg shadow-sm placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-districorr-accent focus:border-districorr-accent sm:text-sm transition-colors duration-150 ease-in-out"
-                  placeholder="ARS">
-         </div>
+        <div>
+          <label for="tipo_monto_ingresado" class="form-label">Tipo de Monto</label>
+          <select id="tipo_monto_ingresado" v-model="tipoMontoIngresado" class="form-input mt-1">
+            <option value="bruto">Bruto (IVA Incluido)</option>
+            <option value="neto">Neto (Sin IVA)</option>
+            <option value="sin_factura">Sin Factura</option>
+          </select>
+        </div>
+        <div class="sm:col-span-2">
+          <label for="monto_iva" class="form-label">IVA (21%) Calculado</label>
+          <input type="text" id="monto_iva" :value="formatCurrency(formState.monto_iva)" disabled class="form-input mt-1 bg-gray-100 cursor-not-allowed">
+        </div>
+      </div>
     </fieldset>
 
-    <!-- FILA 3: Descripción General -->
-    <div>
-      <label for="descripcion_general" class="block text-sm font-medium text-districorr-text-medium mb-1.5">Descripción General <span class="text-gray-400 text-xs">(Opcional)</span></label>
-      <textarea id="descripcion_general" v-model="form.descripcion_general" rows="3"
-                class="block w-full px-3.5 py-2.5 border border-gray-300 rounded-lg shadow-sm placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-districorr-accent focus:border-districorr-accent sm:text-sm transition-colors duration-150 ease-in-out"
-                placeholder="Detalles generales del gasto..."></textarea>
-    </div>
-    
-    <!-- FILA: Cliente Referido (Ahora Obligatorio) -->
-    <div>
-      <label for="cliente_referido" class="block text-sm font-medium text-districorr-text-medium mb-1.5">
-        Cliente Referido <span class="text-red-500">*</span>
-      </label>
-      <input type="text" 
-             id="cliente_referido" 
-             v-model.trim="form.cliente_referido" 
-             required
-             list="clientes-sugeridos-list"
-             class="appearance-none block w-full px-3.5 py-2.5 border border-gray-300 rounded-lg shadow-sm placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-districorr-accent focus:border-districorr-accent sm:text-sm transition-colors duration-150 ease-in-out"
-             placeholder="Nombre del cliente o referencia (ej. SAI, Pérez Juan)">
-      <datalist id="clientes-sugeridos-list">
-        <option v-for="cliente in clientesSugeridos" :key="cliente" :value="cliente"></option>
-      </datalist>
-      <p class="mt-1 text-xs text-gray-500">Asocia este gasto a un cliente específico.</p>
-    </div>
-
-    <!-- FILA: N° Factura y Viaje Asociado -->
-    <div class="grid grid-cols-1 md:grid-cols-2 gap-x-6 gap-y-5">
-       <div :class="{'opacity-50 cursor-not-allowed': tipoMontoIngresado === 'sin_factura'}">
-         <label for="numero_factura" class="block text-sm font-medium text-districorr-text-medium mb-1.5">N° de Factura 
-           <span v-if="tipoMontoIngresado !== 'sin_factura'" class="text-gray-400 text-xs">(Opcional)</span>
-           <span v-else class="text-gray-400 text-xs">(No aplica)</span>
-         </label>
-         <input type="text" id="numero_factura" v-model="form.numero_factura"
-               :disabled="tipoMontoIngresado === 'sin_factura'"
-               class="appearance-none block w-full px-3.5 py-2.5 border border-gray-300 rounded-lg shadow-sm placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-districorr-accent focus:border-districorr-accent sm:text-sm transition-colors duration-150 ease-in-out disabled:bg-gray-100">
-       </div>
-       <div>
-         <label for="viaje_id" class="block text-sm font-medium text-districorr-text-medium mb-1.5">Asociar a Viaje / Período <span class="text-red-500">*</span></label>
-         <div v-if="viajes.length === 0 && !loading && !gastoId" class="my-1 p-2 bg-yellow-100 text-yellow-800 text-xs rounded-md border border-yellow-300">
-            No tienes Viajes/Períodos creados. Debes 
-            <a href="#" @click.prevent="emit('cancelar'); router.push({ name: 'ViajeNuevo' })" class="font-semibold underline hover:text-yellow-900">crear uno</a> primero.
-          </div>
-         <select id="viaje_id" v-model.number="form.viaje_id" required :disabled="viajes.length === 0 && !gastoId"
-                 class="block w-full px-3.5 py-2.5 border border-gray-300 bg-white rounded-lg shadow-sm focus:outline-none focus:ring-2 focus:ring-districorr-accent focus:border-districorr-accent sm:text-sm transition-colors duration-150 ease-in-out disabled:bg-gray-100 disabled:cursor-not-allowed">
-           <option :value="null" disabled>
-             {{ (viajes.length === 0 && !gastoId) ? '-- Crea un viaje/período primero --' : '-- Seleccione un Viaje/Período --' }}
-           </option>
-           <option v-for="viaje in viajes" :key="viaje.id" :value="viaje.id">{{ viaje.nombre_viaje }}</option>
-         </select>
-       </div>
-    </div>
-
-    <!-- FILA: Adelanto Aplicado al Gasto (Específico) -->
-    <div>
-      <label for="adelanto_especifico_aplicado" class="block text-sm font-medium text-districorr-text-medium mb-1.5">Adelanto Aplicado Directo al Gasto <span class="text-gray-400 text-xs">(Opcional)</span></label>
-      <input type="number" id="adelanto_especifico_aplicado" v-model.number="form.adelanto_especifico_aplicado" step="0.01"
-             class="appearance-none block w-full px-3.5 py-2.5 border border-gray-300 rounded-lg shadow-sm placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-districorr-accent focus:border-districorr-accent sm:text-sm transition-colors duration-150 ease-in-out"
-             placeholder="0.00">
-      <p class="mt-1 text-xs text-gray-500">Si parte de este gasto se cubrió con un adelanto específico para este mismo gasto (diferente al adelanto general del viaje/período).</p>
-    </div>
-
-    <!-- FILA: Adjuntar Comprobante -->
-    <div>
-      <label for="factura_file" class="block text-sm font-medium text-districorr-text-medium mb-1.5">Adjuntar Comprobante <span class="text-gray-400 text-xs">(Opcional)</span></label>
-      <input type="file" id="factura_file" @change="handleFacturaChange" accept="image/*,application/pdf,.heic,.heif"
-             class="block w-full text-sm text-gray-500 transition-colors duration-150 ease-in-out
-                    file:mr-4 file:py-2.5 file:px-5 file:rounded-lg file:border-0
-                    file:text-sm file:font-semibold file:cursor-pointer
-                    file:bg-districorr-accent file:text-white
-                    hover:file:bg-opacity-90 active:file:bg-opacity-75">
-      <div v-if="facturaPreview || (form.factura_url && !facturaFile)" class="mt-3 border border-gray-200 rounded-lg p-2 inline-block max-w-xs shadow-sm bg-gray-50">
-        <p class="text-xs text-gray-600 mb-1.5 font-medium">
-          {{ facturaFile ? 'Nueva previsualización:' : (form.factura_url ? 'Comprobante actual:' : '') }}
-        </p>
-        <img v-if="facturaPreview && facturaPreview.startsWith('data:image')" :src="facturaPreview" alt="Previsualización de factura" class="max-h-48 w-auto rounded object-contain mx-auto">
-        <a v-else-if="form.factura_url && !facturaFile && (form.factura_url.match(/\.(jpeg|jpg|gif|png|webp)$/i) || form.factura_url.startsWith('data:image'))" :href="form.factura_url" target="_blank" class="block text-center">
-            <img :src="form.factura_url" alt="Factura actual" class="max-h-48 w-auto rounded object-contain mx-auto">
-        </a>
-        <a v-else-if="(form.factura_url && !facturaFile && form.factura_url.match(/\.pdf$/i)) || (facturaFile && facturaFile.type === 'application/pdf')" 
-           :href="facturaFile && facturaFile.type === 'application/pdf' ? '#' : (form.factura_url || '#')" 
-           target="_blank" 
-           class="flex items-center justify-center text-districorr-accent hover:underline p-3 bg-white rounded-md border border-gray-300 shadow-sm hover:bg-gray-50">
-            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="w-6 h-6 mr-2 text-red-600"><path fill-rule="evenodd" d="M15.621 4.379a3 3 0 00-4.242 0l-7 7a3 3 0 004.241 4.243h.001l.497-.5a.75.75 0 011.064 1.057l-.498.501-.002.002a4.5 4.5 0 01-6.364-6.364l7-7a4.5 4.5 0 016.368 6.36l-3.455 3.553A2.625 2.625 0 119.53 9.514l3.453-3.552a.75.75 0 011.06 1.06l-3.453 3.552a1.125 1.125 0 001.591 1.59l3.455-3.553a3 3 0 000-4.242z" clip-rule="evenodd" /></svg>
-            {{ facturaFile ? facturaFile.name : 'Ver PDF actual' }}
-        </a>
-        <p v-else-if="facturaFile" class="text-sm p-3 bg-white rounded-md border border-gray-300 shadow-sm">📄 {{ facturaFile.name }}</p>
-      </div>
-    </div>
-
-    <!-- SECCIÓN DE CAMPOS DINÁMICOS -->
-    <div v-if="form.formato_id" class="pt-2">
-      <div v-if="cargandoCamposDinamicos && !gastoId" class="text-center my-6 py-8 border-t border-b border-gray-200">
-          <svg class="animate-spin h-8 w-8 text-districorr-primary mx-auto" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-              <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
-              <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-          </svg>
-          <p class="text-sm text-gray-500 mt-3">Cargando campos específicos del formato...</p>
-      </div>
-
-      <div v-if="!cargandoCamposDinamicos && camposDinamicosConfig.length > 0" class="space-y-5 border-t-2 border-districorr-accent/50 mt-8 pt-6">
-        <h4 class="text-xl font-semibold text-districorr-primary mb-1 tracking-tight">
-          Detalles Específicos del Formato
-        </h4>
-        <div v-for="campoConfig in camposDinamicosConfig" :key="campoConfig.id" class="campo-dinamico-item py-2 first:pt-0 last:pb-0">
-          <label :for="`campo_dinamico_${campoConfig.nombre_campo_tecnico}`" 
-                 class="block text-sm font-medium text-districorr-text-medium mb-1.5">
-            {{ campoConfig.etiqueta_visible }}
-            <span v-if="campoConfig.es_obligatorio" class="text-red-500 ml-0.5">*</span>
-          </label>
-
-          <input v-if="campoConfig.tipo_dato === 'texto_corto'"
-                 type="text" :id="`campo_dinamico_${campoConfig.nombre_campo_tecnico}`"
-                 v-model.trim="form.datos_adicionales[campoConfig.nombre_campo_tecnico]"
-                 :required="campoConfig.es_obligatorio"
-                 class="appearance-none block w-full px-3.5 py-2.5 border border-gray-300 rounded-lg shadow-sm focus:outline-none focus:ring-2 focus:ring-districorr-accent focus:border-districorr-accent sm:text-sm transition-colors duration-150 ease-in-out">
-
-          <textarea v-else-if="campoConfig.tipo_dato === 'texto_largo'"
-                    :id="`campo_dinamico_${campoConfig.nombre_campo_tecnico}`"
-                    v-model.trim="form.datos_adicionales[campoConfig.nombre_campo_tecnico]"
-                    :required="campoConfig.es_obligatorio" rows="3"
-                    class="block w-full px-3.5 py-2.5 border border-gray-300 rounded-lg shadow-sm placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-districorr-accent focus:border-districorr-accent sm:text-sm transition-colors duration-150 ease-in-out"></textarea>
-
-          <input v-else-if="campoConfig.tipo_dato === 'numero'"
-                 type="number" :id="`campo_dinamico_${campoConfig.nombre_campo_tecnico}`"
-                 v-model.number="form.datos_adicionales[campoConfig.nombre_campo_tecnico]"
-                 :required="campoConfig.es_obligatorio" step="any" 
-                 class="appearance-none block w-full px-3.5 py-2.5 border border-gray-300 rounded-lg shadow-sm focus:outline-none focus:ring-2 focus:ring-districorr-accent focus:border-districorr-accent sm:text-sm transition-colors duration-150 ease-in-out">
-
-          <input v-else-if="campoConfig.tipo_dato === 'fecha'"
-                 type="date" :id="`campo_dinamico_${campoConfig.nombre_campo_tecnico}`"
-                 v-model="form.datos_adicionales[campoConfig.nombre_campo_tecnico]"
-                 :required="campoConfig.es_obligatorio"
-                 class="appearance-none block w-full px-3.5 py-2.5 border border-gray-300 rounded-lg shadow-sm focus:outline-none focus:ring-2 focus:ring-districorr-accent focus:border-districorr-accent sm:text-sm transition-colors duration-150 ease-in-out">
-
-          <select v-else-if="campoConfig.tipo_dato === 'selector' && campoConfig.opciones_selector"
-                  :id="`campo_dinamico_${campoConfig.nombre_campo_tecnico}`"
-                  v-model="form.datos_adicionales[campoConfig.nombre_campo_tecnico]"
-                  :required="campoConfig.es_obligatorio"
-                  class="block w-full px-3.5 py-2.5 border border-gray-300 bg-white rounded-lg shadow-sm focus:outline-none focus:ring-2 focus:ring-districorr-accent focus:border-districorr-accent sm:text-sm transition-colors duration-150 ease-in-out">
-            <option :value="undefined" v-if="!form.datos_adicionales[campoConfig.nombre_campo_tecnico] && campoConfig.es_obligatorio">-- Seleccione --</option>
-            <option :value="null" v-if="!campoConfig.es_obligatorio && (!form.datos_adicionales[campoConfig.nombre_campo_tecnico] || form.datos_adicionales[campoConfig.nombre_campo_tecnico] === undefined)">-- (Opcional) --</option>
-            <option v-for="opcion in campoConfig.opciones_selector" :key="opcion.valor !== undefined ? opcion.valor : opcion.etiqueta" :value="opcion.valor">
-              {{ opcion.etiqueta }}
-            </option>
+    <!-- SECCIÓN DE DETALLES -->
+    <fieldset>
+      <legend class="form-legend">Detalles del Gasto</legend>
+      <div class="grid grid-cols-1 sm:grid-cols-2 gap-6">
+        <div>
+          <label for="fecha_gasto" class="form-label">Fecha del Gasto <span class="text-red-500">*</span></label>
+          <input type="date" id="fecha_gasto" v-model="formState.fecha_gasto" required class="form-input mt-1">
+        </div>
+        <div>
+          <label for="tipo_gasto_id" class="form-label">Tipo de Gasto <span class="text-red-500">*</span></label>
+          <select id="tipo_gasto_id" v-model.number="formState.tipo_gasto_id" required class="form-input mt-1">
+            <option disabled :value="null">-- Seleccione un tipo --</option>
+            <option v-for="tipo in opcionesSelect.tipos_gasto" :key="tipo.id" :value="tipo.id">{{ tipo.nombre_tipo_gasto }}</option>
           </select>
-
-          <div v-else-if="campoConfig.tipo_dato === 'booleano'" class="flex items-center mt-1 py-1.5">
-            <input type="checkbox"
-                   :id="`campo_dinamico_${campoConfig.nombre_campo_tecnico}`"
-                   v-model="form.datos_adicionales[campoConfig.nombre_campo_tecnico]"
-                   :true-value="true" :false-value="false"
-                   class="h-5 w-5 text-districorr-accent border-gray-300 rounded-md focus:ring-2 focus:ring-offset-1 focus:ring-districorr-accent cursor-pointer shadow-sm">
-            <label :for="`campo_dinamico_${campoConfig.nombre_campo_tecnico}`" class="ml-2.5 block text-sm text-gray-700 cursor-pointer select-none">
-              {{ campoConfig.etiqueta_visible }} <!-- Se puede quitar si la etiqueta de arriba es suficiente -->
-            </label>
-          </div>
-          
-          <p v-else class="text-xs text-red-600 mt-1 p-2 bg-red-50 rounded-md border border-red-200">
-            <span class="font-semibold">Advertencia:</span> Tipo de campo dinámico no implementado en el formulario ('{{ campoConfig.tipo_dato }}') para "{{ campoConfig.etiqueta_visible }}".
-          </p>
+        </div>
+        <div class="sm:col-span-2">
+          <label for="descripcion_general" class="form-label">Descripción General</label>
+          <input type="text" id="descripcion_general" v-model="formState.descripcion_general" @change="aplicarSugerencia" list="sugerencias-gastos" class="form-input mt-1" placeholder="Ej: Nafta YPF, Almuerzo en...">
+          <datalist id="sugerencias-gastos">
+            <option v-for="sugerencia in sugerenciasGastos" :key="sugerencia.descripcion_general" :value="sugerencia.descripcion_general"></option>
+          </datalist>
+        </div>
+        <div>
+          <label for="numero_factura" class="form-label">N° de Factura</label>
+          <input type="text" id="numero_factura" v-model="formState.numero_factura" class="form-input mt-1">
+        </div>
+        <div>
+          <label for="viaje_id" class="form-label">Asociar a Rendición <span class="text-red-500">*</span></label>
+          <select id="viaje_id" v-model.number="formState.viaje_id" required class="form-input mt-1">
+            <option disabled :value="null">-- Seleccione una rendición --</option>
+            <option v-for="viaje in opcionesSelect.viajes" :key="viaje.id" :value="viaje.id">{{ viaje.nombre_viaje }}</option>
+          </select>
         </div>
       </div>
-      <div v-else-if="!cargandoCamposDinamicos && form.formato_id && camposDinamicosConfig.length === 0 && !gastoId" class="my-4 p-3 bg-blue-50 border border-blue-200 rounded-lg text-sm text-blue-700 shadow-sm">
-          Este formato no tiene campos adicionales configurados.
+    </fieldset>
+
+    <!-- SECCIÓN DE CAMPOS OBLIGATORIOS -->
+    <fieldset v-if="camposObligatorios.length > 0">
+      <legend class="form-legend">Detalles Específicos del Formato</legend>
+      <div class="grid grid-cols-1 sm:grid-cols-2 gap-6">
+        <div v-for="campo in camposObligatorios" :key="campo.id">
+          <label :for="campo.nombre_campo_tecnico" class="form-label">
+            {{ campo.etiqueta_visible }} <span v-if="campo.es_obligatorio" class="text-red-500">*</span>
+          </label>
+          <input v-if="campo.tipo_input === 'texto'" type="text" :id="campo.nombre_campo_tecnico" v-model="formState[campo.nombre_campo_tecnico]" :required="campo.es_obligatorio" class="form-input mt-1">
+          <v-select v-else-if="campo.tipo_input === 'select_cliente'" :id="campo.nombre_campo_tecnico" v-model="formState.cliente_id" :options="opcionesSelect.clientes" placeholder="-- Buscar cliente --" class="mt-1" :class="{ 'v-select-required': campo.es_obligatorio && !formState.cliente_id }"></v-select>
+          <v-select v-else-if="campo.tipo_input === 'select_transporte'" :id="campo.nombre_campo_tecnico" v-model="formState.transporte_id" :options="opcionesSelect.transportes" placeholder="-- Buscar transporte --" class="mt-1" :class="{ 'v-select-required': campo.es_obligatorio && !formState.transporte_id }"></v-select>
+        </div>
       </div>
-    </div>
-    <!-- FIN SECCIÓN DE CAMPOS DINÁMICOS -->
+    </fieldset>
 
-    <!-- Mensajes y Botones -->
-    <div v-if="errorMessage" class="my-5 p-3.5 bg-red-100 border-l-4 border-red-600 text-red-700 rounded-r-md text-sm shadow-md">
-      <p class="font-semibold">Error al procesar el formulario:</p>
-      <p class="whitespace-pre-line mt-1">{{ errorMessage }}</p>
-    </div>
-    <div v-if="successMessage" class="my-5 p-3.5 bg-green-100 border-l-4 border-green-600 text-green-700 rounded-r-md text-sm shadow-md">
-      {{ successMessage }}
+    <!-- SECCIÓN DE CAMPOS OPCIONALES -->
+    <div class="border-t border-gray-200 pt-6">
+        <h3 class="text-base font-semibold leading-7 text-gray-900">¿Necesitas más detalles?</h3>
+        <p class="mt-1 text-sm leading-6 text-gray-600">Añade solo los campos que necesites para este gasto.</p>
+        <div class="mt-4 flex flex-wrap gap-3">
+            <template v-for="campo in camposOpcionales" :key="`btn-${campo.id}`">
+                <button v-if="!camposOpcionalesVisibles.has(campo.nombre_campo_tecnico)"
+                        type="button"
+                        @click="agregarCampoOpcional(campo)"
+                        class="btn-add-optional">
+                    + {{ campo.etiqueta_visible }}
+                </button>
+            </template>
+        </div>
+        <fieldset v-if="camposOpcionalesVisibles.size > 0" class="mt-6">
+            <div class="grid grid-cols-1 sm:grid-cols-2 gap-6">
+                <template v-for="campo in camposOpcionales" :key="campo.id">
+                    <div v-if="camposOpcionalesVisibles.has(campo.nombre_campo_tecnico)" class="relative group">
+                        <label :for="`opcional-${campo.nombre_campo_tecnico}`" class="form-label">{{ campo.etiqueta_visible }}</label>
+                        <input v-if="campo.tipo_input === 'texto'" type="text" :id="`opcional-${campo.nombre_campo_tecnico}`" v-model="formState[campo.nombre_campo_tecnico]" class="form-input mt-1">
+                        <v-select v-else-if="campo.tipo_input === 'select_cliente'" :id="`opcional-${campo.nombre_campo_tecnico}`" v-model="formState.cliente_id" :options="opcionesSelect.clientes" placeholder="-- Buscar cliente --" class="mt-1"></v-select>
+                        <v-select v-else-if="campo.tipo_input === 'select_transporte'" :id="`opcional-${campo.nombre_campo_tecnico}`" v-model="formState.transporte_id" :options="opcionesSelect.transportes" placeholder="-- Buscar transporte --" class="mt-1"></v-select>
+                        <button type="button" @click="quitarCampoOpcional(campo)" class="btn-remove-optional">
+                            <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z" clip-rule="evenodd" /></svg>
+                        </button>
+                    </div>
+                </template>
+            </div>
+        </fieldset>
     </div>
 
-    <div class="flex flex-col sm:flex-row justify-end items-center space-y-3 sm:space-y-0 sm:space-x-4 pt-5 border-t border-gray-200 mt-8">
-      <button type="button" @click="emit('cancelar')"
-              class="w-full sm:w-auto px-6 py-3 border border-gray-300 rounded-lg shadow-sm text-sm font-medium text-gray-700 bg-white hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-gray-400 transition-all duration-150 ease-in-out">
-        Cancelar
-      </button>
-      <button type="submit"
-              :disabled="loading || (cargandoCamposDinamicos && !gastoId)"
-              class="w-full sm:w-auto flex justify-center items-center px-6 py-3 border border-transparent rounded-lg shadow-sm text-sm font-medium text-white bg-districorr-primary hover:bg-opacity-85 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-districorr-accent disabled:opacity-60 disabled:cursor-not-allowed transition-all duration-150 ease-in-out">
-        <svg v-if="loading || (cargandoCamposDinamicos && !gastoId)" class="animate-spin -ml-1 mr-2.5 h-5 w-5 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-          <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
-          <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-        </svg>
-        <span v-if="loading">Procesando...</span>
-        <span v-else-if="cargandoCamposDinamicos && !gastoId">Cargando Formato...</span>
-        <span v-else>{{ gastoId ? 'Actualizar Gasto' : 'Guardar Gasto' }}</span>
+    <!-- BOTONES DE ACCIÓN -->
+    <div class="pt-8 flex items-center justify-end gap-x-6 border-t border-gray-200">
+      <button type="button" @click="emit('cancelar')" class="btn-secondary">Cancelar</button>
+      <button type="submit" :disabled="loading" class="btn-primary">
+        <span v-if="loading">Guardando...</span>
+        <span v-else>{{ isEditMode ? 'Actualizar Gasto' : 'Guardar Gasto' }}</span>
       </button>
     </div>
   </form>
 </template>
+<style>
+/* Estilos para vue-select (se mantienen) */
+:root {
+  --vs-colors--lightest: rgba(60, 60, 60, 0.26);
+  --vs-colors--light: rgba(60, 60, 60, 0.5);
+  --vs-colors--dark: #333;
+  --vs-colors--darkest: rgba(0, 0, 0, 0.15);
+  --vs-search-input-color: inherit;
+  --vs-font-size: 0.875rem;
+  --vs-line-height: 1.4;
+  --vs-border-color: #d1d5db;
+  --vs-border-width: 1px;
+  --vs-border-radius: 0.375rem;
+  --vs-actions-padding: 4px 6px 0 3px;
+  --vs-dropdown-bg: #fff;
+  --vs-dropdown-color: inherit;
+  --vs-dropdown-z-index: 1000;
+  --vs-dropdown-min-width: 160px;
+  --vs-dropdown-max-height: 350px;
+  --vs-dropdown-box-shadow: 0px 3px 6px 0px var(--vs-colors--darkest);
+  --vs-dropdown-option-bg: #4f46e5; /* Color indigo para el hover */
+  --vs-dropdown-option-color: #fff;
+  --vs-dropdown-option-padding: 6px 12px;
+}
+.v-select-required .vs__dropdown-toggle {
+  border-color: #ef4444;
+}
 
-<style scoped>
-/* Si necesitas anular algún estilo de Tailwind o añadir algo muy específico */
-input[type="date"]::-webkit-calendar-picker-indicator {
-    cursor: pointer;
-    opacity: 0.6;
+/* --- NUEVOS ESTILOS PARA EL FORMULARIO --- */
+.form-legend {
+  @apply text-base font-semibold leading-7 text-gray-900 mb-4;
 }
-input[type="date"]::-webkit-calendar-picker-indicator:hover {
-    opacity: 1;
+.form-label {
+  @apply block text-sm font-medium leading-6 text-gray-900;
 }
-.campo-dinamico-item + .campo-dinamico-item {
-    /* border-top: 1px dashed #e5e7eb; Opcional: separador entre campos dinámicos */
-    /* padding-top: 1rem; Opcional: más espacio */
+.form-input {
+  @apply block w-full rounded-md border-0 py-1.5 text-gray-900 shadow-sm ring-1 ring-inset ring-gray-300 placeholder:text-gray-400 focus:ring-2 focus:ring-inset focus:ring-indigo-600 sm:text-sm sm:leading-6;
+}
+.btn-primary {
+  @apply rounded-md bg-indigo-600 px-4 py-2 text-sm font-semibold text-white shadow-sm hover:bg-indigo-500 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-600 disabled:opacity-50;
+}
+.btn-secondary {
+  @apply text-sm font-semibold leading-6 text-gray-900 px-4 py-2 rounded-md hover:bg-gray-100;
+}
+.btn-add-optional {
+  @apply rounded-full bg-white px-3 py-1.5 text-sm font-semibold text-gray-900 shadow-sm ring-1 ring-inset ring-gray-300 hover:bg-gray-50;
+}
+.btn-remove-optional {
+  @apply absolute -top-2 -right-2 h-6 w-6 bg-white rounded-full text-gray-400 hover:text-red-500 hover:bg-red-100 flex items-center justify-center border transition-opacity opacity-0 group-hover:opacity-100;
 }
 </style>
-
