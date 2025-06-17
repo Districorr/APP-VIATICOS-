@@ -3,9 +3,7 @@ import jsPDF from 'jspdf';
 import 'jspdf-autotable';
 import * as XLSX from 'xlsx';
 import { formatDate, formatCurrency } from '../utils/formatters.js';
-
-// Asume que tienes un logo en la carpeta public. Si no, puedes comentar la sección de la marca de agua.
-// const logoBase64 = '...'; // El logo cargado dinámicamente es mejor.
+import logoImg from '/districorr-logo-circular (2).png';
 
 export function useReportGenerator() {
 
@@ -24,19 +22,26 @@ export function useReportGenerator() {
   const formatearDescripcionCompleta = (gasto) => {
     let descripcionFinal = gasto.descripcion_general || '-';
 
-    // Mapeo de nombres técnicos a etiquetas legibles para el PDF
-    const etiquetas = {
-      cliente_referido: 'Cliente',
-      transporte_referido: 'Transporte',
-      paciente_referido: 'Paciente',
-      // Añade aquí más mapeos si creas nuevos campos opcionales
-    };
+    // 1. Añadir cliente si existe (desde la relación)
+    if (gasto.clientes && gasto.clientes.nombre_cliente) {
+      descripcionFinal += `\n(Cliente: ${gasto.clientes.nombre_cliente})`;
+    }
 
+    // 2. Añadir transporte si existe (desde la relación)
+    if (gasto.transportes && gasto.transportes.nombre) {
+      descripcionFinal += `\n(Transporte: ${gasto.transportes.nombre})`;
+    }
+
+    // 3. Añadir otros campos desde datos_adicionales (JSONB)
     if (gasto.datos_adicionales && typeof gasto.datos_adicionales === 'object') {
+      const etiquetas = {
+        paciente_referido: 'Paciente', // Mapeo para un nombre más amigable
+        // Añade aquí más mapeos si creas nuevos campos opcionales en el JSON
+      };
+
       for (const key in gasto.datos_adicionales) {
         const valor = gasto.datos_adicionales[key];
-        if (valor) { // Solo añadir si el campo tiene un valor
-          // Usa la etiqueta del mapeo, o formatea el nombre del campo si no existe
+        if (valor) {
           const etiqueta = etiquetas[key] || key.replace(/_/g, ' ').replace(/(^\w{1})|(\s+\w{1})/g, letra => letra.toUpperCase());
           descripcionFinal += `\n(${etiqueta}: ${valor})`;
         }
@@ -423,135 +428,118 @@ export function useReportGenerator() {
     
     const doc = new jsPDF();
     const pageWidth = doc.internal.pageSize.getWidth();
-    const pageHeight = doc.internal.pageSize.getHeight();
     const margin = 15;
-    let currentY = 15;
+    let currentY = 0;
 
-    try {
-      const response = await fetch('/districorr-logo-circular.png');
-      const blob = await response.blob();
-      const reader = new FileReader();
-      reader.readAsDataURL(blob);
-      await new Promise(resolve => reader.onload = resolve);
-      const logoImgData = reader.result;
-      
-      const imgProps = doc.getImageProperties(logoImgData);
-      const imgWidth = 120;
-      const imgHeight = (imgProps.height * imgWidth) / imgProps.width;
-      const x = (pageWidth - imgWidth) / 2;
-      const y = (pageHeight - imgHeight) / 2;
-      doc.saveGraphicsState();
-      doc.setGState(new doc.GState({opacity: 0.08}));
-      doc.addImage(logoImgData, 'PNG', x, y, imgWidth, imgHeight);
-      doc.restoreGraphicsState();
-    } catch (e) {
-      console.error("No se pudo cargar el logo para la marca de agua:", e);
-    }
-
-    doc.setFontSize(20).setFont(undefined, 'bold').setTextColor(0, 74, 153);
-    doc.text("InfoGastos Districorr", pageWidth / 2, currentY, { align: 'center' });
-    currentY += 8;
-    doc.setFontSize(12).setFont(undefined, 'normal').setTextColor(40, 40, 40);
-    doc.text("Reporte de Rendición de Gastos", pageWidth / 2, currentY, { align: 'center' });
-    currentY += 10;
-    doc.setLineWidth(0.2).line(margin, currentY, pageWidth - margin, currentY);
-    currentY += 10;
-    doc.setTextColor(0, 0, 0);
-
-    const col1X = margin;
-    const col2X = pageWidth / 2 + 10;
-    const labelOffset = 35;
-    doc.setFontSize(9);
-    const infoFields = [
-      { label1: "Responsable:", value1: userInfo.nombre_completo || 'N/A', label2: "Fecha Emisión:", value2: formatDate(new Date()) },
-      { label1: "Referencia:", value1: viajeInfo.nombre_viaje || 'N/A', label2: "ID:", value2: `#${viajeInfo.codigo_rendicion || viajeInfo.id}` },
-      { label1: "Período:", value1: `${formatDate(viajeInfo.fecha_inicio)} al ${formatDate(viajeInfo.fecha_fin || new Date())}` },
-      { label1: "Adelanto del Viaje:", value1: formatCurrency(viajeInfo.monto_adelanto), color1: [0, 100, 0] },
-      { label1: "Adelantos Extras:", value1: formatCurrency(totales.adelantosExtras), color1: [0, 100, 0] },
-      { label1: "Estado:", value1: viajeInfo.cerrado_en ? 'CERRADO' : 'EN CURSO', color1: viajeInfo.cerrado_en ? [200, 0, 0] : [0, 100, 0] }
-    ];
-    infoFields.forEach(field => {
-      doc.setFont(undefined, 'bold'); doc.text(field.label1, col1X, currentY);
-      doc.setFont(undefined, 'normal');
-      if (field.color1) doc.setTextColor(field.color1[0], field.color1[1], field.color1[2]);
-      doc.text(String(field.value1), col1X + labelOffset, currentY);
-      doc.setTextColor(0,0,0);
-      if (field.label2) {
-        doc.setFont(undefined, 'bold'); doc.text(field.label2, col2X, currentY);
-        doc.setFont(undefined, 'normal'); doc.text(String(field.value2), col2X + labelOffset, currentY);
+    // --- Encabezado Profesional ---
+    currentY = 20;
+    if (logoImg) {
+      try {
+        doc.addImage(logoImg, 'PNG', margin, 12, 25, 25);
+      } catch (e) {
+        console.error("Error al añadir la imagen del logo al PDF:", e);
       }
-      currentY += 6;
-    });
+    }
+    doc.setFontSize(20).setFont(undefined, 'bold');
+    doc.text("Informe de Rendición de Gastos", pageWidth - margin, currentY, { align: 'right' });
     currentY += 8;
+    doc.setFontSize(11).setFont(undefined, 'normal').setTextColor(100, 100, 100);
+    doc.text("Sistema InfoGastos – Districorr", pageWidth - margin, currentY, { align: 'right' });
+    currentY += 10;
+    doc.setLineWidth(0.5).line(margin, currentY, pageWidth - margin, currentY);
+    currentY += 5;
 
+    // --- Sección de Información Clave en Tabla ---
+    const infoBody = [
+      [{content: 'Responsable:', styles: {fontStyle: 'bold'}}, userInfo.nombre_completo || 'N/A', {content: 'Fecha Emisión:', styles: {fontStyle: 'bold'}}, formatDate(new Date())],
+      [{content: 'Referencia:', styles: {fontStyle: 'bold'}}, viajeInfo.nombre_viaje || 'N/A', {content: 'ID:', styles: {fontStyle: 'bold'}}, `#${viajeInfo.codigo_rendicion || viajeInfo.id}`],
+      [{content: 'Período:', styles: {fontStyle: 'bold'}}, `${formatDate(viajeInfo.fecha_inicio)} al ${formatDate(viajeInfo.fecha_fin || new Date())}`, {content: 'Estado:', styles: {fontStyle: 'bold'}}, {content: viajeInfo.cerrado_en ? 'CERRADO' : 'EN CURSO', styles: {textColor: viajeInfo.cerrado_en ? [200, 0, 0] : [0, 100, 0], fontStyle: 'bold'}}],
+    ];
+    doc.autoTable({
+      body: infoBody, startY: currentY, theme: 'plain',
+      styles: { fontSize: 9, cellPadding: 1 },
+      columnStyles: { 0: {cellWidth: 25}, 2: {cellWidth: 30} }
+    });
+    currentY = doc.lastAutoTable.finalY + 10;
+
+    // --- Tabla de Gastos ---
     const head = [['Fecha', 'Tipo', 'Descripción Detallada', 'N° Fact.', 'IVA', 'Monto Total']];
     const body = gastos.map(g => {
       const v = getValoresMonetariosGasto(g);
       const descripcionCompleta = formatearDescripcionCompleta(g);
-      return [
-        formatDate(g.fecha_gasto),
-        g.tipos_gasto_config?.nombre_tipo_gasto || 'N/A',
-        descripcionCompleta,
-        g.numero_factura || '-',
-        formatCurrency(v.iva),
-        formatCurrency(v.total)
-      ];
+      return [formatDate(g.fecha_gasto), g.tipos_gasto_config?.nombre_tipo_gasto || 'N/A', descripcionCompleta, g.numero_factura || '-', formatCurrency(v.iva), formatCurrency(v.total)];
     });
-    doc.autoTable({
-      head, body,
-      startY: currentY,
-      theme: 'striped',
-      headStyles: { fillColor: [0, 74, 153], textColor: 255, fontStyle: 'bold', fontSize: 9 },
-      styles: { fontSize: 8, cellPadding: 2, textColor: [0, 0, 0], cellWidth: 'wrap' },
-      columnStyles: { 2: { cellWidth: 65 }, 3: { halign: 'center' }, 4: { halign: 'right' }, 5: { halign: 'right' } }
-    });
-    currentY = doc.lastAutoTable.finalY + 10;
 
+    const pageContent = (data) => {
+      doc.setLineWidth(0.2).line(margin, doc.internal.pageSize.getHeight() - 15, pageWidth - margin, doc.internal.pageSize.getHeight() - 15);
+      doc.setFontSize(8);
+      const footerText = `CUIT: 30-71598290-7 | 9 DE JULIO 1251 | Reporte generado automáticamente desde InfoGastos`;
+      doc.text(footerText, margin, doc.internal.pageSize.getHeight() - 8);
+      doc.text(`Página ${data.pageNumber} de ${doc.internal.getNumberOfPages()}`, pageWidth - margin, doc.internal.pageSize.getHeight() - 8, { align: 'right' });
+    };
+
+    doc.autoTable({
+      head, body, startY: currentY, theme: 'striped',
+      headStyles: { fillColor: [13, 47, 91], textColor: 255, fontStyle: 'bold', fontSize: 9 },
+      styles: { fontSize: 8, cellPadding: 2, textColor: [40, 40, 40], cellWidth: 'wrap' },
+      columnStyles: { 
+        2: { cellWidth: 65, fontSize: 8.5 },
+        3: { halign: 'center' }, 
+        4: { halign: 'right', fontSize: 7, textColor: [100, 100, 100] },
+        5: { halign: 'right', fontStyle: 'bold' } 
+      },
+      didDrawPage: pageContent
+    });
+    currentY = doc.lastAutoTable.finalY + 15;
+
+    // --- Resumen y Totales Finales ---
     const resumenPorTipo = gastos.reduce((acc, g) => { const tipo = g.tipos_gasto_config?.nombre_tipo_gasto || 'Sin Tipo'; acc[tipo] = (acc[tipo] || 0) + (g.monto_total || 0); return acc; }, {});
+    const resumenHead = [['Tipo', 'Monto']];
     const resumenBody = Object.entries(resumenPorTipo).map(([tipo, monto]) => [tipo, formatCurrency(monto)]);
     
-    let resumenTableY = currentY;
-    let totalsY = currentY;
-    const totalsX = pageWidth / 2 + 20;
+    if (currentY > doc.internal.pageSize.getHeight() - 80) { doc.addPage(); currentY = margin; }
 
+    // Columna Izquierda: Resumen por tipo
     doc.autoTable({
-      head: [['Resumen por Tipo de Gasto (Bruto)']],
-      body: resumenBody,
-      startY: resumenTableY,
-      theme: 'plain',
-      tableWidth: pageWidth / 2 - margin,
-      headStyles: { fontStyle: 'bold', fontSize: 9, textColor: [0,0,0] },
-      styles: { fontSize: 8, cellPadding: 1.5, textColor: [0,0,0] },
+      head: resumenHead, body: resumenBody, startY: currentY, theme: 'grid',
+      tableWidth: pageWidth * 0.4,
+      margin: { left: margin },
+      headStyles: { fontStyle: 'bold', fontSize: 9, fillColor: [230, 230, 230], textColor: [40,40,40] },
+      styles: { fontSize: 8, cellPadding: 2 },
       columnStyles: { 1: { halign: 'right' } }
     });
 
-    doc.setFontSize(9);
-    doc.setFont(undefined, 'bold'); doc.text("Total Adelantos Disponibles:", totalsX, totalsY, { align: 'right' });
-    doc.setTextColor(0, 100, 0); doc.text(formatCurrency(totales.adelantosDisponibles), pageWidth - margin, totalsY, { align: 'right' });
-    doc.setTextColor(0, 0, 0); totalsY += 12;
-    doc.setFont(undefined, 'normal'); doc.text("Total Gastos (Bruto):", totalsX, totalsY, { align: 'right' });
-    doc.text(formatCurrency(totales.gastosBruto), pageWidth - margin, totalsY, { align: 'right' });
-    totalsY += 8;
-    doc.setLineWidth(0.2).line(totalsX, totalsY, pageWidth - margin, totalsY);
-    totalsY += 8;
-    doc.setFontSize(11).setFont(undefined, 'bold').setTextColor(200, 0, 0);
-    const saldoText = totales.saldoFinal >= 0 ? 'SALDO A FAVOR:' : 'A REPONER:';
-    doc.text(saldoText, totalsX, totalsY, { align: 'right' });
-    doc.text(formatCurrency(Math.abs(totales.saldoFinal)), pageWidth - margin, totalsY, { align: 'right' });
-    doc.setTextColor(0, 0, 0);
-    
-    const firmaY = doc.internal.pageSize.getHeight() - 40;
-    doc.setLineWidth(0.2);
-    doc.setFontSize(8);
-    doc.line(margin, firmaY, margin + 60, firmaY); doc.text("Firma Responsable", margin, firmaY + 5);
-    doc.line(pageWidth - margin - 60, firmaY, pageWidth - margin, firmaY); doc.text("Firma Gerencia", pageWidth - margin - 60, firmaY + 5);
-    
-    const footerY = doc.internal.pageSize.getHeight() - 10;
-    doc.line(margin, footerY - 5, pageWidth - margin, footerY - 5);
-    doc.setFontSize(7);
-    doc.text("CUIT: 30-71598290-7 | 9 DE JULIO 1251 | Districorr InfoGastos - Uso Interno", pageWidth / 2, footerY, { align: 'center' });
-    doc.text(`Página 1 de 1`, pageWidth - margin, footerY, { align: 'right' });
+    // Resumen Financiero Destacado
+    const resumenFinancieroBody = [
+      [{ content: 'Total Adelantos Disponibles:', styles: { fontStyle: 'bold', textColor: [0, 0, 0] } }, { content: formatCurrency(totales.adelantosDisponibles), styles: { textColor: [0, 0, 0] } }],
+      [{ content: 'Total Gastos (Bruto):', styles: { fontStyle: 'bold', textColor: [0, 0, 0] } }, { content: formatCurrency(totales.gastosBruto), styles: { textColor: [0, 0, 0] } }],
+      [{ content: totales.saldoFinal >= 0 ? 'SALDO A FAVOR' : 'A REPONER', styles: { fontStyle: 'bold' } }, { content: formatCurrency(Math.abs(totales.saldoFinal)), styles: { fontStyle: 'bold', textColor: [200, 0, 0] } }]
+    ];
+    doc.autoTable({
+      body: resumenFinancieroBody,
+      startY: currentY,
+      theme: 'grid',
+      margin: { left: pageWidth * 0.4 + margin + 5 },
+      styles: { fontSize: 9, cellPadding: 3 },
+      columnStyles: { 1: { halign: 'right' } }
+    });
 
+    // Bloque de Firmas
+    const firmaY = doc.internal.pageSize.getHeight() - 40;
+    doc.setLineWidth(0.3);
+    doc.setFontSize(9);
+    doc.line(margin, firmaY, margin + 70, firmaY);
+    doc.text(userInfo.nombre_completo || 'Nombre de Usuario', margin, firmaY + 5);
+    doc.setFontSize(8).setTextColor(100, 100, 100);
+    doc.text("Responsable", margin, firmaY + 10);
+
+    doc.setLineWidth(0.3);
+    doc.setFontSize(9).setTextColor(0, 0, 0);
+    doc.line(pageWidth - margin - 70, firmaY, pageWidth - margin, firmaY);
+    doc.text("Gerencia", pageWidth - margin - 70, firmaY + 5);
+    doc.setFontSize(8).setTextColor(100, 100, 100);
+    doc.text("Firma Gerencia", pageWidth - margin - 70, firmaY + 10);
+    
     doc.save(`Rendicion_${viajeInfo.codigo_rendicion || viajeInfo.id}.pdf`);
   };
 

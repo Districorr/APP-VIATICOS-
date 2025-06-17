@@ -4,13 +4,12 @@ import { supabase } from '../../supabaseClient.js';
 import { useRouter, useRoute, RouterLink } from 'vue-router';
 import { formatDate, formatCurrency } from '../../utils/formatters.js';
 import { useReportGenerator } from '../../composables/useReportGenerator.js';
+import DetallesJson from '../../components/DetallesJson.vue';
 
 const router = useRouter();
 const route = useRoute();
 
-// --- Instanciar ReportGenerator y desestructurar funciones necesarias ---
 const {
-  // Ya no necesitamos generateAdminLibroIVAExcel ni generateAdminLibroIVAPDF
   calculateAdminGastosPorTipo,
   generateAdminResumenTiposGastoExcel,
   generateAdminResumenTiposGastoPDF,
@@ -19,7 +18,6 @@ const {
   generateResumenGerencialTiposGastoExcel,
 } = useReportGenerator();
 
-// --- Refs existentes ---
 const todosLosGastos = ref([]);
 const loading = ref(true);
 const errorMessage = ref('');
@@ -40,7 +38,6 @@ const adminFiltroViajeId = ref(route.query.viajeId || '');
 const adminFiltroUsuarioId = ref(''); 
 const adminFiltroEstadoViaje = ref(''); 
 
-// --- Nombres de Columnas de la VISTA SQL 'admin_gastos_completos' ---
 const colGastoId = 'gasto_id';
 const colGastoCreatedAt = 'gasto_created_at';
 const colGastoUserId = 'gasto_user_id';
@@ -52,8 +49,6 @@ const colDescripcionGasto = 'gasto_descripcion';
 const colNFacturaGasto = 'gasto_n_factura';
 const colFacturaUrlGasto = 'gasto_factura_url';
 const colAdelantoEspecificoGasto = 'adelanto_especifico_aplicado';
-const colClienteReferidoGasto = 'gasto_cliente_referido';
-const colMontoIVAGasto = 'gasto_monto_iva';
 const colDatosAdicionalesGasto = 'gasto_datos_adicionales';
 const colViajeIdDelGasto = 'viaje_id';
 const colResponsableGastoNombre = 'responsable_gasto_nombre';
@@ -64,8 +59,6 @@ const colViajeNombre = 'nombre_viaje';
 const colViajeCodigoRendicion = 'viaje_codigo_rendicion';
 const colViajeCerradoEn = 'viaje_cerrado_en';
 
-
-// --- Título de la Vista ---
 const tituloVista = computed(() => {
   if (adminFiltroViajeId.value && viajeFiltradoInfo.value) {
     let titulo = `Gastos del Viaje: "${viajeFiltradoInfo.value.nombre_viaje || 'Desconocido'}"`;
@@ -83,9 +76,7 @@ const tituloVista = computed(() => {
   return 'Panel de Admin - Listado Global de Gastos';
 });
 
-// --- Funciones de Carga ---
 async function fetchAdminDropdownData() {
-  console.log("AdminGastosListView: fetchAdminDropdownData INICIO");
   try {
     const [tiposRes, viajesRes, usuariosRes] = await Promise.all([
       supabase.from('tipos_gasto_config').select('id, nombre_tipo_gasto').eq('activo', true).order('nombre_tipo_gasto'),
@@ -115,9 +106,7 @@ async function fetchAdminDropdownData() {
         display_name: `${u.nombre_completo || 'Usuario sin nombre'} (${u.email || 'Sin email'})`
     })).sort((a,b) => (a.nombre_completo || a.email || '').localeCompare(b.nombre_completo || b.email || ''));
 
-    console.log("AdminGastosListView: fetchAdminDropdownData FIN");
   } catch (error) {
-    console.error('AdminGastosListView: Error en fetchAdminDropdownData:', error.message);
     errorMessage.value = (errorMessage.value ? errorMessage.value + '\n' : '') + "Error cargando opciones de filtro.";
   }
 }
@@ -125,7 +114,6 @@ async function fetchAdminDropdownData() {
 async function fetchAdminGastos() {
   const viajeIdDesdeRuta = route.query.viajeId;
   const viajeIdActivoParaFiltrar = viajeIdDesdeRuta || adminFiltroViajeId.value;
-  console.log("AdminGastosListView: fetchAdminGastos INICIO.");
   loading.value = true; errorMessage.value = '';
   try {
     let query = supabase.from('admin_gastos_completos').select('*'); 
@@ -141,11 +129,11 @@ async function fetchAdminGastos() {
       query = query.eq(colViajeIdDelGasto, viajeIdActivoParaFiltrar);
       if (!viajeFiltradoInfo.value || String(viajeFiltradoInfo.value.id) !== String(viajeIdActivoParaFiltrar)) {
         const { data: vData, error: vError } = await supabase.from('admin_viajes_con_responsable')
-            .select('id, nombre_viaje, codigo_rendicion, monto_adelanto, cerrado_en, responsable_nombre') // No se pide 'moneda'
+            .select('id, nombre_viaje, codigo_rendicion, monto_adelanto, cerrado_en, responsable_nombre')
             .eq('id', viajeIdActivoParaFiltrar).single();
         if (vError && vError.code !== 'PGRST116') { console.warn("Error cargando info del viaje filtrado:", vError.message); }
         viajeFiltradoInfo.value = vData 
-            ? { ...vData, moneda: vData.moneda || 'ARS' } // Asignar ARS si moneda no viene
+            ? { ...vData, moneda: 'ARS' }
             : {id: viajeIdActivoParaFiltrar, nombre_viaje: `Viaje ID ${viajeIdActivoParaFiltrar}`, codigo_rendicion: 'N/A', monto_adelanto:0, cerrado_en: null, moneda: 'ARS'};
       }
     } else { viajeFiltradoInfo.value = null; }
@@ -166,17 +154,13 @@ async function fetchAdminGastos() {
     const { data, error } = await query;
     if (error) throw error;
     todosLosGastos.value = data || [];
-    console.log("AdminGastosListView: Gastos de admin cargados:", todosLosGastos.value.length);
   } catch (error) {
-    console.error('AdminGastosListView: Error general en fetchAdminGastos:', error.message, error);
     errorMessage.value = `No se pudieron cargar los gastos: ${error.message || 'Error desconocido.'}`;
     todosLosGastos.value = []; 
   } finally { loading.value = false; }
 }
 
-// --- Hooks y Watchers ---
 onMounted(() => {
-  console.log("AdminGastosListView: Componente MONTADO.");
   fetchAdminDropdownData();
 });
 watch(() => route.query.viajeId, (newViajeIdQuery) => {
@@ -184,7 +168,6 @@ watch(() => route.query.viajeId, (newViajeIdQuery) => {
     fetchAdminGastos(); 
 }, { immediate: true }); 
 
-// --- Acciones de Filtro ---
 const adminAplicarFiltrosManualmente = () => {
   const viajeIdEnRuta = route.query.viajeId || '';
   const viajeIdEnSelect = adminFiltroViajeId.value || '';
@@ -201,42 +184,32 @@ const adminLimpiarFiltros = () => {
   else { fetchAdminGastos(); }
 };
 
-// --- Otras Acciones ---
 const adminVerDetalleGasto = (gasto) => {
-  console.log("Admin: Ver detalle del gasto:", gasto);
   alert(`Admin: Detalle Gasto ID: ${gasto[colGastoId]}\nResp: ${gasto[colResponsableGastoNombre] || 'N/A'}\nViaje: ${gasto[colViajeNombre] || 'N/A'} (#${gasto[colViajeCodigoRendicion] || 'S/C'})\nMonto: ${formatCurrency(gasto[colMontoTotalGasto], gasto[colMonedaGasto])}`);
 };
 
-// --- MANEJADORES PARA EL MENÚ DE REPORTES (Actualizados) ---
-// Ya no se incluyen manejadores para Libro de IVA.
-
 const handleExportAdminResumenDetalladoTipoExcel = () => {
   if (!todosLosGastos.value || todosLosGastos.value.length === 0) { alert('No hay gastos para exportar.'); return; }
-  if (typeof calculateAdminGastosPorTipo !== 'function') { console.error("calculateAdminGastosPorTipo no es una función."); alert("Error al generar reporte."); return; }
   const gastosAgrupados = calculateAdminGastosPorTipo(todosLosGastos.value);
   generateAdminResumenTiposGastoExcel(gastosAgrupados, 'Admin_Gastos_ResumenDetalladoTipo');
 };
 const handleExportAdminResumenDetalladoTipoPDF = () => {
   if (!todosLosGastos.value || todosLosGastos.value.length === 0) { alert('No hay gastos para exportar.'); return; }
-  if (typeof calculateAdminGastosPorTipo !== 'function') { console.error("calculateAdminGastosPorTipo no es una función."); alert("Error al generar reporte."); return; }
   const gastosAgrupados = calculateAdminGastosPorTipo(todosLosGastos.value);
   generateAdminResumenTiposGastoPDF(gastosAgrupados, 'Admin_Gastos_ResumenDetalladoTipo');
 };
 
 const handleExportAdminResumenGerencialTipoExcel = () => {
   if (!todosLosGastos.value || todosLosGastos.value.length === 0) { alert('No hay gastos para exportar.'); return; }
-  if (typeof calculateResumenGerencialPorTipo !== 'function') { console.error("calculateResumenGerencialPorTipo no es una función."); alert("Error al generar reporte."); return; }
   const dataResumen = calculateResumenGerencialPorTipo(todosLosGastos.value, 'ARS');
   generateResumenGerencialTiposGastoExcel(dataResumen, 'Admin_Gastos_ResumenGerencialTipo');
 };
 const handleExportAdminResumenGerencialTipoPDF = () => {
   if (!todosLosGastos.value || todosLosGastos.value.length === 0) { alert('No hay gastos para exportar.'); return; }
-  if (typeof calculateResumenGerencialPorTipo !== 'function') { console.error("calculateResumenGerencialPorTipo no es una función."); alert("Error al generar reporte."); return; }
   const dataResumen = calculateResumenGerencialPorTipo(todosLosGastos.value, 'ARS');
   generateResumenGerencialTiposGastoPDF(dataResumen, 'Admin_Gastos_ResumenGerencialTipo');
 };
 
-// --- Propiedad computada para Resumen de Saldos ---
 const resumenSaldoViaje = computed(() => {
     if (!viajeFiltradoInfo.value || !adminFiltroViajeId.value) return null;
     const adelantoInicial = parseFloat(viajeFiltradoInfo.value.monto_adelanto) || 0;
@@ -244,7 +217,7 @@ const resumenSaldoViaje = computed(() => {
     const totalAdelantos = adelantoInicial + adelantosExtrasLista;
     const totalGastosLista = todosLosGastos.value.reduce((sum, g) => sum + (parseFloat(g[colMontoTotalGasto]) || 0), 0);
     const saldo = totalAdelantos - totalGastosLista;
-    const monedaViaje = viajeFiltradoInfo.value.moneda || (todosLosGastos.value.length > 0 ? todosLosGastos.value[0][colMonedaGasto] : 'ARS');
+    const monedaViaje = 'ARS';
     return {
         nombre: viajeFiltradoInfo.value.nombre_viaje, codigo: viajeFiltradoInfo.value.codigo_rendicion,
         cerrado: !!viajeFiltradoInfo.value.cerrado_en, adelantoInicialF: formatCurrency(adelantoInicial, monedaViaje),
@@ -255,30 +228,29 @@ const resumenSaldoViaje = computed(() => {
     };
 });
 </script>
-
 <template>
   <div class="container mx-auto px-2 sm:px-4 lg:px-6 py-8">
     <!-- Encabezado y Limpiar Filtros -->
     <div class="flex flex-col sm:flex-row justify-between items-start sm:items-center mb-6 gap-4">
       <div>
-        <h1 class="text-2xl sm:text-3xl font-bold text-districorr-primary tracking-tight">
+        <h1 class="text-2xl sm:text-3xl font-bold text-gray-800 tracking-tight">
           {{ tituloVista }}
         </h1>
         <router-link 
           v-if="route.query.viajeId || adminFiltroViajeId || adminFiltroUsuarioId || adminFiltroTipoGastoId || adminFiltroEstadoViaje || adminFiltroFechaDesde || adminFiltroFechaHasta" 
           to="#"
           @click.prevent="adminLimpiarFiltros"
-          class="text-sm text-districorr-accent hover:underline mt-1.5 inline-flex items-center group"
+          class="text-sm text-blue-600 hover:underline mt-1.5 inline-flex items-center group"
         >
           <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4 mr-1 group-hover:rotate-[-90deg] transition-transform duration-200" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M10 14l2-2m0 0l2-2m-2 2l-2-2m2 2l2 2m7-2a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
           Limpiar Filtros y Ver Todos
         </router-link>
       </div>
 
-      <!-- Botones de Reportes para Admin (Actualizado sin Libro de IVA) -->
+      <!-- Botones de Reportes para Admin -->
       <div v-if="!loading && todosLosGastos.length > 0" class="flex flex-col sm:flex-row gap-2 sm:items-center mt-3 sm:mt-0 self-start sm:self-center">
         <div class="relative group">
-            <button class="px-4 py-2 text-sm font-medium text-white bg-districorr-accent rounded-lg shadow-sm hover:bg-opacity-85 transition-colors flex items-center">
+            <button class="px-4 py-2 text-sm font-medium text-white bg-blue-600 rounded-lg shadow-sm hover:bg-blue-700 transition-colors flex items-center">
                 <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 mr-2" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M3 17a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1zm3.293-7.707a1 1 0 011.414 0L9 10.586V3a1 1 0 112 0v7.586l1.293-1.293a1 1 0 111.414 1.414l-3 3a1 1 0 01-1.414 0l-3-3a1 1 0 010-1.414z" clip-rule="evenodd" /></svg>
                 Exportar Reportes
             </button>
@@ -298,7 +270,7 @@ const resumenSaldoViaje = computed(() => {
 
     <!-- Sección de Filtros para Admin -->
     <div class="bg-white p-4 sm:p-6 rounded-xl shadow-lg mb-8 border border-gray-200">
-      <h3 class="text-xl font-semibold text-districorr-text-dark mb-4">Filtrar Gastos</h3>
+      <h3 class="text-xl font-semibold text-gray-800 mb-4">Filtrar Gastos</h3>
       <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-3 gap-x-6 gap-y-5 items-end">
         <div><label for="adminFiltroFechaDesde" class="block text-sm font-medium text-gray-700 mb-1">Gasto Desde</label><input type="date" id="adminFiltroFechaDesde" v-model="adminFiltroFechaDesde" class="input-form-style"></div>
         <div><label for="adminFiltroFechaHasta" class="block text-sm font-medium text-gray-700 mb-1">Gasto Hasta</label><input type="date" id="adminFiltroFechaHasta" v-model="adminFiltroFechaHasta" class="input-form-style"></div>
@@ -314,7 +286,7 @@ const resumenSaldoViaje = computed(() => {
     </div>
 
     <div v-if="!loading && resumenSaldoViaje" class="mb-6 bg-blue-50 p-4 rounded-lg shadow-md text-right sm:min-w-[400px] border border-blue-200 space-y-1.5">
-        <p class="text-sm text-districorr-text-dark font-semibold mb-1.5 text-center sm:text-right">Resumen del Viaje: "{{ resumenSaldoViaje.nombre }}" <span v-if="resumenSaldoViaje.codigo" class="font-mono text-xs">(#{{ resumenSaldoViaje.codigo }})</span></p>
+        <p class="text-sm text-gray-800 font-semibold mb-1.5 text-center sm:text-right">Resumen del Viaje: "{{ resumenSaldoViaje.nombre }}" <span v-if="resumenSaldoViaje.codigo" class="font-mono text-xs">(#{{ resumenSaldoViaje.codigo }})</span></p>
         <div v-if="resumenSaldoViaje.cerrado" class="text-xs text-red-600 font-semibold text-center sm:text-right mb-1.5">PERÍODO CERRADO</div><hr class="my-2 border-blue-200/60">
         <div class="flex justify-between items-center"><span class="text-sm text-gray-600">Adelanto Inicial:</span><span class="font-semibold text-blue-700">{{ resumenSaldoViaje.adelantoInicialF }}</span></div>
         <div class="flex justify-between items-center"><span class="text-sm text-gray-600">(+) Adelantos Extras (lista):</span><span class="font-semibold text-green-600">{{ resumenSaldoViaje.adelantosExtrasListaF }}</span></div><hr class="my-1.5 border-blue-200/60">
@@ -323,25 +295,60 @@ const resumenSaldoViaje = computed(() => {
         <div class="flex justify-between items-center"><span class="text-lg font-bold" :class="resumenSaldoViaje.saldoEsPositivo ? 'text-green-600':'text-red-600'">SALDO:</span><span class="text-lg font-bold" :class="resumenSaldoViaje.saldoEsPositivo ? 'text-green-600':'text-red-600'">{{ resumenSaldoViaje.saldoF }}</span></div>
     </div>
 
-    <div v-if="loading" class="text-center py-12"><svg class="animate-spin h-10 w-10 text-districorr-primary mx-auto" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg><p class="text-lg text-gray-600 mt-3">Cargando...</p></div>
+    <div v-if="loading" class="text-center py-12"><svg class="animate-spin h-10 w-10 text-blue-600 mx-auto" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg><p class="text-lg text-gray-600 mt-3">Cargando...</p></div>
     <div v-else-if="errorMessage" class="error-banner" role="alert"><p class="font-bold">Error:</p><p>{{ errorMessage }}</p></div>
     <div v-else-if="todosLosGastos.length === 0" class="no-data-placeholder"><svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-16 h-16 mx-auto text-gray-300 mb-4"><path stroke-linecap="round" stroke-linejoin="round" d="M20.25 7.5l-.625 10.632a2.25 2.25 0 01-2.247 2.118H6.622a2.25 2.25 0 01-2.247-2.118L3.75 7.5M10 11.25h4M3.375 7.5h17.25c.621 0 1.125-.504 1.125-1.125V6.375c0-.621-.504-1.125-1.125-1.125H3.375c-.621 0-1.125.504-1.125 1.125v.001c0 .621.504 1.125 1.125 1.125z" /></svg><p>No se encontraron gastos.</p></div>
 
     <div v-else class="bg-white shadow-xl rounded-lg overflow-hidden border border-gray-200">
       <div class="overflow-x-auto">
         <table class="min-w-full divide-y divide-gray-200">
-          <thead class="bg-gray-100"><tr><th scope="col" class="table-header">Fecha</th><th scope="col" class="table-header">Responsable</th><th scope="col" class="table-header">Tipo Gasto</th><th scope="col" class="table-header">Desc./Cliente</th><th scope="col" class="table-header">Viaje (#ID)</th><th scope="col" class="table-header text-right">Monto Bruto <span class="block text-[10px] normal-case text-gray-500">(Ad.Esp.)</span></th><th scope="col" class="table-header text-center">Estado Viaje</th><th scope="col" class="table-header text-center">Fact.</th><th scope="col" class="relative table-header"><span class="sr-only">Acciones</span></th></tr></thead>
+          <thead class="bg-gray-100">
+            <tr>
+              <th scope="col" class="table-header">Fecha</th>
+              <th scope="col" class="table-header">Responsable</th>
+              <th scope="col" class="table-header">Tipo Gasto</th>
+              <th scope="col" class="table-header">Desc.</th>
+              <th scope="col" class="table-header">Detalles Adicionales</th>
+              <th scope="col" class="table-header">Viaje (#ID)</th>
+              <th scope="col" class="table-header text-right">Monto Bruto <span class="block text-[10px] normal-case text-gray-500">(Ad.Esp.)</span></th>
+              <th scope="col" class="table-header text-center">Estado Viaje</th>
+              <th scope="col" class="table-header text-center">Fact.</th>
+              <th scope="col" class="relative table-header"><span class="sr-only">Acciones</span></th>
+            </tr>
+          </thead>
           <tbody class="bg-white divide-y divide-gray-200">
             <tr v-for="gasto in todosLosGastos" :key="gasto[colGastoId]" class="hover:bg-gray-50/75 transition-colors" :class="{'opacity-70': gasto[colViajeCerradoEn]}">
               <td class="table-cell">{{ formatDate(gasto[colFechaGasto]) }}</td>
               <td class="table-cell" :title="gasto[colResponsableGastoEmail]">{{ gasto[colResponsableGastoNombre] || 'N/A' }}</td>
               <td class="table-cell">{{ gasto[colTipoGastoNombre] || 'N/A' }}</td>
-              <td class="table-cell max-w-xs"><div class="truncate" :title="gasto[colDescripcionGasto]">{{ gasto[colDescripcionGasto] || '-' }}</div><div v-if="gasto[colClienteReferidoGasto]" class="text-xs text-gray-500 italic truncate" :title="`Cliente: ${gasto[colClienteReferidoGasto]}`">(Cliente: {{ gasto[colClienteReferidoGasto] }})</div></td>
-              <td class="table-cell"><span :title="gasto[colViajeNombre]">{{ gasto[colViajeNombre] ? gasto[colViajeNombre].substring(0,20) + (gasto[colViajeNombre].length > 20 ? '...' : '') : 'N/A' }}</span><span v-if="gasto[colViajeCodigoRendicion]" class="text-xs font-mono text-gray-400 ml-1">#{{ gasto[colViajeCodigoRendicion] }}</span></td>
-              <td class="table-cell text-right font-semibold">{{ formatCurrency(gasto[colMontoTotalGasto], gasto[colMonedaGasto]) }}<div v-if="gasto[colAdelantoEspecificoGasto] && parseFloat(gasto[colAdelantoEspecificoGasto]) !== 0" class="text-xs font-normal" :class="parseFloat(gasto[colAdelantoEspecificoGasto]) > 0 ? 'text-green-600' : 'text-red-600'" :title="`Adelanto Específico: ${formatCurrency(gasto[colAdelantoEspecificoGasto], gasto[colMonedaGasto])}`">({{ formatCurrency(gasto[colAdelantoEspecificoGasto], gasto[colMonedaGasto]) }})</div></td>
-              <td class="table-cell text-center text-xs font-medium"><span class="px-2 py-0.5 inline-flex leading-5 rounded-full" :class="gasto[colViajeCerradoEn] ? 'bg-red-100 text-red-800' : 'bg-green-100 text-green-800'">{{ gasto[colViajeCerradoEn] ? 'Cerrado' : 'En Curso' }}</span></td>
-              <td class="table-cell text-center"><a v-if="gasto[colFacturaUrlGasto]" :href="gasto[colFacturaUrlGasto]" target="_blank" class="text-districorr-accent hover:underline font-medium">Ver</a><span v-else class="text-gray-400">-</span></td>
-              <td class="table-cell text-right space-x-2"><button @click="adminVerDetalleGasto(gasto)" class="text-blue-600 hover:text-blue-800 font-medium transition-colors">Detalles</button></td>
+              <td class="table-cell max-w-xs">
+                <div class="truncate" :title="gasto[colDescripcionGasto]">{{ gasto[colDescripcionGasto] || '-' }}</div>
+              </td>
+              <td class="table-cell">
+                <DetallesJson :datos="gasto[colDatosAdicionalesGasto]" />
+              </td>
+              <td class="table-cell">
+                <span :title="gasto[colViajeNombre]">{{ gasto[colViajeNombre] ? gasto[colViajeNombre].substring(0,20) + (gasto[colViajeNombre].length > 20 ? '...' : '') : 'N/A' }}</span>
+                <span v-if="gasto[colViajeCodigoRendicion]" class="text-xs font-mono text-gray-400 ml-1">#{{ gasto[colViajeCodigoRendicion] }}</span>
+              </td>
+              <td class="table-cell text-right font-semibold">
+                {{ formatCurrency(gasto[colMontoTotalGasto], gasto[colMonedaGasto]) }}
+                <div v-if="gasto[colAdelantoEspecificoGasto] && parseFloat(gasto[colAdelantoEspecificoGasto]) !== 0" class="text-xs font-normal" :class="parseFloat(gasto[colAdelantoEspecificoGasto]) > 0 ? 'text-green-600' : 'text-red-600'" :title="`Adelanto Específico: ${formatCurrency(gasto[colAdelantoEspecificoGasto], gasto[colMonedaGasto])}`">
+                  ({{ formatCurrency(gasto[colAdelantoEspecificoGasto], gasto[colMonedaGasto]) }})
+                </div>
+              </td>
+              <td class="table-cell text-center text-xs font-medium">
+                <span class="px-2 py-0.5 inline-flex leading-5 rounded-full" :class="gasto[colViajeCerradoEn] ? 'bg-red-100 text-red-800' : 'bg-green-100 text-green-800'">
+                  {{ gasto[colViajeCerradoEn] ? 'Cerrado' : 'En Curso' }}
+                </span>
+              </td>
+              <td class="table-cell text-center">
+                <a v-if="gasto[colFacturaUrlGasto]" :href="gasto[colFacturaUrlGasto]" target="_blank" class="text-blue-600 hover:underline font-medium">Ver</a>
+                <span v-else class="text-gray-400">-</span>
+              </td>
+              <td class="table-cell text-right space-x-2">
+                <button @click="adminVerDetalleGasto(gasto)" class="text-blue-600 hover:text-blue-800 font-medium transition-colors">Detalles</button>
+              </td>
             </tr>
           </tbody>
         </table>
@@ -349,23 +356,3 @@ const resumenSaldoViaje = computed(() => {
     </div>
   </div>
 </template>
-
-<style scoped>
-.input-form-style { @apply mt-1 block w-full rounded-lg border-gray-300 shadow-sm focus:border-districorr-accent focus:ring-2 focus:ring-districorr-accent/50 sm:text-sm py-2 px-3; }
-.select-form-style { @apply bg-white; }
-.btn-primary { @apply px-5 py-2.5 border border-transparent rounded-lg shadow-sm text-sm font-medium text-white bg-districorr-primary hover:bg-opacity-85 transition-colors; }
-.btn-secondary-outline { @apply px-5 py-2.5 border border-gray-300 rounded-lg shadow-sm text-sm font-medium text-gray-700 bg-white hover:bg-gray-50 transition-colors; }
-.error-banner { @apply bg-red-100 border-l-4 border-red-500 text-red-700 p-4 rounded-md shadow-md; }
-.no-data-placeholder { @apply bg-white p-10 rounded-xl shadow-lg text-center border border-gray-200; }
-.table-header{ @apply px-3 py-3.5 text-left text-xs font-medium text-gray-600 uppercase tracking-wider; }
-.table-cell { @apply px-3 py-3.5 whitespace-nowrap text-sm text-gray-500; }
-
-/* Estilos para el menú desplegable de reportes */
-.menu-section-title { @apply px-4 pt-2 pb-1 text-xs text-gray-500 font-semibold uppercase; }
-.menu-item { @apply block px-4 py-2 text-sm text-gray-700 hover:bg-gray-100 hover:text-gray-900 transition-colors; }
-.menu-divider { @apply my-1 border-t border-gray-200; }
-
-/* Para el efecto de hover del dropdown */
-.group:hover .group-hover\:opacity-100 { opacity: 1; pointer-events: auto; }
-.group:focus-within .group-focus-within\:opacity-100 { opacity: 1; pointer-events: auto; }
-</style>

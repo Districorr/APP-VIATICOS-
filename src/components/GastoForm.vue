@@ -222,6 +222,7 @@ async function handleSubmit() {
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) throw new Error("Usuario no autenticado.");
 
+    // --- Lógica de subida de factura (sin cambios) ---
     let finalFacturaUrl = formState.factura_url;
     if (facturaFile.value) {
       const filePath = `${user.id}/${Date.now()}-${facturaFile.value.name}`;
@@ -230,7 +231,18 @@ async function handleSubmit() {
       finalFacturaUrl = supabase.storage.from('facturas').getPublicUrl(filePath).data.publicUrl;
     }
 
-    const payloadFijo = {
+    // --- INICIO DE LA NUEVA LÓGICA DE CONSTRUCCIÓN DEL PAYLOAD ---
+
+    // 1. Definimos los campos que tienen su propia columna en la tabla 'gastos'
+    const CAMPOS_FIJOS_TABLA = [
+      'id', 'user_id', 'formato_id', 'fecha_gasto', 'monto_total', 'monto_iva', 
+      'moneda', 'descripcion_general', 'numero_factura', 'viaje_id', 
+      'tipo_gasto_id', 'cliente_id', 'transporte_id', 
+      'adelanto_especifico_aplicado', 'factura_url', 'datos_adicionales'
+    ];
+
+    // 2. Creamos el payload base con los campos fijos
+    const payload = {
       user_id: user.id,
       formato_id: props.formatoId,
       fecha_gasto: formState.fecha_gasto,
@@ -247,18 +259,31 @@ async function handleSubmit() {
       factura_url: finalFacturaUrl,
     };
 
+    // 3. Creamos el objeto para los datos adicionales
     const datosAdicionales = {};
-    const todosLosCampos = [...camposObligatorios.value, ...camposOpcionales.value];
-    todosLosCampos.forEach(campo => {
-      if (!payloadFijo.hasOwnProperty(campo.nombre_campo_tecnico)) {
-        datosAdicionales[campo.nombre_campo_tecnico] = formState[campo.nombre_campo_tecnico];
+    const todosLosCamposDelFormato = [...camposObligatorios.value, ...camposOpcionales.value];
+
+    // 4. Iteramos sobre todos los campos del formato para encontrar los dinámicos
+    todosLosCamposDelFormato.forEach(campo => {
+      const nombreTecnico = campo.nombre_campo_tecnico;
+      // Si el campo NO es uno de los fijos, lo guardamos en datos_adicionales
+      if (!CAMPOS_FIJOS_TABLA.includes(nombreTecnico)) {
+        // Solo lo añadimos si tiene un valor
+        if (formState[nombreTecnico] !== null && formState[nombreTecnico] !== undefined && formState[nombreTecnico] !== '') {
+          datosAdicionales[nombreTecnico] = formState[nombreTecnico];
+        }
       }
     });
-    payloadFijo.datos_adicionales = datosAdicionales;
 
+    // 5. Asignamos el objeto JSON al payload
+    payload.datos_adicionales = datosAdicionales;
+
+    // --- FIN DE LA NUEVA LÓGICA ---
+
+    // La lógica de inserción/actualización no cambia
     const { data, error } = isEditMode.value
-      ? await supabase.from('gastos').update(payloadFijo).eq('id', props.gastoId).select().single()
-      : await supabase.from('gastos').insert(payloadFijo).select().single();
+      ? await supabase.from('gastos').update(payload).eq('id', props.gastoId).select().single()
+      : await supabase.from('gastos').insert(payload).select().single();
 
     if (error) throw error;
 
