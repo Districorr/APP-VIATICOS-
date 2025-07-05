@@ -1,0 +1,146 @@
+/* src/assets/style.css */
+
+/* 1. DIRECTIVAS DE TAILWIND */
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* 2. ESTILOS BASE (para elementos HTML puros) */
+@layer base {
+  body {
+    @apply font-sans text-districorr-text-primary bg-districorr-background-alt antialiased;
+  }
+
+  html, body, #app {
+    @apply h-full m-0 p-0;
+  }
+
+  /* Estilos base para inputs para que se vean consistentes */
+  input[type="text"],
+  input[type="email"],
+  input[type="password"],
+  input[type="number"],
+  input[type="date"],
+  select,
+  textarea {
+    @apply block w-full px-3 py-2.5 border border-gray-300 rounded-md shadow-sm placeholder-gray-400 
+           focus:outline-none focus:ring-districorr-accent focus:border-districorr-accent 
+           sm:text-sm transition-colors duration-150 ease-in-out;
+  }
+
+  input[type="checkbox"] {
+    @apply h-4 w-4 text-districorr-accent border-gray-300 rounded focus:ring-districorr-accent;
+  }
+}
+
+/* 3. COMPONENTES PERSONALIZADOS (clases de utilidad reutilizables) */
+@layer components {
+  /* --- Estilos de Botones (Unificados) --- */
+  .btn {
+    @apply py-2.5 px-5 text-sm font-semibold rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-offset-2 transition duration-150 ease-in-out disabled:opacity-50 disabled:cursor-not-allowed;
+  }
+  .btn-primary {
+    @apply bg-districorr-primary text-white hover:bg-opacity-85 focus:ring-districorr-primary;
+  }
+  .btn-accent {
+    @apply bg-districorr-accent text-white hover:bg-opacity-80 focus:ring-districorr-accent;
+  }
+  .btn-secondary {
+    @apply bg-white text-gray-700 border border-gray-300 hover:bg-gray-50 focus:ring-indigo-500;
+  }
+  .btn-danger {
+    @apply bg-red-600 text-white hover:bg-red-700 focus:ring-red-500;
+  }
+  .btn-success {
+     @apply bg-green-500 text-white hover:bg-green-600 focus:ring-green-500;
+  }
+
+  /* Botones específicos de Admin */
+  .btn-admin-action {
+    @apply text-xs text-white font-medium py-1.5 px-3 rounded-md shadow-sm hover:shadow-md transform hover:scale-105 transition-all duration-150;
+  }
+  .btn-admin-action-xs {
+    @apply text-[11px] text-white font-medium py-1 px-2 rounded shadow-sm hover:shadow transform hover:scale-105 transition-all duration-150;
+  }
+  .btn-blue { @apply bg-blue-500 hover:bg-blue-600 focus:ring-blue-400; }
+  .btn-orange { @apply bg-orange-500 hover:bg-orange-600 focus:ring-orange-400; }
+  .btn-yellow { @apply bg-yellow-400 hover:bg-yellow-500 text-yellow-900 focus:ring-yellow-300; }
+
+  /* Otros botones */
+  .btn-view-active {
+    @apply bg-districorr-primary text-white shadow-md ring-2 ring-offset-1 ring-districorr-primary;
+  }
+  .btn-view-inactive {
+    @apply bg-gray-200 hover:bg-gray-300 text-gray-700;
+  }
+  .btn-export-main {
+    @apply px-4 py-2 text-sm font-medium text-white bg-districorr-accent rounded-lg shadow-sm hover:bg-opacity-85 transition-colors flex items-center focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-districorr-accent;
+  }
+
+  /* --- Estilos para Formularios --- */
+  .form-label {
+    @apply block text-sm font-medium text-gray-700 mb-1;
+  }
+
+  /* --- Estilos para Tablas --- */
+  .table-th {
+    @apply px-4 py-3 text-left text-xs font-medium text-gray-600 uppercase tracking-wider;
+  }
+  .table-td {
+    @apply px-4 py-3 whitespace-nowrap;
+  }
+  
+  /* --- ESTILOS PARA AppHeader (Versión Fondo Oscuro) --- */
+
+  /* Botón CTA principal (ahora usa el color de acento) */
+  .btn-accent-header {
+    @apply flex items-center justify-center space-x-2 px-3 py-2 rounded-lg bg-districorr-accent text-white font-semibold shadow-sm hover:bg-opacity-90 transition-all focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-white;
+  }
+  /* Botón de icono para fondo oscuro */
+  .btn-icon-header-dark {
+    @apply p-2 rounded-full text-white/80 hover:bg-white/10 transition-colors;
+  }
+  
+  /* Navegación Desktop para fondo oscuro */
+  .nav-link-desktop-dark {
+    @apply flex items-center h-full px-4 py-2 text-base font-medium text-white/80 rounded-md hover:bg-white/10;
+  }
+  .nav-link-desktop-dark-active {
+    @apply bg-white/10 text-white font-semibold;
+  }
+
+  /* Navegación Móvil para fondo oscuro */
+  .nav-link-mobile-dark {
+    @apply block w-full text-left px-4 py-3 text-base font-medium text-white rounded-md hover:bg-white/10;
+  }
+  .nav-link-mobile-dark-active {
+    @apply bg-white/20 font-semibold;
+  }
+
+  /* Avatar para fondo oscuro */
+  .avatar-header-dark {
+    @apply flex h-9 w-9 items-center justify-center rounded-full bg-white/20 text-white font-bold text-sm;
+  }
+
+  /* El menú desplegable y sus items no necesitan cambiar, ya que tienen fondo blanco */
+  .dropdown-menu {
+    @apply absolute right-0 mt-2 w-56 origin-top-right rounded-md bg-white shadow-lg ring-1 ring-black ring-opacity-5 focus:outline-none;
+  }
+  .dropdown-item {
+    @apply block w-full text-left px-4 py-2 text-sm text-districorr-text-primary hover:bg-districorr-background-alt;
+  }
+  .notification-badge {
+    @apply absolute -top-1 -right-1 flex h-5 w-5 items-center justify-center rounded-full bg-districorr-error text-white text-xs;
+  }
+}
+
+/* 4. TRANSICIONES DE VUE (fuera de @layer) */
+.fade-enter-active,
+.fade-leave-active {
+  transition: opacity 0.2s ease-out;
+}
+
+.fade-enter-from,
+.fade-leave-to {
+  opacity: 0;
+}

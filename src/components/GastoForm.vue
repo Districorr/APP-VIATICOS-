@@ -1,0 +1,450 @@
+<!-- src/components/GastoForm.vue -->
+<script setup>
+import { ref, reactive, onMounted, computed, watch, nextTick } from 'vue';
+import { supabase } from '../supabaseClient.js';
+import { formatCurrency, formatCurrencyForInput } from '../utils/formatters.js';
+import vSelect from 'vue-select';
+import 'vue-select/dist/vue-select.css';
+import TipoGastoSelector from './TipoGastoSelector.vue';
+
+const props = defineProps({
+  formatoId: { type: [Number, String], required: true },
+  nombreFormato: { type: String, default: 'Formulario de Gasto' },
+  gastoId: { type: [Number, String], default: null },
+  viajeIdPredeterminado: { type: [Number, String], default: null },
+  cajaIdPredeterminada: { type: [Number, String], default: null }
+});
+const emit = defineEmits(['gasto-guardado', 'cancelar']);
+
+const currentStep = ref(1);
+const stepError = ref('');
+const loading = ref(true);
+const errorMessage = ref('');
+const successMessage = ref('');
+const isEditMode = computed(() => !!props.gastoId);
+
+const formState = reactive({});
+const opcionesSelect = ref({
+  viajes: [],
+  tipos_gasto: [],
+  clientes: [],
+  transportes: [],
+  proveedores: [],
+  cajas_chicas: [],
+  usuariosParaDelegar: []
+});
+
+const facturaFile = ref(null);
+const facturaPreview = ref(null);
+const sugerenciasGastos = ref([]);
+const sinFactura = ref(false);
+const useCajaDiaria = ref(false);
+const selectedCajaId = ref(null);
+const isDelegating = ref(false);
+const delegatedToUserId = ref(null);
+
+const camposObligatorios = ref([]);
+const camposOpcionales = ref([]);
+const camposOpcionalesVisibles = ref(new Set());
+const formattedMontoTotal = ref('');
+
+const provincias = ref(['Buenos Aires', 'CABA', 'Catamarca', 'Chaco', 'Chubut', 'Córdoba', 'Corrientes', 'Entre Ríos', 'Formosa', 'Jujuy', 'La Pampa', 'La Rioja', 'Mendoza', 'Misiones', 'Neuquén', 'Río Negro', 'Salta', 'San Juan', 'San Luis', 'Santa Cruz', 'Santa Fe', 'Santiago del Estero', 'Tierra del Fuego', 'Tucumán']);
+
+const handleMontoInput = (event) => {
+  const input = event.target;
+  let value = input.value;
+  const digits = value.replace(/\D/g, '');
+  const numericValue = digits ? parseInt(digits, 10) / 100 : 0;
+  formState.monto_total = numericValue;
+  const formattedValue = formatCurrencyForInput(numericValue);
+  const cursorPos = input.selectionStart;
+  const oldLength = value.length;
+  formattedMontoTotal.value = formattedValue;
+  nextTick(() => {
+    const newLength = formattedValue.length;
+    let newCursorPos = cursorPos + (newLength - oldLength);
+    if (newLength > oldLength && formattedValue[cursorPos] === '.') newCursorPos = cursorPos + 1;
+    input.setSelectionRange(newCursorPos, newCursorPos);
+  });
+};
+
+const formattedMontoIva = computed(() => {
+  if (formState.monto_total > 0) return formatCurrency(formState.monto_iva);
+  return '';
+});
+
+async function cargarConfiguracionYDatos() {
+  loading.value = true;
+  errorMessage.value = '';
+  try {
+    const [camposResult, _, sugerenciasResult] = await Promise.all([
+      supabase.from('campos_formato_config').select('*').eq('formato_id', props.formatoId).order('orden_visualizacion'),
+      cargarOpcionesParaSelects(),
+      supabase.rpc('get_sugerencias_gastos_usuario')
+    ]);
+
+    if (camposResult.error) throw camposResult.error;
+    const todosLosCampos = camposResult.data || [];
+    camposObligatorios.value = todosLosCampos.filter(c => c.es_obligatorio);
+    camposOpcionales.value = todosLosCampos.filter(c => !c.es_obligatorio);
+
+    if (sugerenciasResult.error) console.warn('No se pudieron cargar las sugerencias', sugerenciasResult.error.message);
+    else sugerenciasGastos.value = sugerenciasResult.data || [];
+
+    inicializarFormState();
+
+    if (isEditMode.value) await cargarGastoParaEditar();
+    else {
+      if (props.viajeIdPredeterminado) formState.viaje_id = parseInt(props.viajeIdPredeterminado);
+      if (props.cajaIdPredeterminada) {
+        useCajaDiaria.value = true;
+        selectedCajaId.value = parseInt(props.cajaIdPredeterminada);
+      }
+    }
+  } catch (e) {
+    errorMessage.value = `No se pudo cargar el formulario: ${e.message}`;
+  } finally {
+    loading.value = false;
+  }
+}
+
+function inicializarFormState() {
+  const camposFijos = { fecha_gasto: new Date().toISOString().split('T')[0], monto_total: 0, monto_iva: 0, moneda: 'ARS', descripcion_general: '', numero_factura: '', viaje_id: null, caja_id: null, tipo_gasto_id: null, adelanto_especifico_aplicado: null, factura_url: null, provincia: null };
+  const camposDeIdNormalizados = { cliente_id: null, transporte_id: null, proveedor_id: null };
+  const otrosCamposDinamicos = {};
+  [...camposObligatorios.value, ...camposOpcionales.value].forEach(campo => {
+    if (!(campo.nombre_campo_tecnico in camposDeIdNormalizados) && !(campo.nombre_campo_tecnico in camposFijos)) {
+      otrosCamposDinamicos[campo.nombre_campo_tecnico] = campo.valor_por_defecto || null;
+    }
+  });
+  Object.assign(formState, { ...camposFijos, ...camposDeIdNormalizados, ...otrosCamposDinamicos });
+  formattedMontoTotal.value = formatCurrencyForInput(formState.monto_total);
+  if (!isEditMode.value) {
+    const lastProvincia = localStorage.getItem('lastUsedProvincia');
+    if (lastProvincia) formState.provincia = lastProvincia;
+    if (opcionesSelect.value.cajas_chicas.length === 1) {
+      selectedCajaId.value = opcionesSelect.value.cajas_chicas[0].value;
+      useCajaDiaria.value = true;
+    }
+  }
+}
+
+async function cargarGastoParaEditar() {
+  const { data: gastoData, error: gastoError } = await supabase.from('gastos').select('*, datos_adicionales, clientes(id, nombre_cliente), transportes(id, nombre), proveedores(id, nombre)').eq('id', props.gastoId).single();
+  if (gastoError) throw gastoError;
+  Object.assign(formState, gastoData, gastoData.datos_adicionales);
+  if (gastoData.caja_id) {
+    useCajaDiaria.value = true;
+    selectedCajaId.value = gastoData.caja_id;
+  }
+  if (gastoData.cliente_id && gastoData.clientes) formState.cliente_id = { label: gastoData.clientes.nombre_cliente, value: gastoData.cliente_id };
+  if (gastoData.transporte_id && gastoData.transportes) formState.transporte_id = { label: gastoData.transportes.nombre, value: gastoData.transporte_id };
+  if (gastoData.proveedor_id && gastoData.proveedores) formState.proveedor_id = { label: gastoData.proveedores.nombre, value: gastoData.proveedor_id };
+  if (gastoData.factura_url) facturaPreview.value = gastoData.factura_url;
+  sinFactura.value = !gastoData.numero_factura;
+  formattedMontoTotal.value = formatCurrencyForInput(formState.monto_total || 0);
+  camposOpcionales.value.forEach(campo => {
+    const campoTecnico = campo.nombre_campo_tecnico;
+    if (formState[campoTecnico] !== null && formState[campoTecnico] !== undefined && formState[campoTecnico] !== '') {
+      camposOpcionalesVisibles.value.add(campoTecnico);
+    }
+  });
+}
+
+async function cargarOpcionesParaSelects() {
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return;
+  const [viajes, tipos, clientes, transportes, proveedores, cajasChicas, todosLosUsuarios] = await Promise.all([
+    supabase.from('viajes').select('id, nombre_viaje').eq('user_id', user.id).is('cerrado_en', null),
+    supabase.from('tipos_gasto_config').select('id, nombre_tipo_gasto, icon_name, color_accent').eq('activo', true),
+    supabase.from('clientes').select('id, nombre_cliente'),
+    supabase.from('transportes').select('id, nombre'),
+    supabase.from('proveedores').select('id, nombre').eq('activo', true),
+    supabase.from('cajas_chicas').select('id, nombre, saldo_actual').eq('responsable_id', user.id).eq('activo', true),
+    supabase.from('perfiles').select('id, nombre_completo, email')
+  ]);
+  opcionesSelect.value = {
+    viajes: viajes.data || [],
+    tipos_gasto: tipos.data || [],
+    clientes: (clientes.data || []).map(c => ({ label: c.nombre_cliente, value: c.id })),
+    transportes: (transportes.data || []).map(t => ({ label: t.nombre, value: t.id })),
+    proveedores: (proveedores.data || []).map(p => ({ label: p.nombre, value: p.id })),
+    cajas_chicas: (cajasChicas.data || []).map(c => ({ label: `${c.nombre} (Saldo: ${formatCurrency(c.saldo_actual)})`, value: c.id })),
+    usuariosParaDelegar: (todosLosUsuarios.data || []).filter(u => u.id !== user.id)
+  };
+}
+
+onMounted(cargarConfiguracionYDatos);
+
+function agregarCampoOpcional(campo) { camposOpcionalesVisibles.value.add(campo.nombre_campo_tecnico); }
+function quitarCampoOpcional(campo) {
+  const campoTecnico = campo.nombre_campo_tecnico;
+  camposOpcionalesVisibles.value.delete(campoTecnico);
+  formState[campoTecnico] = null;
+}
+
+watch([() => formState.monto_total, sinFactura], ([newMonto, noTieneFactura]) => {
+  if (noTieneFactura) formState.monto_iva = 0;
+  else formState.monto_iva = parseFloat(((newMonto || 0) - ((newMonto || 0) / 1.21)).toFixed(2));
+}, { immediate: true });
+
+watch(sinFactura, (esSinFactura) => { if (esSinFactura) formState.numero_factura = ''; });
+
+const handleFacturaChange = (event) => {
+  const file = event.target.files[0];
+  if (file) {
+    facturaFile.value = file;
+    facturaPreview.value = URL.createObjectURL(file);
+  }
+};
+
+function aplicarSugerencia() {
+  const desc = formState.descripcion_general;
+  const sugerenciaEncontrada = sugerenciasGastos.value.find(s => s.descripcion_general === desc);
+  if (sugerenciaEncontrada) formState.tipo_gasto_id = sugerenciaEncontrada.tipo_gasto_id;
+}
+
+function validateStep1() {
+  if (!formState.monto_total || formState.monto_total <= 0) { stepError.value = 'Por favor, ingresa un monto total válido.'; return false; }
+  if (useCajaDiaria.value && !selectedCajaId.value) { stepError.value = 'Si pagas con Caja Diaria, debes seleccionar una caja.'; return false; }
+  return true;
+}
+
+function validateStep2() {
+  if (!useCajaDiaria.value && !isDelegating.value && !formState.viaje_id) { stepError.value = 'Debes asociar este gasto a una rendición o delegarlo.'; return false; }
+  if (isDelegating.value && !delegatedToUserId.value) { stepError.value = 'Debes seleccionar un responsable a quien delegar el gasto.'; return false; }
+  if (!formState.tipo_gasto_id) { stepError.value = 'Debes seleccionar un tipo de gasto.'; return false; }
+  return true;
+}
+
+function nextStep() { if (validateStep1()) { stepError.value = ''; currentStep.value = 2; } }
+function prevStep() { currentStep.value = 1; }
+
+async function handleSubmit() {
+  if (!validateStep2()) return;
+  loading.value = true;
+  errorMessage.value = '';
+  try {
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) throw new Error('Usuario no autenticado.');
+
+    let finalFacturaUrl = formState.factura_url;
+    if (facturaFile.value) {
+      const filePath = `${user.id}/${Date.now()}-${facturaFile.value.name}`;
+      const { error: uploadError } = await supabase.storage.from('facturas').upload(filePath, facturaFile.value);
+      if (uploadError) throw uploadError;
+      finalFacturaUrl = supabase.storage.from('facturas').getPublicUrl(filePath).data.publicUrl;
+    }
+
+    const CAMPOS_FIJOS_TABLA = ['id', 'user_id', 'creado_por_id', 'estado_delegacion', 'formato_id', 'fecha_gasto', 'monto_total', 'monto_iva', 'moneda', 'descripcion_general', 'numero_factura', 'viaje_id', 'caja_id', 'tipo_gasto_id', 'cliente_id', 'transporte_id', 'proveedor_id', 'adelanto_especifico_aplicado', 'factura_url', 'datos_adicionales', 'provincia'];
+    
+    const payload = {
+      formato_id: props.formatoId,
+      fecha_gasto: formState.fecha_gasto,
+      monto_total: formState.monto_total,
+      monto_iva: formState.monto_iva,
+      moneda: formState.moneda,
+      descripcion_general: formState.descripcion_general,
+      numero_factura: sinFactura.value ? null : formState.numero_factura,
+      tipo_gasto_id: formState.tipo_gasto_id,
+      cliente_id: formState.cliente_id?.value || formState.cliente_id || null,
+      transporte_id: formState.transporte_id?.value || formState.transporte_id || null,
+      proveedor_id: formState.proveedor_id?.value || formState.proveedor_id || null,
+      adelanto_especifico_aplicado: formState.adelanto_especifico_aplicado,
+      factura_url: finalFacturaUrl,
+      provincia: formState.provincia,
+    };
+
+    if (isDelegating.value) {
+      payload.user_id = delegatedToUserId.value;
+      payload.creado_por_id = user.id;
+      payload.estado_delegacion = 'pendiente_aceptacion';
+      payload.viaje_id = null;
+      payload.caja_id = null;
+    } else {
+      payload.user_id = user.id;
+      payload.creado_por_id = null;
+      payload.estado_delegacion = 'directo';
+      payload.viaje_id = useCajaDiaria.value ? null : formState.viaje_id;
+      payload.caja_id = useCajaDiaria.value ? selectedCajaId.value : null;
+    }
+
+    const datosAdicionales = {};
+    const todosLosCamposDelFormato = [...camposObligatorios.value, ...camposOpcionales.value];
+    todosLosCamposDelFormato.forEach(campo => {
+      const nombreTecnico = campo.nombre_campo_tecnico;
+      if (!CAMPOS_FIJOS_TABLA.includes(nombreTecnico)) {
+        if (formState[nombreTecnico] !== null && formState[nombreTecnico] !== undefined && formState[nombreTecnico] !== '') {
+          datosAdicionales[nombreTecnico] = formState[nombreTecnico];
+        }
+      }
+    });
+    payload.datos_adicionales = Object.keys(datosAdicionales).length > 0 ? datosAdicionales : null;
+
+    const { data: gastoGuardadoData, error } = isEditMode.value
+      ? await supabase.from('gastos').update(payload).eq('id', props.gastoId).select().single()
+      : await supabase.from('gastos').insert(payload).select().single();
+
+    if (error) throw new Error(`Error al guardar el gasto: ${error.message}`);
+
+    if (useCajaDiaria.value && !isDelegating.value) {
+      const { error: rpcError } = await supabase.rpc('registrar_gasto_caja_chica', { p_gasto_id: gastoGuardadoData.id, p_caja_id: selectedCajaId.value }).single();
+      if (rpcError) throw new Error(`Problema con Caja Diaria: ${rpcError.message}`);
+    }
+
+    if (isDelegating.value) {
+      const { data: delegadorProfile } = await supabase.from('perfiles').select('nombre_completo').eq('id', user.id).single();
+      const nombreDelegador = delegadorProfile?.nombre_completo || user.email;
+      const { error: notifError } = await supabase.from('notificaciones').insert({
+        user_id: delegatedToUserId.value,
+        mensaje: `${nombreDelegador} te ha delegado un gasto de ${formatCurrency(payload.monto_total)} para que lo incluyas en una de tus rendiciones.`,
+        link_a: '/rendiciones/delegados',
+        tipo: 'delegacion_gasto'
+      });
+      if (notifError) console.warn("Gasto delegado guardado, pero falló la notificación:", notifError.message);
+    }
+
+    successMessage.value = `Gasto ${isEditMode.value ? 'actualizado' : 'registrado'} con éxito.`;
+    if (formState.provincia) localStorage.setItem('lastUsedProvincia', formState.provincia);
+    if (formState.viaje_id) localStorage.setItem('lastUsedViajeId', formState.viaje_id);
+
+    setTimeout(() => { emit('gasto-guardado', gastoGuardadoData); }, 1000);
+  } catch (e) {
+    errorMessage.value = `Error al guardar: ${e.message}`;
+  } finally {
+    loading.value = false;
+  }
+}
+</script>
+
+<template>
+  <div v-if="loading" class="text-center py-12">
+    <svg class="animate-spin h-10 w-10 text-blue-600 mx-auto" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg>
+    <p class="mt-3 text-gray-600">Cargando formulario...</p>
+  </div>
+  <div v-else-if="errorMessage" class="bg-red-100 p-4 rounded-md text-red-700">{{ errorMessage }}</div>
+  
+  <form v-else @submit.prevent="handleSubmit" class="bg-white pb-28">
+    
+    <div class="p-6 sm:p-8">
+      <div class="border-b border-gray-200 pb-5 mb-8">
+        <h2 class="text-2xl font-bold leading-7 text-gray-900">{{ isEditMode ? 'Editar Gasto' : 'Registrar Nuevo Gasto' }}</h2>
+        <p class="mt-1 text-sm leading-6 text-gray-600">Usando el formato: <span class="font-semibold text-indigo-600">{{ nombreFormato }}</span></p>
+      </div>
+
+      <div class="space-y-8">
+        <!-- PASO 1: Información de Montos y Asignación -->
+        <div v-if="currentStep === 1">
+          <fieldset>
+            <legend class="form-legend">Paso 1 de 2: Información de Montos y Destino</legend>
+            <div class="grid grid-cols-1 sm:grid-cols-2 gap-6">
+              <div class="input-wrapper">
+                <label for="monto_total" class="form-label">Monto Total <span class="text-red-500">*</span></label>
+                <div class="relative mt-1">
+                  <div class="pointer-events-none absolute inset-y-0 left-0 flex items-center pl-3"><span class="text-gray-500 sm:text-sm">$</span></div>
+                  <input type="text" id="monto_total" :value="formattedMontoTotal" @input="handleMontoInput" required class="form-input pl-7 text-right" inputmode="decimal" placeholder="0,00"/>
+                </div>
+              </div>
+              <transition enter-active-class="transition ease-out duration-200" enter-from-class="opacity-0" enter-to-class="opacity-100" leave-active-class="transition ease-in duration-150" leave-from-class="opacity-100" leave-to-class="opacity-0">
+                <div v-if="!sinFactura" class="input-wrapper">
+                  <label for="monto_iva" class="form-label">IVA (21%) Desglosado</label>
+                  <input type="text" id="monto_iva" :value="formattedMontoIva" disabled class="form-input mt-1 bg-gray-100 cursor-not-allowed text-right" />
+                </div>
+              </transition>
+              <div class="sm:col-span-2 grid grid-cols-1 sm:grid-cols-2 gap-6 items-end">
+                  <div class="input-wrapper">
+                      <label for="numero_factura" class="form-label">N° de Factura</label>
+                      <input type="text" id="numero_factura" v-model="formState.numero_factura" :disabled="sinFactura" class="form-input mt-1" :class="{ 'bg-gray-100 cursor-not-allowed': sinFactura }" />
+                  </div>
+                  <div class="flex items-center h-full pb-1.5">
+                      <div class="flex items-center">
+                          <label class="checkbox-wrapper"><input id="sin_factura_check" type="checkbox" v-model="sinFactura" class="checkbox-native" /><span class="checkbox-custom"><svg viewBox="0 0 16 16" fill="white" xmlns="http://www.w3.org/2000/svg" class="checkmark-icon"><path d="M12.207 4.793a1 1 0 010 1.414l-5 5a1 1 0 01-1.414 0l-2-2a1 1 0 011.414-1.414L6.5 9.086l4.293-4.293a1 1 0 011.414 0z"/></svg></span></label>
+                          <label for="sin_factura_check" class="ml-2 block text-sm text-gray-900 cursor-pointer">Este gasto no tiene factura</label>
+                      </div>
+                  </div>
+              </div>
+            </div>
+          </fieldset>
+
+          <!-- --- INICIO DE MI MODIFICACIÓN: Lógica de Asignación movida al Paso 1 --- -->
+          <fieldset class="mt-8 border-t pt-6">
+            <legend class="form-legend">¿Cómo se rinde este gasto?</legend>
+            <div class="space-y-6">
+              <!-- Opción 1: Caja Diaria -->
+              <div v-if="opcionesSelect.cajas_chicas.length > 0" class="flex items-start">
+                <div class="flex h-6 items-center"><input id="assign-caja" name="assignment-type" type="radio" :value="true" v-model="useCajaDiaria" @change="isDelegating = false" class="h-4 w-4 rounded-full border-gray-300 text-indigo-600 focus:ring-indigo-600"></div>
+                <div class="ml-3 text-sm leading-6">
+                  <label for="assign-caja" class="font-medium text-gray-900">Pagar con mi Caja Diaria</label>
+                  <transition enter-active-class="transition ease-out duration-200" enter-from-class="opacity-0" enter-to-class="opacity-100" leave-active-class="transition ease-in duration-150" leave-from-class="opacity-100" leave-to-class="opacity-0">
+                    <div v-if="useCajaDiaria" class="mt-2">
+                      <select v-model="selectedCajaId" class="form-input">
+                        <option disabled :value="null">-- Selecciona tu caja --</option>
+                        <option v-for="caja in opcionesSelect.cajas_chicas" :key="caja.value" :value="caja.value">{{ caja.label }}</option>
+                      </select>
+                    </div>
+                  </transition>
+                </div>
+              </div>
+              <!-- Opción 2: Rendición Propia -->
+              <div class="flex items-start">
+                <div class="flex h-6 items-center"><input id="assign-rendicion" name="assignment-type" type="radio" :checked="!useCajaDiaria && !isDelegating" @change="useCajaDiaria = false; isDelegating = false" class="h-4 w-4 rounded-full border-gray-300 text-indigo-600 focus:ring-indigo-600"></div>
+                <div class="ml-3 text-sm leading-6">
+                  <label for="assign-rendicion" class="font-medium text-gray-900">Asociar a una de mis Rendiciones</label>
+                  <transition enter-active-class="transition ease-out duration-200" enter-from-class="opacity-0" enter-to-class="opacity-100" leave-active-class="transition ease-in duration-150" leave-from-class="opacity-100" leave-to-class="opacity-0">
+                    <div v-if="!useCajaDiaria && !isDelegating" class="mt-2">
+                      <select v-model.number="formState.viaje_id" class="form-input">
+                        <option disabled :value="null">-- Selecciona una rendición --</option>
+                        <option v-for="viaje in opcionesSelect.viajes" :key="viaje.id" :value="viaje.id">{{ viaje.nombre_viaje }}</option>
+                      </select>
+                    </div>
+                  </transition>
+                </div>
+              </div>
+              <!-- Opción 3: Delegar Gasto -->
+              <div class="flex items-start">
+                <div class="flex h-6 items-center"><input id="assign-delegar" name="assignment-type" type="radio" :value="true" v-model="isDelegating" @change="useCajaDiaria = false" class="h-4 w-4 rounded-full border-gray-300 text-indigo-600 focus:ring-indigo-600"></div>
+                <div class="ml-3 text-sm leading-6">
+                  <label for="assign-delegar" class="font-medium text-gray-900">Delegar gasto a otro responsable</label>
+                  <p class="text-gray-500">El gasto será enviado para que otro usuario lo apruebe y lo incluya en su propia rendición.</p>
+                  <transition enter-active-class="transition ease-out duration-200" enter-from-class="opacity-0" enter-to-class="opacity-100" leave-active-class="transition ease-in duration-150" leave-from-class="opacity-100" leave-to-class="opacity-0">
+                    <div v-if="isDelegating" class="mt-2">
+                      <select v-model="delegatedToUserId" class="form-input">
+                        <option disabled :value="null">-- Selecciona un responsable --</option>
+                        <option v-for="user in opcionesSelect.usuariosParaDelegar" :key="user.id" :value="user.id">{{ user.nombre_completo || user.email }}</option>
+                      </select>
+                    </div>
+                  </transition>
+                </div>
+              </div>
+            </div>
+          </fieldset>
+          <!-- --- FIN DE MI MODIFICACIÓN --- -->
+        </div>
+
+        <!-- PASO 2: Detalles del Gasto -->
+        <div v-if="currentStep === 2">
+          <fieldset>
+            <legend class="form-legend">Paso 2 de 2: Detalles del Gasto</legend>
+            <div class="grid grid-cols-1 sm:grid-cols-2 gap-6">
+              <div class="input-wrapper"><label for="fecha_gasto" class="form-label">Fecha del Gasto <span class="text-red-500">*</span></label><input type="date" id="fecha_gasto" v-model="formState.fecha_gasto" required class="form-input mt-1" /></div>
+              <div class="sm:col-span-2"><label class="form-label">Tipo de Gasto <span class="text-red-500">*</span></label><TipoGastoSelector v-model="formState.tipo_gasto_id" :options="opcionesSelect.tipos_gasto" class="mt-2"/></div>
+              <div class="sm:col-span-2 input-wrapper"><label for="descripcion_general" class="form-label">Descripción General</label><input type="text" id="descripcion_general" v-model="formState.descripcion_general" @change="aplicarSugerencia" list="sugerencias-gastos" class="form-input mt-1" placeholder="Ej: Nafta YPF, Almuerzo en..." /><datalist id="sugerencias-gastos"><option v-for="sugerencia in sugerenciasGastos" :key="sugerencia.descripcion_general" :value="sugerencia.descripcion_general"></option></datalist></div>
+              <div class="input-wrapper"><label for="provincia" class="form-label">Provincia del Gasto</label><select id="provincia" v-model="formState.provincia" class="form-input mt-1"><option disabled :value="null">-- Seleccione una provincia --</option><option v-for="prov in provincias" :key="prov" :value="prov">{{ prov }}</option></select></div>
+            </div>
+          </fieldset>
+          
+          <fieldset v-if="camposObligatorios.length > 0" class="mt-8"><legend class="form-legend">Detalles Específicos del Formato</legend><div class="grid grid-cols-1 sm:grid-cols-2 gap-6"><div v-for="campo in camposObligatorios" :key="campo.id" class="input-wrapper"><label :for="campo.nombre_campo_tecnico" class="form-label">{{ campo.etiqueta_visible }} <span v-if="campo.es_obligatorio" class="text-red-500">*</span></label><input v-if="campo.tipo_input === 'texto'" type="text" :id="campo.nombre_campo_tecnico" v-model="formState[campo.nombre_campo_tecnico]" :required="campo.es_obligatorio" class="form-input mt-1" /><v-select v-else-if="campo.tipo_input === 'select_cliente'" :id="campo.nombre_campo_tecnico" v-model="formState.cliente_id" :options="opcionesSelect.clientes" placeholder="-- Buscar cliente --" class="mt-1" :class="{ 'v-select-required': campo.es_obligatorio && !formState.cliente_id }"></v-select><v-select v-else-if="campo.tipo_input === 'select_transporte'" :id="campo.nombre_campo_tecnico" v-model="formState.transporte_id" :options="opcionesSelect.transportes" placeholder="-- Buscar transporte --" class="mt-1" :class="{ 'v-select-required': campo.es_obligatorio && !formState.transporte_id }"></v-select><v-select v-else-if="campo.tipo_input === 'select_proveedor'" :id="campo.nombre_campo_tecnico" v-model="formState.proveedor_id" :options="opcionesSelect.proveedores" placeholder="-- Buscar proveedor --" class="mt-1" :class="{ 'v-select-required': campo.es_obligatorio && !formState.proveedor_id }"></v-select></div></div></fieldset>
+          <div class="border-t border-gray-200 pt-6 mt-8"><h3 class="text-base font-semibold leading-7 text-gray-900">¿Necesitas más detalles?</h3><p class="mt-1 text-sm leading-6 text-gray-600">Añade solo los campos que necesites para este gasto.</p><div class="mt-4 flex flex-wrap gap-3"><template v-for="campo in camposOpcionales" :key="`btn-${campo.id}`"><button v-if="!camposOpcionalesVisibles.has(campo.nombre_campo_tecnico)" type="button" @click="agregarCampoOpcional(campo)" class="btn-add-optional min-h-[44px]">+ {{ campo.etiqueta_visible }}</button></template></div><fieldset v-if="camposOpcionalesVisibles.size > 0" class="mt-6"><div class="grid grid-cols-1 sm:grid-cols-2 gap-6"><template v-for="campo in camposOpcionales" :key="campo.id"><div v-if="camposOpcionalesVisibles.has(campo.nombre_campo_tecnico)" class="relative group input-wrapper"><label :for="`opcional-${campo.nombre_campo_tecnico}`" class="form-label">{{ campo.etiqueta_visible }}</label><input v-if="campo.tipo_input === 'texto'" type="text" :id="`opcional-${campo.nombre_campo_tecnico}`" v-model="formState[campo.nombre_campo_tecnico]" class="form-input mt-1" /><v-select v-else-if="campo.tipo_input === 'select_cliente'" :id="`opcional-${campo.nombre_campo_tecnico}`" v-model="formState.cliente_id" :options="opcionesSelect.clientes" placeholder="-- Buscar cliente --" class="mt-1"></v-select><v-select v-else-if="campo.tipo_input === 'select_transporte'" :id="`opcional-${campo.nombre_campo_tecnico}`" v-model="formState.transporte_id" :options="opcionesSelect.transportes" placeholder="-- Buscar transporte --" class="mt-1"></v-select><v-select v-else-if="campo.tipo_input === 'select_proveedor'" :id="`opcional-${campo.nombre_campo_tecnico}`" v-model="formState.proveedor_id" :options="opcionesSelect.proveedores" placeholder="-- Buscar proveedor --" class="mt-1"></v-select><button type="button" @click="quitarCampoOpcional(campo)" class="btn-remove-optional"><svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z" clip-rule="evenodd" /></svg></button></div></template></div></fieldset></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="fixed bottom-0 left-0 right-0 bg-white border-t border-gray-200 shadow-lg-top z-10">
+      <div class="max-w-4xl mx-auto px-6 sm:px-8 py-4">
+        <div v-if="stepError" class="text-center text-red-600 text-sm mb-2">{{ stepError }}</div>
+        <div v-if="currentStep === 1" class="flex items-center justify-end gap-x-6"><button type="button" @click="emit('cancelar')" class="btn-secondary min-h-[44px]">Cancelar</button><button type="button" @click="nextStep" class="btn-primary min-h-[44px]">Siguiente</button></div>
+        <div v-if="currentStep === 2" class="flex items-center justify-between gap-x-6"><button type="button" @click="prevStep" class="btn-secondary min-h-[44px]">Atrás</button><div class="flex items-center gap-x-6"><button type="button" @click="emit('cancelar')" class="btn-secondary min-h-[44px]">Cancelar</button><button type="submit" :disabled="loading" class="btn-primary min-h-[44px]"><span v-if="loading">Guardando...</span><span v-else>{{ isEditMode ? 'Actualizar Gasto' : 'Guardar Gasto' }}</span></button></div></div>
+      </div>
+    </div>
+  </form>
+</template>
