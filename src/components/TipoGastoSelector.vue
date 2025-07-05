@@ -1,8 +1,9 @@
+<!-- src/components/TipoGastoSelector.vue -->
 <script setup>
-// No se necesitan otras importaciones de Vue para esta lógica.
+import { computed } from 'vue';
 
 const props = defineProps({
-  modelValue: { // Para compatibilidad con v-model
+  modelValue: {
     type: [Number, String],
     default: null
   },
@@ -18,10 +19,6 @@ function selectTipo(tipoId) {
   emit('update:modelValue', tipoId);
 }
 
-// INICIO: FASE 3.2 - Lógica para estilos dinámicos
-// Esta función genera los estilos CSS en línea para cada tarjeta.
-// Si la tarjeta está seleccionada y tiene un color de acento, lo aplica
-// como una variable CSS que el <style> puede usar.
 const getCardStyle = (tipo) => {
   if (props.modelValue === tipo.id && tipo.color_accent) {
     return {
@@ -30,8 +27,8 @@ const getCardStyle = (tipo) => {
   }
   return {};
 };
-// FIN: FASE 3.2
 </script>
+
 <template>
   <div class="tipo-gasto-grid">
     <button
@@ -43,12 +40,12 @@ const getCardStyle = (tipo) => {
       :style="getCardStyle(tipo)"
       @click="selectTipo(tipo.id)"
     >
-      <!-- INICIO: FASE 3.2 - Placeholder para un futuro ícono -->
-      <div v-if="tipo.icon_name" class="icon-placeholder">
-        <!-- Mostramos la primera letra del nombre del icono como un simple placeholder visual -->
-        <span>{{ tipo.icon_name.charAt(0).toUpperCase() }}</span>
-      </div>
-      <!-- FIN: FASE 3.2 -->
+      <!-- --- INICIO DE MI CORRECCIÓN --- -->
+      <!-- Añadida la clase 'icon-wrapper' que faltaba para darle tamaño al div -->
+      <div v-if="tipo.icono_svg" class="icon-wrapper" v-html="tipo.icono_svg"></div>
+      <!-- Si no hay icono, se muestra un placeholder para mantener la estructura -->
+      <div v-else class="icon-placeholder"></div>
+      <!-- --- FIN DE MI CORRECIÓN --- -->
 
       <span class="card-text">{{ tipo.nombre_tipo_gasto }}</span>
       
@@ -66,37 +63,41 @@ const getCardStyle = (tipo) => {
     </button>
   </div>
 </template>
+
 <style scoped>
 .tipo-gasto-grid {
-  @apply grid grid-cols-2 sm:grid-cols-3 gap-3;
+  @apply grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3;
 }
 
 .tipo-gasto-card {
-  @apply relative flex flex-col items-center justify-center p-3 h-20 min-h-[44px] rounded-lg border-2 border-gray-200 bg-white text-center font-semibold text-gray-700 transition-all duration-200 ease-in-out;
+  @apply relative flex flex-col items-center justify-center p-3 h-24 rounded-xl border-2 border-gray-200 bg-white text-center font-semibold text-gray-700 transition-all duration-200 ease-in-out; /* Aumentado a rounded-xl */
   @apply hover:border-gray-400 hover:shadow-md;
   @apply focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500;
 }
 
-/* INICIO: FASE 3.2 - Uso de la variable CSS para el color de acento */
 .tipo-gasto-card.selected {
-  /* Usamos la variable CSS. Si no está definida, usa el color índigo por defecto. */
   border-color: var(--card-accent-color, #4f46e5);
   color: var(--card-accent-color, #4f46e5);
   @apply bg-white shadow-lg ring-2 ring-offset-1;
   ring-color: var(--card-accent-color, #4f46e5);
 }
-/* FIN: FASE 3.2 */
 
-/* INICIO: FASE 3.2 - Estilos para el placeholder del icono */
+.icon-wrapper, .icon-placeholder {
+  @apply w-8 h-8 mb-2 text-gray-400 transition-colors;
+}
+
 .icon-placeholder {
-  @apply w-8 h-8 mb-1 rounded-full flex items-center justify-center bg-gray-100 text-gray-400 font-bold text-lg;
+  @apply bg-gray-100 rounded-lg; /* Placeholder visible si no hay icono */
 }
 
-.tipo-gasto-card.selected .icon-placeholder {
-  background-color: var(--card-accent-color, #4f46e5);
-  @apply text-white;
+.icon-wrapper :deep(svg) {
+  @apply w-full h-full;
+  stroke-width: 1.5;
 }
-/* FIN: FASE 3.2 */
+
+.tipo-gasto-card.selected .icon-wrapper {
+  color: var(--card-accent-color, #4f46e5);
+}
 
 .card-text {
   @apply text-sm font-normal text-gray-600;
