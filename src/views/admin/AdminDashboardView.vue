@@ -164,6 +164,17 @@ onMounted(() => {
           <div class="module-card-icon bg-sky-100 text-sky-600"><svg xmlns="http://www.w3.org/2000/svg" class="h-8 w-8" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z" /></svg></div>
           <div><h3 class="module-card-title">Clientes</h3><p class="module-card-description">Gestionar la base de datos de clientes.</p></div>
         </router-link>
+        <router-link :to="{ name: 'AdminVehiculos' }" class="module-card group">
+          <div class="module-card-icon bg-gray-100 text-gray-600">
+            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-8 h-8">
+              <path stroke-linecap="round" stroke-linejoin="round" d="M8.25 18.75a1.5 1.5 0 01-3 0m3 0a1.5 1.5 0 00-3 0m3 0h6m-9 0H3.375a1.125 1.125 0 01-1.125-1.125V14.25m17.25 4.5a1.5 1.5 0 01-3 0m3 0a1.5 1.5 0 00-3 0m3 0h1.125c.621 0 1.125-.504 1.125-1.125V14.25m-17.25 4.5v-1.875a3.375 3.375 0 013.375-3.375h1.5a1.125 1.125 0 011.125 1.125v-1.5a3.375 3.375 0 00-3.375-3.375H5.25m5.25 9v-4.5m0 4.5h.75M12 14.25h.75m-4.5 4.5H12m-4.5-4.5H12" />
+            </svg>
+          </div>
+          <div>
+            <h3 class="module-card-title">Flota de Vehículos</h3>
+            <p class="module-card-description">Gestionar las unidades de la empresa.</p>
+          </div>
+        </router-link>
 
         <router-link :to="{ name: 'AdminTransportes' }" class="module-card group">
           <div class="module-card-icon bg-amber-100 text-amber-600"><svg xmlns="http://www.w3.org/2000/svg" class="h-8 w-8" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path d="M9 17a2 2 0 11-4 0 2 2 0 014 0zM19 17a2 2 0 11-4 0 2 2 0 014 0z" /><path stroke-linecap="round" stroke-linejoin="round" d="M13 16V6a1 1 0 00-1-1H4a1 1 0 00-1 1v8h11zM12 5l1.5 1.5M12 5l-1.5 1.5M12 5v2M17 16h-4M17 11h-4M17 8h-4" /></svg></div>

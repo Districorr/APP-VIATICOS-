@@ -5,6 +5,7 @@ import { supabase } from '../supabaseClient.js';
 // import { getInitialUser } from '../supabaseClient.js'; // Esta importación no es usada directamente en el guardián
 
 // --- Importación de Vistas de Usuario ---
+import AdminVehiculosView from '../views/admin/AdminVehiculosView.vue'
 import LoginView from '../views/LoginView.vue';
 import RegisterView from '../views/RegisterView.vue';
 import DashboardView from '../views/DashboardView.vue';
@@ -163,6 +164,7 @@ const routes = [
       { path: 'analiticas', name: 'AdminAnalytics', component: AdminAnalyticsView, meta: { title: 'Admin: Gráficos y Estadísticas' } },
       { path: 'clientes', name: 'AdminClientes', component: AdminClientesView, meta: { title: 'Admin: Clientes' } },
       { path: 'transportes', name: 'AdminTransportes', component: AdminTransportesView, meta: { title: 'Admin: Transportes' } },
+      { path: 'vehiculos', name: 'AdminVehiculos', component: AdminVehiculosView, meta: { title: 'Admin: Flota de Vehículos' } },
     ]
   },
   

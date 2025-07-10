@@ -5,6 +5,7 @@ import { formatCurrency, formatCurrencyForInput } from '../utils/formatters.js';
 import vSelect from 'vue-select';
 import 'vue-select/dist/vue-select.css';
 import TipoGastoSelector from './TipoGastoSelector.vue';
+import { useRouter } from 'vue-router'; // Importar useRouter
 
 const props = defineProps({
   formatoId: { type: [Number, String], required: true },
@@ -13,16 +14,17 @@ const props = defineProps({
   viajeIdPredeterminado: { type: [Number, String], default: null },
   cajaIdPredeterminada: { type: [Number, String], default: null }
 });
-const emit = defineEmits(['gasto-guardado', 'cancelar']);
+const emit = defineEmits(['gasto-guardado', 'cancelar']); // Corregido: defineEmits('gasto-guardado', 'cancelar') a defineEmits(['gasto-guardado', 'cancelar'])
+
+const router = useRouter(); // Inicializar router
 
 const currentStep = ref(1);
 const stepError = ref('');
-const loading = ref(true); // Loading principal para la estructura del form
+const loading = ref(true);
 const errorMessage = ref('');
 const successMessage = ref('');
 const isEditMode = computed(() => !!props.gastoId);
 
-// --- INICIO DE MI MODIFICACIÓN: Estados de carga para selects ---
 const loadingSelects = reactive({
   viajes: true,
   clientes: true,
@@ -30,8 +32,8 @@ const loadingSelects = reactive({
   proveedores: true,
   cajas_chicas: true,
   usuariosParaDelegar: true,
+  vehiculos: true,
 });
-// --- FIN DE MI MODIFICACIÓN ---
 
 const formState = reactive({});
 const opcionesSelect = ref({
@@ -41,7 +43,8 @@ const opcionesSelect = ref({
   transportes: [],
   proveedores: [],
   cajas_chicas: [],
-  usuariosParaDelegar: []
+  usuariosParaDelegar: [],
+  vehiculos: [],
 });
 
 const facturaFile = ref(null);
@@ -57,6 +60,9 @@ const camposObligatorios = ref([]);
 const camposOpcionales = ref([]);
 const camposOpcionalesVisibles = ref(new Set());
 const formattedMontoTotal = ref('');
+
+const duplicationWarning = ref('');
+const duplicationCheckTimeout = ref(null);
 
 const provincias = ref(['Buenos Aires', 'CABA', 'Catamarca', 'Chaco', 'Chubut', 'Córdoba', 'Corrientes', 'Entre Ríos', 'Formosa', 'Jujuy', 'La Pampa', 'La Rioja', 'Mendoza', 'Misiones', 'Neuquén', 'Río Negro', 'Salta', 'San Juan', 'San Luis', 'Santa Cruz', 'Santa Fe', 'Santiago del Estero', 'Tierra del Fuego', 'Tucumán']);
 
@@ -83,7 +89,6 @@ const formattedMontoIva = computed(() => {
   return '';
 });
 
-// --- INICIO DE MI MODIFICACIÓN: Lógica de Carga Optimizada ---
 async function cargarDatosCriticos() {
   try {
     const { data: { user } } = await supabase.auth.getUser();
@@ -110,7 +115,7 @@ async function cargarDatosCriticos() {
 
   } catch (e) {
     errorMessage.value = `Error crítico al cargar el formulario: ${e.message}`;
-    loading.value = false; // Detener la carga si lo crítico falla
+    loading.value = false;
   }
 }
 
@@ -119,14 +124,14 @@ async function cargarDatosSecundarios() {
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) return;
 
-    // Lanzamos todas las promesas y las manejamos individualmente
     const promesas = {
       viajes: supabase.from('viajes').select('id, nombre_viaje').eq('user_id', user.id).is('cerrado_en', null),
       clientes: supabase.from('clientes').select('id, nombre_cliente'),
       transportes: supabase.from('transportes').select('id, nombre'),
       proveedores: supabase.from('proveedores').select('id, nombre').eq('activo', true),
       cajasChicas: supabase.from('cajas_chicas').select('id, nombre, saldo_actual').eq('responsable_id', user.id).eq('activo', true),
-      todosLosUsuarios: supabase.from('perfiles').select('id, nombre_completo, email')
+      todosLosUsuarios: supabase.from('perfiles').select('id, nombre_completo, email'),
+      vehiculos: supabase.from('vehiculos').select('id, patente, marca, modelo').eq('activo', true),
     };
 
     for (const key in promesas) {
@@ -139,6 +144,8 @@ async function cargarDatosSecundarios() {
             opcionesSelect.value.cajas_chicas = (data || []).map(c => ({ label: `${c.nombre} (Saldo: ${formatCurrency(c.saldo_actual)})`, value: c.id }));
           } else if (key === 'todosLosUsuarios') {
             opcionesSelect.value.usuariosParaDelegar = (data || []).filter(u => u.id !== user.id);
+          } else if (key === 'vehiculos') {
+            opcionesSelect.value.vehiculos = (data || []).map(v => ({ label: `${v.marca || ''} ${v.modelo || ''} (${v.patente})`, value: v.id }));
           } else {
             opcionesSelect.value[key] = data || [];
           }
@@ -156,11 +163,9 @@ onMounted(async () => {
   loading.value = true;
   await cargarDatosCriticos();
   
-  // Si estamos en modo edición, cargamos los datos del gasto
   if (isEditMode.value) {
     await cargarGastoParaEditar();
   } else {
-    // Aplicamos valores por defecto si es un gasto nuevo
     if (props.viajeIdPredeterminado) formState.viaje_id = parseInt(props.viajeIdPredeterminado);
     if (props.cajaIdPredeterminada) {
       useCajaDiaria.value = true;
@@ -168,14 +173,9 @@ onMounted(async () => {
     }
   }
 
-  // El formulario ya es visible, ahora cargamos el resto en segundo plano
   loading.value = false;
   cargarDatosSecundarios();
 });
-// --- FIN DE MI MODIFICACIÓN ---
-
-// ... (El resto de tus funciones como inicializarFormState, cargarGastoParaEditar, etc., se mantienen igual)
-// ... (Solo he movido la lógica de carga a las nuevas funciones)
 
 function inicializarFormState() {
   const camposFijos = { fecha_gasto: new Date().toISOString().split('T')[0], monto_total: 0, monto_iva: 0, moneda: 'ARS', descripcion_general: '', numero_factura: '', viaje_id: null, caja_id: null, tipo_gasto_id: null, adelanto_especifico_aplicado: null, factura_url: null, provincia: null };
@@ -230,6 +230,37 @@ watch([() => formState.monto_total, sinFactura], ([newMonto, noTieneFactura]) =>
 
 watch(sinFactura, (esSinFactura) => { if (esSinFactura) formState.numero_factura = ''; });
 
+watch(() => [formState.numero_factura, formState.proveedor_id], ([numFactura, provId]) => {
+  clearTimeout(duplicationCheckTimeout.value);
+  duplicationWarning.value = '';
+  if (!numFactura || sinFactura.value || !provId) {
+    return;
+  }
+  duplicationCheckTimeout.value = setTimeout(async () => {
+    try {
+      const proveedorIdFinal = provId.value || provId;
+      let query = supabase
+        .from('gastos')
+        .select('id', { count: 'exact', head: true })
+        .eq('numero_factura', numFactura)
+        .eq('proveedor_id', proveedorIdFinal);
+      
+      if (isEditMode.value) {
+        query = query.neq('id', props.gastoId);
+      }
+      
+      const { count, error } = await query;
+      if (error) throw error;
+
+      if (count > 0) {
+        duplicationWarning.value = 'Alerta: Ya existe un gasto con este N° de factura y proveedor.';
+      }
+    } catch (e) {
+      console.error("Error verificando duplicados:", e.message);
+    }
+  }, 800);
+});
+
 const handleFacturaChange = (event) => {
   const file = event.target.files[0];
   if (file) {
@@ -276,9 +307,7 @@ async function handleSubmit() {
       finalFacturaUrl = supabase.storage.from('facturas').getPublicUrl(filePath).data.publicUrl;
     }
 
-    const CAMPOS_FIJOS_TABLA = ['id', 'user_id', 'creado_por_id', 'estado_delegacion', 'formato_id', 'fecha_gasto', 'monto_total', 'monto_iva', 'moneda', 'descripcion_general', 'numero_factura', 'viaje_id', 'caja_id', 'tipo_gasto_id', 'cliente_id', 'transporte_id', 'proveedor_id', 'adelanto_especifico_aplicado', 'factura_url', 'datos_adicionales', 'provincia'];
-    
-    const payload = {
+    const payloadBase = {
       formato_id: props.formatoId,
       fecha_gasto: formState.fecha_gasto,
       monto_total: formState.monto_total,
@@ -295,21 +324,8 @@ async function handleSubmit() {
       provincia: formState.provincia,
     };
 
-    if (isDelegating.value) {
-      payload.user_id = delegatedToUserId.value;
-      payload.creado_por_id = user.id;
-      payload.estado_delegacion = 'pendiente_aceptacion';
-      payload.viaje_id = null;
-      payload.caja_id = null;
-    } else {
-      payload.user_id = user.id;
-      payload.creado_por_id = null;
-      payload.estado_delegacion = 'directo';
-      payload.viaje_id = useCajaDiaria.value ? null : formState.viaje_id;
-      payload.caja_id = useCajaDiaria.value ? selectedCajaId.value : null;
-    }
-
     const datosAdicionales = {};
+    const CAMPOS_FIJOS_TABLA = ['id', 'user_id', 'creado_por_id', 'estado_delegacion', 'formato_id', 'fecha_gasto', 'monto_total', 'monto_iva', 'moneda', 'descripcion_general', 'numero_factura', 'viaje_id', 'caja_id', 'tipo_gasto_id', 'cliente_id', 'transporte_id', 'proveedor_id', 'adelanto_especifico_aplicado', 'factura_url', 'datos_adicionales', 'provincia'];
     const todosLosCamposDelFormato = [...camposObligatorios.value, ...camposOpcionales.value];
     todosLosCamposDelFormato.forEach(campo => {
       const nombreTecnico = campo.nombre_campo_tecnico;
@@ -319,36 +335,129 @@ async function handleSubmit() {
         }
       }
     });
-    payload.datos_adicionales = Object.keys(datosAdicionales).length > 0 ? datosAdicionales : null;
+    payloadBase.datos_adicionales = Object.keys(datosAdicionales).length > 0 ? datosAdicionales : null;
 
-    const { data: gastoGuardadoData, error } = isEditMode.value
-      ? await supabase.from('gastos').update(payload).eq('id', props.gastoId).select().single()
-      : await supabase.from('gastos').insert(payload).select().single();
+    let gastoGuardadoData;
+    let error;
 
-    if (error) throw new Error(`Error al guardar el gasto: ${error.message}`);
+    // --- INICIO DE LA MODIFICACIÓN CRÍTICA ---
+    // Ajuste en la lógica para garantizar que se usa el RPC para delegar,
+    // y para depuración.
+    console.log("Submit: isDelegating.value:", isDelegating.value); // DEBUG
+    console.log("Submit: isEditMode.value:", isEditMode.value); // DEBUG
+    
+    if (isEditMode.value) { // Edición de un gasto existente
+        const payloadUpdate = { ...payloadBase };
+        if (isDelegating.value) { // Si se está editando Y re-delegando
+            console.log("Submit: Editando y Re-delegando. Llamando a RPC."); // DEBUG
+            // Aunque es edición, si se delega, es un nuevo flujo que debe pasar por RPC de creación
+            // ya que el estado original del gasto cambia drásticamente.
+            // Para simplificar, asumimos que re-delegar es casi como crear uno nuevo en otro contexto.
+            // La BD asignará el estado 'pendiente_aceptacion'.
+            const { data, error: rpcError } = await supabase.rpc('crear_gasto_delegado', {
+                payload: {
+                    ...payloadBase,
+                    user_id: delegatedToUserId.value, // Nuevo receptor
+                }
+            });
+            gastoGuardadoData = data;
+            error = rpcError;
+
+            // Si es edición Y re-delegación, el gasto original DEBE ser marcado como inválido o borrado
+            // para evitar duplicados. Esto es una consideración de negocio.
+            // Por ahora, solo lanzamos un error para evitar un estado inconsistente.
+            if (!error) { // Si el nuevo gasto delegado se creó bien, invalidar el original si no es el mismo
+                if (props.gastoId && gastoGuardadoData.id !== props.gastoId) {
+                    const { error: deleteOriginalError } = await supabase.from('gastos').delete().eq('id', props.gastoId);
+                    if (deleteOriginalError) console.error("Error al borrar el gasto original en re-delegación:", deleteOriginalError);
+                }
+            }
+
+        } else { // Edición normal (no delegando)
+            console.log("Submit: Editando gasto existente (normal)."); // DEBUG
+            payloadUpdate.user_id = user.id; // El usuario sigue siendo el dueño
+            payloadUpdate.creado_por_id = null; // Si se edita, ya no es "creado por otro"
+            payloadUpdate.estado_delegacion = 'directo'; // Vuelve a estado normal
+            payloadUpdate.viaje_id = useCajaDiaria.value ? null : formState.viaje_id;
+            payloadUpdate.caja_id = useCajaDiaria.value ? selectedCajaId.value : null;
+
+            ({ data: gastoGuardadoData, error } = await supabase.from('gastos').update(payloadUpdate).eq('id', props.gastoId).select().single());
+        }
+
+    } else { // Creación de un gasto nuevo
+        if (isDelegating.value) {
+            console.log("Submit: Creando y Delegando (NUEVO GASTO). Llamando a RPC."); // DEBUG
+            const payloadDelegado = {
+                ...payloadBase,
+                user_id: delegatedToUserId.value,
+            };
+            const { data, error: rpcError } = await supabase.rpc('crear_gasto_delegado', { payload: payloadDelegado });
+            gastoGuardadoData = data;
+            error = rpcError;
+        } else {
+            console.log("Submit: Creando gasto propio (NUEVO GASTO). Llamando a INSERT directo."); // DEBUG
+            let payloadPropio = {
+                ...payloadBase,
+                user_id: user.id,
+                creado_por_id: null,
+                estado_delegacion: 'directo',
+                viaje_id: useCajaDiaria.value ? null : formState.viaje_id,
+                caja_id: useCajaDiaria.value ? selectedCajaId.value : null,
+            };
+            ({ data: gastoGuardadoData, error } = await supabase.from('gastos').insert(payloadPropio).select().single());
+        }
+    }
+    // --- FIN DE LA MODIFICACIÓN CRÍTICA ---
+
+    if (error) {
+      if (error.code === '23505' && error.message.includes('unique_factura_proveedor')) {
+        throw new Error('Error: Ya existe un gasto con este número de factura para este proveedor. No se puede guardar un duplicado.');
+      }
+      throw new Error(`Error al guardar el gasto: ${error.message}`);
+    }
 
     if (useCajaDiaria.value && !isDelegating.value) {
       const { error: rpcError } = await supabase.rpc('registrar_gasto_caja_chica', { p_gasto_id: gastoGuardadoData.id, p_caja_id: selectedCajaId.value }).single();
       if (rpcError) throw new Error(`Problema con Caja Diaria: ${rpcError.message}`);
     }
 
-    if (isDelegating.value) {
+    if (isDelegating.value) { // Solo si se delegó (o re-delegó)
       const { data: delegadorProfile } = await supabase.from('perfiles').select('nombre_completo').eq('id', user.id).single();
       const nombreDelegador = delegadorProfile?.nombre_completo || user.email;
-      const { error: notifError } = await supabase.from('notificaciones').insert({
-        user_id: delegatedToUserId.value,
-        mensaje: `${nombreDelegador} te ha delegado un gasto de ${formatCurrency(payload.monto_total)} para que lo incluyas en una de tus rendiciones.`,
-        link_a: '/rendiciones/delegados',
-        tipo: 'delegacion_gasto'
+      
+      const { error: notifError } = await supabase.rpc('crear_notificacion_delegacion', {
+        p_receptor_id: delegatedToUserId.value,
+        p_mensaje: `${nombreDelegador} te ha delegado un gasto de ${formatCurrency(gastoGuardadoData.monto_total)} para que lo incluyas en una de tus rendiciones.`,
+        p_link: '/rendiciones/delegados'
       });
+
       if (notifError) console.warn("Gasto delegado guardado, pero falló la notificación:", notifError.message);
     }
 
-    successMessage.value = `Gasto ${isEditMode.value ? 'actualizado' : 'registrado'} con éxito.`;
+    let feedbackMessage = `Gasto ${isEditMode.value ? 'actualizado' : 'creado'} con éxito.`;
+    let redirectTo = { name: 'Dashboard' };
+
+    if (isDelegating.value) {
+      const receptor = opcionesSelect.value.usuariosParaDelegar.find(u => u.id === delegatedToUserId.value);
+      const nombreReceptor = receptor?.nombre_completo || 'el usuario seleccionado';
+      feedbackMessage = `Gasto delegado a ${nombreReceptor} con éxito. Serás notificado de su decisión.`;
+      // Redirigimos al usuario a su lista de rendiciones para que continúe su trabajo.
+      redirectTo = { name: 'ViajesListUser' }; 
+    } else if (gastoGuardadoData?.caja_id) {
+      redirectTo = { name: 'CajaDiaria' };
+    } else if (gastoGuardadoData?.viaje_id) {
+      redirectTo = { name: 'GastosListUser', query: { viajeId: gastoGuardadoData.viaje_id } };
+    }
+
+    successMessage.value = feedbackMessage;
     if (formState.provincia) localStorage.setItem('lastUsedProvincia', formState.provincia);
     if (formState.viaje_id) localStorage.setItem('lastUsedViajeId', formState.viaje_id);
 
-    setTimeout(() => { emit('gasto-guardado', gastoGuardadoData); }, 1000);
+    setTimeout(() => {
+      router.push({ ...redirectTo, query: { ...redirectTo.query, feedback: feedbackMessage } });
+    }, 1500); 
+    emit('gasto-guardado', gastoGuardadoData);
+
   } catch (e) {
     errorMessage.value = `Error al guardar: ${e.message}`;
   } finally {
@@ -356,7 +465,6 @@ async function handleSubmit() {
   }
 }
 </script>
-
 <template>
   <div v-if="loading" class="text-center py-12">
     <svg class="animate-spin h-10 w-10 text-indigo-600 mx-auto" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg>
@@ -399,12 +507,16 @@ async function handleSubmit() {
                   <input type="text" id="monto_iva" :value="formattedMontoIva" disabled class="form-input mt-1 bg-gray-100 cursor-not-allowed text-right" />
                 </div>
               </transition>
-              <div class="sm:col-span-2 grid grid-cols-1 sm:grid-cols-2 gap-6 items-end">
+              <div class="sm:col-span-2 grid grid-cols-1 sm:grid-cols-2 gap-x-6 gap-y-2 items-start">
                   <div class="input-wrapper">
                       <label for="numero_factura" class="form-label">N° de Factura</label>
                       <input type="text" id="numero_factura" v-model="formState.numero_factura" :disabled="sinFactura" class="form-input mt-1" :class="{ 'bg-gray-100 cursor-not-allowed': sinFactura }" title="Número del comprobante o factura"/>
+                      <!-- Alerta de Duplicados (Prioridad 2) -->
+                      <div v-if="duplicationWarning" class="mt-2 p-2 bg-yellow-100 border-l-4 border-yellow-500 text-yellow-800 text-xs rounded-md">
+                        <p>{{ duplicationWarning }}</p>
+                      </div>
                   </div>
-                  <div class="flex items-center h-full pb-1.5">
+                  <div class="flex items-center h-full pt-6">
                       <div class="flex items-center">
                           <label class="checkbox-wrapper"><input id="sin_factura_check" type="checkbox" v-model="sinFactura" class="checkbox-native" /><span class="checkbox-custom"></span></label>
                           <label for="sin_factura_check" class="ml-2 block text-sm text-gray-900 cursor-pointer">Este gasto no tiene factura</label>
@@ -444,7 +556,50 @@ async function handleSubmit() {
           </fieldset>
           
           <fieldset v-if="camposObligatorios.length > 0" class="mt-8"><legend class="form-legend">Detalles Específicos del Formato</legend><div class="grid grid-cols-1 sm:grid-cols-2 gap-6"><div v-for="campo in camposObligatorios" :key="campo.id" class="input-wrapper"><label :for="campo.nombre_campo_tecnico" class="form-label">{{ campo.etiqueta_visible }} <span v-if="campo.es_obligatorio" class="text-red-500">*</span></label><input v-if="campo.tipo_input === 'texto'" type="text" :id="campo.nombre_campo_tecnico" v-model="formState[campo.nombre_campo_tecnico]" :required="campo.es_obligatorio" class="form-input mt-1" /><v-select v-else-if="campo.tipo_input === 'select_cliente'" :id="campo.nombre_campo_tecnico" v-model="formState.cliente_id" :options="opcionesSelect.clientes" placeholder="-- Buscar cliente --" class="mt-1" :class="{ 'v-select-required': campo.es_obligatorio && !formState.cliente_id }"></v-select><v-select v-else-if="campo.tipo_input === 'select_transporte'" :id="campo.nombre_campo_tecnico" v-model="formState.transporte_id" :options="opcionesSelect.transportes" placeholder="-- Buscar transporte --" class="mt-1" :class="{ 'v-select-required': campo.es_obligatorio && !formState.transporte_id }"></v-select><v-select v-else-if="campo.tipo_input === 'select_proveedor'" :id="campo.nombre_campo_tecnico" v-model="formState.proveedor_id" :options="opcionesSelect.proveedores" placeholder="-- Buscar proveedor --" class="mt-1" :class="{ 'v-select-required': campo.es_obligatorio && !formState.proveedor_id }"></v-select></div></div></fieldset>
-          <div class="border-t border-gray-200 pt-6 mt-8"><h3 class="text-base font-semibold leading-7 text-gray-900">¿Necesitas más detalles?</h3><p class="mt-1 text-sm leading-6 text-gray-600">Añade solo los campos que necesites para este gasto.</p><div class="mt-4 flex flex-wrap gap-3"><template v-for="campo in camposOpcionales" :key="`btn-${campo.id}`"><button v-if="!camposOpcionalesVisibles.has(campo.nombre_campo_tecnico)" type="button" @click="agregarCampoOpcional(campo)" class="btn-add-optional">+ {{ campo.etiqueta_visible }}</button></template></div><fieldset v-if="camposOpcionalesVisibles.size > 0" class="mt-6"><div class="grid grid-cols-1 sm:grid-cols-2 gap-6"><template v-for="campo in camposOpcionales" :key="campo.id"><div v-if="camposOpcionalesVisibles.has(campo.nombre_campo_tecnico)" class="relative group input-wrapper"><label :for="`opcional-${campo.nombre_campo_tecnico}`" class="form-label">{{ campo.etiqueta_visible }}</label><input v-if="campo.tipo_input === 'texto'" type="text" :id="`opcional-${campo.nombre_campo_tecnico}`" v-model="formState[campo.nombre_campo_tecnico]" class="form-input mt-1" /><v-select v-else-if="campo.tipo_input === 'select_cliente'" :id="`opcional-${campo.nombre_campo_tecnico}`" v-model="formState.cliente_id" :options="opcionesSelect.clientes" placeholder="-- Buscar cliente --" class="mt-1"></v-select><v-select v-else-if="campo.tipo_input === 'select_transporte'" :id="`opcional-${campo.nombre_campo_tecnico}`" v-model="formState.transporte_id" :options="opcionesSelect.transportes" placeholder="-- Buscar transporte --" class="mt-1"></v-select><v-select v-else-if="campo.tipo_input === 'select_proveedor'" :id="`opcional-${campo.nombre_campo_tecnico}`" v-model="formState.proveedor_id" :options="opcionesSelect.proveedores" placeholder="-- Buscar proveedor --" class="mt-1"></v-select><button type="button" @click="quitarCampoOpcional(campo)" class="btn-remove-optional" aria-label="Quitar campo"><svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z" clip-rule="evenodd" /></svg></button></div></template></div></fieldset></div>
+          
+          <div class="border-t border-gray-200 pt-6 mt-8">
+            <h3 class="text-base font-semibold leading-7 text-gray-900">¿Necesitas más detalles?</h3>
+            <p class="mt-1 text-sm leading-6 text-gray-600">Añade solo los campos que necesites para este gasto.</p>
+            <div class="mt-4 flex flex-wrap gap-3">
+              <template v-for="campo in camposOpcionales" :key="`btn-${campo.id}`">
+                <button v-if="!camposOpcionalesVisibles.has(campo.nombre_campo_tecnico)" type="button" @click="agregarCampoOpcional(campo)" class="btn-add-optional">+ {{ campo.etiqueta_visible }}</button>
+              </template>
+              <button v-if="!camposOpcionalesVisibles.has('vehiculo_id')" type="button" @click="agregarCampoOpcional({nombre_campo_tecnico: 'vehiculo_id'})" class="btn-add-optional">+ Vehículo</button>
+            </div>
+            
+            <fieldset v-if="camposOpcionalesVisibles.size > 0" class="mt-6">
+              <div class="grid grid-cols-1 sm:grid-cols-2 gap-6">
+                <template v-for="campo in camposOpcionales" :key="campo.id">
+                  <div v-if="camposOpcionalesVisibles.has(campo.nombre_campo_tecnico)" class="relative group input-wrapper">
+                    <label :for="`opcional-${campo.nombre_campo_tecnico}`" class="form-label">{{ campo.etiqueta_visible }}</label>
+                    <input v-if="campo.tipo_input === 'texto'" type="text" :id="`opcional-${campo.nombre_campo_tecnico}`" v-model="formState[campo.nombre_campo_tecnico]" class="form-input mt-1" />
+                    <v-select v-else-if="campo.tipo_input === 'select_cliente'" :id="`opcional-${campo.nombre_campo_tecnico}`" v-model="formState.cliente_id" :options="opcionesSelect.clientes" placeholder="-- Buscar cliente --" class="mt-1"></v-select>
+                    <v-select v-else-if="campo.tipo_input === 'select_transporte'" :id="`opcional-${campo.nombre_campo_tecnico}`" v-model="formState.transporte_id" :options="opcionesSelect.transportes" placeholder="-- Buscar transporte --" class="mt-1"></v-select>
+                    <v-select v-else-if="campo.tipo_input === 'select_proveedor'" :id="`opcional-${campo.nombre_campo_tecnico}`" v-model="formState.proveedor_id" :options="opcionesSelect.proveedores" placeholder="-- Buscar proveedor --" class="mt-1"></v-select>
+                    <button type="button" @click="quitarCampoOpcional(campo)" class="btn-remove-optional" aria-label="Quitar campo"><svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z" clip-rule="evenodd" /></svg></button>
+                  </div>
+                </template>
+                
+                <div v-if="camposOpcionalesVisibles.has('vehiculo_id')" class="relative group input-wrapper sm:col-span-2 p-4 border border-gray-200 rounded-lg bg-gray-50">
+                   <button type="button" @click="quitarCampoOpcional({nombre_campo_tecnico: 'vehiculo_id'})" class="btn-remove-optional" aria-label="Quitar sección de vehículo"><svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z" clip-rule="evenodd" /></svg></button>
+                   <div class="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                      <div>
+                        <label for="vehiculo_id" class="form-label">Unidad</label>
+                        <v-select id="vehiculo_id" v-model="formState.vehiculo_id" :options="opcionesSelect.vehiculos" :loading="loadingSelects.vehiculos" placeholder="-- Seleccionar --" class="mt-1 bg-white"></v-select>
+                      </div>
+                      <div>
+                        <label for="kilometraje_actual" class="form-label">KM Actual</label>
+                        <input type="number" id="kilometraje_actual" v-model="formState.kilometraje_actual" class="form-input mt-1" placeholder="Ej: 150000" />
+                      </div>
+                      <div>
+                        <label for="numero_remito_vehiculo" class="form-label">N° Remito</label>
+                        <input type="text" id="numero_remito_vehiculo" v-model="formState.numero_remito_vehiculo" class="form-input mt-1" />
+                      </div>
+                   </div>
+                </div>
+              </div>
+            </fieldset>
+          </div>
         </div>
       </div>
     </div>
@@ -472,7 +627,6 @@ async function handleSubmit() {
     </div>
   </form>
 </template>
-
 <style>
 :root {
   --vs-border-radius: 0.5rem;
@@ -503,7 +657,7 @@ async function handleSubmit() {
 }
 
 .btn-primary {
-  @apply inline-flex items-center justify-center rounded-lg bg-indigo-600 px-4 py-2 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-indigo-500 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-600 disabled:opacity-50;
+  @apply inline-flex items-center justify-center rounded-lg bg-indigo-600 px-4 py-2 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-indigo-500 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-600 disabled:opacity-50 disabled:bg-indigo-400;
 }
 .btn-secondary {
   @apply inline-flex items-center justify-center rounded-lg bg-white px-4 py-2 text-sm font-semibold text-gray-900 shadow-sm ring-1 ring-inset ring-gray-300 hover:bg-gray-50 disabled:opacity-50;
