@@ -1,4 +1,4 @@
-<!-- src/views/GastoFormView.vue -->
+--- START OF FILE src/views/GastoFormView.vue ---
 <script setup>
 import { ref, onMounted } from 'vue';
 import { useRouter, useRoute } from 'vue-router';
@@ -15,8 +15,8 @@ const formatoSeleccionadoId = ref(null);
 const nombreFormatoSeleccionado = ref('');
 
 // --- INICIO DE MI MODIFICACIÓN ---
-// Ahora el ID del gasto a editar se obtiene de la ruta de forma estándar
-const gastoIdToEdit = ref(route.params.gastoId || null); 
+// CORRECCIÓN: Ahora el ID del gasto a editar se obtiene de la ruta usando 'id'
+const gastoIdToEdit = ref(route.params.id || null); 
 const viajeIdPredeterminadoQuery = ref(route.query.viajeId || null);
 const cajaIdPredeterminadaQuery = ref(route.query.caja_id || null); // Añadido para soportar gastos de caja
 // --- FIN DE MI MODIFICACIÓN ---
@@ -48,7 +48,7 @@ onMounted(async () => {
     return;
   }
 
-  // --- MODO CREACIÓN ---
+  // --- MODO CREACIÓN (original) ---
   try {
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) throw new Error("Usuario no autenticado.");

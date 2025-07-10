@@ -1,3 +1,4 @@
+--- START OF FILE src/views/GastosDelegadosView.vue ---
 <script setup>
 import { ref, onMounted, computed } from 'vue';
 import { supabase } from '../supabaseClient.js';
@@ -6,7 +7,8 @@ import DelegatedExpenseCard from '../components/DelegatedExpenseCard.vue';
 
 // --- ESTADO PRINCIPAL ---
 const activeTab = ref('pendientes'); // 'pendientes' o 'historial'
-const historyFilter = ref('aceptados'); // 'aceptados' o 'rechazados'
+// CORRECCIÓN: Los filtros para el historial ahora deben ser singulares para coincidir con la DB
+const historyFilter = ref('aceptado'); // 'aceptado' o 'rechazado'
 const pendingExpenses = ref([]);
 const historyExpenses = ref([]); // Nuevo estado para el historial
 const loading = ref(true);
@@ -26,7 +28,10 @@ const selectedRendicionId = ref(null);
 // --- LÓGICA DE DATOS ---
 const filteredHistory = computed(() => {
   if (!historyExpenses.value) return [];
-  return historyExpenses.value.filter(h => h.decision === historyFilter.value);
+  // Normalizamos para asegurar la comparación, aunque los valores ya deberían coincidir
+  return historyExpenses.value.filter(h => 
+    String(h.decision || '').trim().toLowerCase() === String(historyFilter.value || '').trim().toLowerCase()
+  );
 });
 
 async function fetchPendingExpenses() {
@@ -34,25 +39,33 @@ async function fetchPendingExpenses() {
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) throw new Error('Usuario no autenticado.');
     
+    // La RPC devuelve TODOS los gastos delegados para este usuario, sin importar su estado final.
     const { data, error } = await supabase
       .rpc('obtener_gastos_recibidos', { p_user_id: user.id })
-      .select(`*, creador:creado_por_id (nombre_completo, email), tipo:tipo_gasto_id (nombre_tipo_gasto)`)
-      .eq('estado_delegacion', 'pendiente_aceptacion');
+      .select(`*, creador:creado_por_id (nombre_completo, email), tipo:tipo_gasto_id (nombre_tipo_gasto)`);
       
     if (error) throw error;
-    pendingExpenses.value = data || [];
+    
+    // CORRECCIÓN CRÍTICA: Filtrar los resultados localmente para obtener solo los pendientes
+    pendingExpenses.value = (data || []).filter(gasto => 
+      gasto.estado_delegacion === 'pendiente_aceptacion'
+    );
+
   } catch (e) {
     errorMessage.value = `Error al cargar pendientes: ${e.message}`;
+    console.error("Error in fetchPendingExpenses:", e);
   }
 }
 
 async function fetchHistory() {
   try {
+    // Esta RPC está diseñada para traer los datos del historial de decisiones.
     const { data, error } = await supabase.rpc('obtener_mi_historial_delegaciones');
     if (error) throw error;
     historyExpenses.value = data || [];
   } catch (e) {
     errorMessage.value = `Error al cargar el historial: ${e.message}`;
+    console.error("Error in fetchHistory:", e);
   }
 }
 
@@ -248,12 +261,13 @@ async function handleReject(gasto) {
       <!-- Contenido Pestaña Historial -->
       <div v-if="activeTab === 'historial'">
         <div class="flex justify-center gap-2 mb-6 bg-gray-100 p-1 rounded-lg">
-          <button @click="historyFilter = 'aceptados'" :class="['filter-button', { 'filter-active': historyFilter === 'aceptados' }]">Aceptados</button>
-          <button @click="historyFilter = 'rechazados'" :class="['filter-button', { 'filter-active': historyFilter === 'rechazados' }]">Rechazados</button>
+          <!-- CORRECCIÓN: Los valores de los botones deben ser singulares para coincidir con la DB -->
+          <button @click="historyFilter = 'aceptado'" :class="['filter-button', { 'filter-active': historyFilter === 'aceptado' }]">Aceptados</button>
+          <button @click="historyFilter = 'rechazado'" :class="['filter-button', { 'filter-active': historyFilter === 'rechazado' }]">Rechazados</button>
         </div>
         <div v-if="filteredHistory.length === 0" class="empty-state">
           <p class="text-gray-700 font-semibold">No hay registros</p>
-          <p class="text-gray-500 mt-1">Tu historial de gastos {{ historyFilter }} está vacío.</p>
+          <p class="text-gray-500 mt-1">Tu historial de gastos {{ historyFilter === 'aceptado' ? 'aceptados' : 'rechazados' }} está vacío.</p>
         </div>
         <div v-else class="space-y-4">
            <div v-for="item in filteredHistory" :key="item.id" class="bg-white p-4 rounded-lg shadow-md border"
