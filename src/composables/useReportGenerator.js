@@ -624,27 +624,6 @@ export function useReportGenerator() {
     doc.autoTable({ head, body, startY: currentY, theme: 'striped', headStyles: { fillColor: [13, 47, 91] }, styles: { cellPadding: 4 }, columnStyles: { 1: { halign: 'right' } } });
     doc.save(`Reporte_Gastos_${new Date().toISOString().split('T')[0]}.pdf`);
   };
-  // Pega esto justo antes de la línea del "return {"
-  const testSimplePDF = () => {
-    try {
-        console.log("Ejecutando Test de PDF Simple...");
-        const doc = new jsPDF();
-        doc.text("Prueba de PDF Simple", 15, 15);
-        doc.autoTable({
-            startY: 20,
-            head: [['Columna 1', 'Columna 2', 'Columna 3']],
-            body: [
-                ['Dato 1', 'Dato 2', 'Dato 3'],
-                ['Dato 4', 'Dato 5', 'Dato 6'],
-            ],
-        });
-        doc.save("test_simple.pdf");
-        console.log("Test de PDF Simple finalizado con éxito.");
-    } catch (e) {
-        console.error("Falló el Test de PDF Simple:", e);
-        alert("Falló la prueba simple de PDF. Revisa la consola.");
-    }
-  };
   return {
     generateCanvaStylePDF, // Exportamos la nueva función
     // --- Resto de exportaciones existentes ---
@@ -652,7 +631,6 @@ export function useReportGenerator() {
     calculateResumenGerencialPorTipo,
     prepararDetalleGastosParaLibroIVA,
     generateGastosPDF,
-    testSimplePDF,
     generateGastosExcel,
     generateAdminResumenTiposGastoExcel,
     generateAdminResumenTiposGastoPDF,

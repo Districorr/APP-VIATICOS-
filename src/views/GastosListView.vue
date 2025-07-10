@@ -610,11 +610,6 @@ const generarRendicionPDFWrapper = () => {
     </div>
     <!-- En GastosListView.vue, cerca del otro botón de exportar -->
     <div class="relative flex-shrink-0 flex items-center gap-2">
-    
-    <!-- BOTÓN DE PRUEBA TEMPORAL -->
-      <button @click="useReportGenerator().testSimplePDF()" class="bg-orange-500 text-white px-4 py-2 rounded-md">
-        Test PDF Simple
-      </button>
     </div>
 <!-- Mensaje de Selección de Rendición -->
 
