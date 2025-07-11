@@ -1,4 +1,3 @@
---- START OF FILE src/views/GastosDelegadosView.vue ---
 <script setup>
 import { ref, onMounted, computed } from 'vue';
 import { supabase } from '../supabaseClient.js';
@@ -6,11 +5,10 @@ import { formatDate, formatCurrency } from '../utils/formatters.js';
 import DelegatedExpenseCard from '../components/DelegatedExpenseCard.vue';
 
 // --- ESTADO PRINCIPAL ---
-const activeTab = ref('pendientes'); // 'pendientes' o 'historial'
-// CORRECCIÓN: Los filtros para el historial ahora deben ser singulares para coincidir con la DB
-const historyFilter = ref('aceptado'); // 'aceptado' o 'rechazado'
+const activeTab = ref('pendientes');
+const historyFilter = ref('aceptado');
 const pendingExpenses = ref([]);
-const historyExpenses = ref([]); // Nuevo estado para el historial
+const historyExpenses = ref([]);
 const loading = ref(true);
 const errorMessage = ref('');
 
@@ -21,14 +19,18 @@ const selectedGasto = ref(null);
 const editableGasto = ref({});
 const modalLoading = ref(false);
 const modalError = ref('');
+
+// --- MODIFICACIÓN: Estados para selección de destino ---
 const rendicionesActivas = ref([]);
+const cajasChicasDisponibles = ref([]); // NUEVO: Para guardar las cajas del usuario
 const tiposDeGasto = ref([]);
 const selectedRendicionId = ref(null);
+const selectedCajaChicaId = ref(null); // NUEVO: Para el ID de la caja seleccionada
+const destinoAceptacion = ref('rendicion'); // NUEVO: 'rendicion' o 'caja_chica'
 
 // --- LÓGICA DE DATOS ---
 const filteredHistory = computed(() => {
   if (!historyExpenses.value) return [];
-  // Normalizamos para asegurar la comparación, aunque los valores ya deberían coincidir
   return historyExpenses.value.filter(h => 
     String(h.decision || '').trim().toLowerCase() === String(historyFilter.value || '').trim().toLowerCase()
   );
@@ -39,33 +41,27 @@ async function fetchPendingExpenses() {
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) throw new Error('Usuario no autenticado.');
     
-    // La RPC devuelve TODOS los gastos delegados para este usuario, sin importar su estado final.
     const { data, error } = await supabase
       .rpc('obtener_gastos_recibidos', { p_user_id: user.id })
       .select(`*, creador:creado_por_id (nombre_completo, email), tipo:tipo_gasto_id (nombre_tipo_gasto)`);
       
     if (error) throw error;
     
-    // CORRECCIÓN CRÍTICA: Filtrar los resultados localmente para obtener solo los pendientes
     pendingExpenses.value = (data || []).filter(gasto => 
       gasto.estado_delegacion === 'pendiente_aceptacion'
     );
-
   } catch (e) {
     errorMessage.value = `Error al cargar pendientes: ${e.message}`;
-    console.error("Error in fetchPendingExpenses:", e);
   }
 }
 
 async function fetchHistory() {
   try {
-    // Esta RPC está diseñada para traer los datos del historial de decisiones.
     const { data, error } = await supabase.rpc('obtener_mi_historial_delegaciones');
     if (error) throw error;
     historyExpenses.value = data || [];
   } catch (e) {
     errorMessage.value = `Error al cargar el historial: ${e.message}`;
-    console.error("Error in fetchHistory:", e);
   }
 }
 
@@ -82,18 +78,22 @@ async function loadAllData() {
 
 onMounted(loadAllData);
 
+// MODIFICACIÓN: Ahora también carga las Cajas Chicas
 async function fetchDropdownData() {
   try {
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) return;
-    const [rendicionesRes, tiposRes] = await Promise.all([
+    const [rendicionesRes, tiposRes, cajasRes] = await Promise.all([
       supabase.from('viajes').select('id, nombre_viaje').eq('user_id', user.id).is('cerrado_en', null),
-      supabase.from('tipos_gasto_config').select('id, nombre_tipo_gasto').eq('activo', true)
+      supabase.from('tipos_gasto_config').select('id, nombre_tipo_gasto').eq('activo', true),
+      supabase.from('cajas_chicas').select('id, nombre, saldo_actual').eq('responsable_id', user.id).eq('activo', true) // NUEVO
     ]);
     if (rendicionesRes.error) throw rendicionesRes.error;
     rendicionesActivas.value = rendicionesRes.data || [];
     if (tiposRes.error) throw tiposRes.error;
     tiposDeGasto.value = tiposRes.data || [];
+    if (cajasRes.error) throw cajasRes.error;
+    cajasChicasDisponibles.value = cajasRes.data || []; // NUEVO
   } catch (e) {
     console.error("Error cargando datos para modales:", e);
   }
@@ -103,6 +103,8 @@ async function fetchDropdownData() {
 function openAcceptModal(gasto) {
   selectedGasto.value = gasto;
   selectedRendicionId.value = null;
+  selectedCajaChicaId.value = null; // NUEVO: Resetear
+  destinoAceptacion.value = 'rendicion'; // NUEVO: Resetear
   modalError.value = '';
   showAcceptModal.value = true;
 }
@@ -111,6 +113,8 @@ function openEditModal(gasto) {
   selectedGasto.value = gasto;
   editableGasto.value = { ...gasto };
   selectedRendicionId.value = null;
+  selectedCajaChicaId.value = null; // NUEVO: Resetear
+  destinoAceptacion.value = 'rendicion'; // NUEVO: Resetear
   modalError.value = '';
   showEditModal.value = true;
 }
@@ -122,35 +126,22 @@ function closeModal() {
   modalLoading.value = false;
 }
 
-async function handleAccept(gasto, rendicionId) {
+// --- MODIFICACIÓN: Lógica de aceptación refactorizada ---
+async function handleAccept() {
   modalLoading.value = true;
   modalError.value = '';
   try {
-    const { data: { user } } = await supabase.auth.getUser();
-    // 1. Actualizar el gasto
-    const { error: updateError } = await supabase
-      .from('gastos')
-      .update({ viaje_id: rendicionId, estado_delegacion: 'aceptado' })
-      .eq('id', gasto.id);
-    if (updateError) throw updateError;
-
-    // 2. Registrar en el historial
-    await supabase.from('historial_delegaciones').insert({
-      gasto_id: gasto.id,
-      delegador_id: gasto.creado_por_id,
-      receptor_id: user.id,
-      decision: 'aceptado'
-    });
-
-    // 3. Notificar (opcional)
-    await supabase.from('notificaciones').insert({
-      user_id: gasto.creado_por_id,
-      mensaje: `Tu gasto delegado de ${formatCurrency(gasto.monto_total)} fue aceptado.`,
-      link_a: `/gastos/editar/${gasto.id}`, tipo: 'aprobacion'
-    });
-
+    if (destinoAceptacion.value === 'rendicion') {
+      if (!selectedRendicionId.value) throw new Error("Debes seleccionar una rendición de destino.");
+      await handleAcceptToRendicion(selectedGasto.value, selectedRendicionId.value);
+    } else if (destinoAceptacion.value === 'caja_chica') {
+      if (!selectedCajaChicaId.value) throw new Error("Debes seleccionar una caja chica de destino.");
+      await handleAcceptToCajaChica(selectedGasto.value, selectedCajaChicaId.value);
+    } else {
+      throw new Error("Destino de aceptación no válido.");
+    }
     closeModal();
-    await loadAllData(); // Recargamos todo
+    await loadAllData();
   } catch (e) {
     modalError.value = `Error al aceptar el gasto: ${e.message}`;
   } finally {
@@ -158,15 +149,69 @@ async function handleAccept(gasto, rendicionId) {
   }
 }
 
-async function handleUpdateAndAccept() {
-  if (!selectedRendicionId.value) {
-    modalError.value = 'Debes seleccionar una rendición para asociar el gasto.';
-    return;
+// NUEVO: Lógica específica para aceptar en una rendición
+async function handleAcceptToRendicion(gasto, rendicionId) {
+  const { data: { user } } = await supabase.auth.getUser();
+  const { error: updateError } = await supabase
+    .from('gastos')
+    .update({ viaje_id: rendicionId, caja_id: null, estado_delegacion: 'aceptado' })
+    .eq('id', gasto.id)
+    .select()
+    .single();
+  if (updateError) throw updateError;
+  await registrarDecisionEnHistorial(gasto.id, gasto.creado_por_id, user.id);
+  await notificarDelegador(gasto.creado_por_id, gasto.monto_total, gasto.id);
+}
+
+// NUEVO: Lógica específica para aceptar en una caja chica
+async function handleAcceptToCajaChica(gasto, cajaId) {
+  const { data: { user } } = await supabase.auth.getUser();
+  
+  // 1. Actualizar el gasto para asociarlo a la caja
+  const { data: gastoActualizado, error: updateError } = await supabase
+    .from('gastos')
+    .update({ caja_id: cajaId, viaje_id: null, estado_delegacion: 'aceptado' })
+    .eq('id', gasto.id)
+    .select()
+    .single();
+  if (updateError) throw updateError;
+
+  // 2. Registrar el movimiento en la caja chica llamando a la RPC
+  const { error: rpcError } = await supabase
+    .rpc('registrar_gasto_caja_chica', { p_gasto_id: gastoActualizado.id, p_caja_id: cajaId });
+  if (rpcError) {
+    // Si la RPC falla, es importante intentar revertir el estado del gasto para no dejar datos inconsistentes.
+    await supabase.from('gastos').update({ estado_delegacion: 'pendiente_aceptacion', caja_id: null }).eq('id', gasto.id);
+    throw new Error(`No se pudo registrar el gasto en la caja chica: ${rpcError.message}. El gasto ha sido devuelto a pendientes.`);
   }
+
+  await registrarDecisionEnHistorial(gasto.id, gasto.creado_por_id, user.id);
+  await notificarDelegador(gasto.creado_por_id, gasto.monto_total, gasto.id);
+}
+
+// NUEVO: Funciones de ayuda reutilizables
+async function registrarDecisionEnHistorial(gastoId, delegadorId, receptorId) {
+  return supabase.from('historial_delegaciones').insert({
+    gasto_id: gastoId,
+    delegador_id: delegadorId,
+    receptor_id: receptorId,
+    decision: 'aceptado'
+  });
+}
+
+async function notificarDelegador(delegadorId, monto, gastoId) {
+  return supabase.from('notificaciones').insert({
+    user_id: delegadorId,
+    mensaje: `Tu gasto delegado de ${formatCurrency(monto)} fue aceptado.`,
+    link_a: `/gastos/editar/${gastoId}`, // Esto puede necesitar ajuste si la ruta de edición de un gasto aceptado es diferente
+    tipo: 'aprobacion'
+  });
+}
+
+async function handleUpdateAndAccept() {
   modalLoading.value = true;
   modalError.value = '';
   try {
-    // 1. Actualizar los detalles del gasto
     const { error: updateError } = await supabase
       .from('gastos')
       .update({
@@ -177,8 +222,8 @@ async function handleUpdateAndAccept() {
       .eq('id', selectedGasto.value.id);
     if (updateError) throw updateError;
 
-    // 2. Aceptar el gasto (reutiliza la lógica de handleAccept)
-    await handleAccept(selectedGasto.value, selectedRendicionId.value);
+    // Después de actualizar, llamamos al handleAccept general que decidirá el destino
+    await handleAccept();
 
   } catch (e) {
     modalError.value = `Error al actualizar y aceptar: ${e.message}`;
@@ -193,17 +238,16 @@ async function handleReject(gasto) {
 
   try {
     const { data: { user } } = await supabase.auth.getUser();
-    // 1. Actualizar el gasto para devolverlo
+    
     const { error: updateError } = await supabase
       .from('gastos')
       .update({ 
         estado_delegacion: 'rechazado',
-        user_id: gasto.creado_por_id // Devolvemos el gasto al creador
+        user_id: gasto.creado_por_id
       })
       .eq('id', gasto.id);
     if (updateError) throw updateError;
 
-    // 2. Registrar en el historial
     await supabase.from('historial_delegaciones').insert({
       gasto_id: gasto.id,
       delegador_id: gasto.creado_por_id,
@@ -212,11 +256,11 @@ async function handleReject(gasto) {
       motivo_rechazo: motivo || null
     });
 
-    // 3. Notificar
     await supabase.from('notificaciones').insert({
       user_id: gasto.creado_por_id,
       mensaje: `Tu gasto delegado de ${formatCurrency(gasto.monto_total)} fue rechazado. ${motivo ? 'Motivo: ' + motivo : ''}`,
-      link_a: `/gastos/editar/${gasto.id}`, tipo: 'rechazo'
+      link_a: `/gastos/editar/${gasto.id}`,
+      tipo: 'rechazo'
     });
 
     await loadAllData();
@@ -225,6 +269,7 @@ async function handleReject(gasto) {
   }
 }
 </script>
+--- START OF FILE src/views/GastosDelegadosView.vue (template ONLY) ---
 <template>
   <div class="container mx-auto max-w-4xl px-4 py-8">
     <h1 class="text-3xl font-bold text-gray-800 mb-2">Gestión de Gastos Delegados</h1>
@@ -261,7 +306,6 @@ async function handleReject(gasto) {
       <!-- Contenido Pestaña Historial -->
       <div v-if="activeTab === 'historial'">
         <div class="flex justify-center gap-2 mb-6 bg-gray-100 p-1 rounded-lg">
-          <!-- CORRECCIÓN: Los valores de los botones deben ser singulares para coincidir con la DB -->
           <button @click="historyFilter = 'aceptado'" :class="['filter-button', { 'filter-active': historyFilter === 'aceptado' }]">Aceptados</button>
           <button @click="historyFilter = 'rechazado'" :class="['filter-button', { 'filter-active': historyFilter === 'rechazado' }]">Rechazados</button>
         </div>
@@ -288,15 +332,32 @@ async function handleReject(gasto) {
       </div>
     </div>
 
-    <!-- Modal para Aceptar -->
+    <!-- MODIFICACIÓN: Modal para Aceptar ahora incluye la selección de destino -->
     <div v-if="showAcceptModal" class="modal-backdrop">
       <div class="modal-container">
         <h3 class="modal-title">Aceptar y Asociar Gasto</h3>
         <p class="mt-1 text-sm text-gray-600">
-          Vas a añadir el gasto de <span class="font-bold">{{ formatCurrency(selectedGasto.monto_total) }}</span> a una de tus rendiciones.
+          Vas a añadir el gasto de <span class="font-bold">{{ formatCurrency(selectedGasto.monto_total) }}</span> a tu nombre.
         </p>
-        <div class="mt-4">
-          <label for="rendicion_id_accept" class="form-label">Selecciona la rendición de destino <span class="text-red-500">*</span></label>
+
+        <!-- Selección de Destino -->
+        <fieldset class="mt-4">
+          <legend class="form-label mb-2">Selecciona el destino del gasto:</legend>
+          <div class="space-y-3">
+            <div class="flex items-center">
+              <input id="destino-rendicion" name="destino" type="radio" value="rendicion" v-model="destinoAceptacion" class="radio-input">
+              <label for="destino-rendicion" class="ml-3 block text-sm font-medium text-gray-700">Asociar a una Rendición (Viaje)</label>
+            </div>
+            <div class="flex items-center" v-if="cajasChicasDisponibles.length > 0">
+              <input id="destino-caja" name="destino" type="radio" value="caja_chica" v-model="destinoAceptacion" class="radio-input">
+              <label for="destino-caja" class="ml-3 block text-sm font-medium text-gray-700">Imputar a mi Caja Chica</label>
+            </div>
+          </div>
+        </fieldset>
+
+        <!-- Selector Condicional de Rendición -->
+        <div v-if="destinoAceptacion === 'rendicion'" class="mt-4">
+          <label for="rendicion_id_accept" class="form-label">Rendición de destino <span class="text-red-500">*</span></label>
           <select id="rendicion_id_accept" v-model="selectedRendicionId" class="form-input mt-1">
             <option :value="null" disabled>-- Tus rendiciones activas --</option>
             <option v-for="r in rendicionesActivas" :key="r.id" :value="r.id">{{ r.nombre_viaje }}</option>
@@ -305,56 +366,66 @@ async function handleReject(gasto) {
             No tienes rendiciones activas. Debes crear una nueva para poder aceptar este gasto.
           </p>
         </div>
+
+        <!-- Selector Condicional de Caja Chica -->
+        <div v-if="destinoAceptacion === 'caja_chica'" class="mt-4">
+          <label for="caja_id_accept" class="form-label">Caja Chica de destino <span class="text-red-500">*</span></label>
+          <select id="caja_id_accept" v-model="selectedCajaChicaId" class="form-input mt-1">
+            <option :value="null" disabled>-- Tus Cajas Chicas --</option>
+            <option v-for="caja in cajasChicasDisponibles" :key="caja.id" :value="caja.id">
+              {{ caja.nombre }} (Saldo: {{ formatCurrency(caja.saldo_actual) }})
+            </option>
+          </select>
+        </div>
+        
         <div v-if="modalError" class="modal-error">{{ modalError }}</div>
         <div class="modal-actions">
           <button @click="closeModal" :disabled="modalLoading" class="btn-secondary">Cancelar</button>
-          <button @click="handleAccept(selectedGasto, selectedRendicionId)" :disabled="!selectedRendicionId || modalLoading" class="btn-success">
+          <button @click="handleAccept" :disabled="modalLoading || (destinoAceptacion === 'rendicion' && !selectedRendicionId) || (destinoAceptacion === 'caja_chica' && !selectedCajaChicaId)" class="btn-success">
             {{ modalLoading ? 'Procesando...' : 'Confirmar y Asociar' }}
           </button>
         </div>
       </div>
     </div>
 
-    <!-- Modal para Editar y Aceptar -->
+    <!-- Modal para Editar y Aceptar (Mantiene la misma lógica de destino) -->
     <div v-if="showEditModal" class="modal-backdrop">
       <div class="modal-container">
         <h3 class="modal-title">Editar y Aceptar Gasto</h3>
         <div class="space-y-4 mt-4">
-          <div>
-            <label class="form-label">Monto</label>
-            <input type="number" v-model.number="editableGasto.monto_total" class="form-input mt-1" />
-          </div>
-          <div>
-            <label class="form-label">Descripción</label>
-            <input type="text" v-model="editableGasto.descripcion_general" class="form-input mt-1" />
-          </div>
-          <div>
-            <label class="form-label">Tipo de Gasto</label>
-            <select v-model="editableGasto.tipo_gasto_id" class="form-input mt-1">
-              <option v-for="t in tiposDeGasto" :key="t.id" :value="t.id">{{ t.nombre_tipo_gasto }}</option>
-            </select>
-          </div>
-          <div class="border-t pt-4">
-            <label class="form-label">Asociar a Rendición <span class="text-red-500">*</span></label>
-            <select v-model="selectedRendicionId" class="form-input mt-1">
-              <option :value="null" disabled>-- Tus rendiciones activas --</option>
-              <option v-for="r in rendicionesActivas" :key="r.id" :value="r.id">{{ r.nombre_viaje }}</option>
-            </select>
-          </div>
+          <div><label class="form-label">Monto</label><input type="number" v-model.number="editableGasto.monto_total" class="form-input mt-1" /></div>
+          <div><label class="form-label">Descripción</label><input type="text" v-model="editableGasto.descripcion_general" class="form-input mt-1" /></div>
+          <div><label class="form-label">Tipo de Gasto</label><select v-model="editableGasto.tipo_gasto_id" class="form-input mt-1"><option v-for="t in tiposDeGasto" :key="t.id" :value="t.id">{{ t.nombre_tipo_gasto }}</option></select></div>
+          <fieldset class="border-t pt-4">
+            <legend class="form-label mb-2">Asociar a:</legend>
+            <div class="space-y-3">
+              <div class="flex items-center">
+                <input id="edit-destino-rendicion" name="edit-destino" type="radio" value="rendicion" v-model="destinoAceptacion" class="radio-input">
+                <label for="edit-destino-rendicion" class="ml-3 block text-sm font-medium text-gray-700">Rendición (Viaje)</label>
+              </div>
+              <select v-if="destinoAceptacion === 'rendicion'" v-model="selectedRendicionId" class="form-input mt-1"><option :value="null" disabled>-- Selecciona rendición --</option><option v-for="r in rendicionesActivas" :key="r.id" :value="r.id">{{ r.nombre_viaje }}</option></select>
+              <div class="flex items-center" v-if="cajasChicasDisponibles.length > 0">
+                <input id="edit-destino-caja" name="edit-destino" type="radio" value="caja_chica" v-model="destinoAceptacion" class="radio-input">
+                <label for="edit-destino-caja" class="ml-3 block text-sm font-medium text-gray-700">Caja Chica</label>
+              </div>
+              <select v-if="destinoAceptacion === 'caja_chica'" v-model="selectedCajaChicaId" class="form-input mt-1"><option :value="null" disabled>-- Selecciona tu caja --</option><option v-for="caja in cajasChicasDisponibles" :key="caja.id" :value="caja.id">{{ caja.nombre }} (Saldo: {{ formatCurrency(caja.saldo_actual) }})</option></select>
+            </div>
+          </fieldset>
         </div>
         <div v-if="modalError" class="modal-error">{{ modalError }}</div>
         <div class="modal-actions">
           <button @click="closeModal" :disabled="modalLoading" class="btn-secondary">Cancelar</button>
-          <button @click="handleUpdateAndAccept" :disabled="!selectedRendicionId || modalLoading" class="btn-success">
-            {{ modalLoading ? 'Procesando...' : 'Guardar Cambios y Aceptar' }}
+          <button @click="handleUpdateAndAccept" :disabled="modalLoading || (destinoAceptacion === 'rendicion' && !selectedRendicionId) || (destinoAceptacion === 'caja_chica' && !selectedCajaChicaId)" class="btn-success">
+            {{ modalLoading ? 'Procesando...' : 'Guardar y Aceptar' }}
           </button>
         </div>
       </div>
     </div>
+
   </div>
 </template>
 <style scoped>
-/* ... (los estilos que ya tenías, más los nuevos para tabs y filtros) ... */
+/* Estilos existentes */
 .form-label { @apply block text-sm font-medium leading-6 text-gray-900; }
 .form-input { @apply block w-full rounded-md border-0 py-1.5 text-gray-900 shadow-sm ring-1 ring-inset ring-gray-300 placeholder:text-gray-500 focus:ring-2 focus:ring-inset focus:ring-indigo-600 sm:text-sm sm:leading-6; }
 .btn-success { @apply rounded-md bg-green-600 px-4 py-2 text-sm font-semibold text-white shadow-sm hover:bg-green-500 disabled:opacity-50; }
@@ -371,4 +442,5 @@ async function handleReject(gasto) {
 .tab-badge { @apply ml-2 py-0.5 px-2 rounded-full text-xs font-medium; }
 .filter-button { @apply w-full px-3 py-1.5 text-sm font-medium rounded-md text-gray-600 hover:bg-gray-200 transition-colors; }
 .filter-active { @apply bg-white text-gray-900 shadow-sm; }
+.radio-input { @apply h-4 w-4 border-gray-300 text-indigo-600 focus:ring-indigo-600; }
 </style>
