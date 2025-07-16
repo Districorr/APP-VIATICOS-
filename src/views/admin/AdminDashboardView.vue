@@ -1,10 +1,12 @@
+// src/views/admin/AdminDashboardView.vue
 <script setup>
 import { reactive, onMounted, computed } from 'vue';
 import { RouterLink } from 'vue-router';
 import { supabase } from '../../supabaseClient.js';
 import { formatCurrency } from '../../utils/formatters.js';
 import {
-  ChartBarIcon, PresentationChartLineIcon, UsersIcon, Cog6ToothIcon, WrenchScrewdriverIcon, BuildingLibraryIcon, TruckIcon, KeyIcon, InboxStackIcon, DocumentCheckIcon, BanknotesIcon
+  ChartBarIcon, PresentationChartLineIcon, UsersIcon, Cog6ToothIcon, WrenchScrewdriverIcon, BuildingLibraryIcon, TruckIcon, KeyIcon, InboxStackIcon, DocumentCheckIcon, BanknotesIcon,
+  ShoppingBagIcon // <-- 1. IMPORTAR NUEVO ICONO
 } from '@heroicons/vue/24/outline';
 
 // --- ESTADO PARA ACCIONES PENDIENTES ---
@@ -23,7 +25,7 @@ const dineroEnCurso = reactive({
   loading: true,
 });
 
-// --- ESTRUCTURA DE LOS MÓDULOS DEL DASHBOARD (SIN CAMBIOS) ---
+// --- ESTRUCTURA DE LOS MÓDULOS DEL DASHBOARD (MODIFICADO) ---
 const dashboardSections = reactive([
   {
     title: 'Módulos de Análisis e Inteligencia',
@@ -37,6 +39,8 @@ const dashboardSections = reactive([
     modules: [
       { name: 'Gestión de Usuarios', description: 'Administrar roles y perfiles.', to: { name: 'AdminUsuarios' }, icon: UsersIcon, color: 'bg-pink-100 text-pink-600' },
       { name: 'Clientes', description: 'Administrar la base de clientes.', to: { name: 'AdminClientes' }, icon: BuildingLibraryIcon, color: 'bg-orange-100 text-orange-600' },
+      // --- 2. AÑADIR NUEVO MÓDULO AQUÍ ---
+      { name: 'Proveedores', description: 'Gestionar estaciones de servicio y otros.', to: { name: 'AdminProveedores' }, icon: ShoppingBagIcon, color: 'bg-red-100 text-red-600' },
       { name: 'Transportes', description: 'Gestionar medios de transporte.', to: { name: 'AdminTransportes' }, icon: TruckIcon, color: 'bg-amber-100 text-amber-600' },
       { name: 'Vehículos', description: 'Gestionar la flota de la empresa.', to: { name: 'AdminVehiculos' }, icon: KeyIcon, color: 'bg-gray-100 text-gray-600' },
       { name: 'Cajas Diarias', description: 'Configurar saldos y responsables.', to: { name: 'AdminGestionCajas' }, icon: Cog6ToothIcon, color: 'bg-green-100 text-green-600' },
@@ -47,9 +51,6 @@ const dashboardSections = reactive([
 ]);
 
 // --- FUNCIONES DE CARGA ---
-
-// Dentro de <script setup> en AdminDashboardView.vue
-
 async function fetchDashboardData() {
   actionableItems.loading = true;
   dineroEnCurso.loading = true;
@@ -59,24 +60,18 @@ async function fetchDashboardData() {
     const [pendientesResult, solicitudesResult, dineroEnCursoResult] = await Promise.all([
       supabase.rpc('get_count_rendiciones_pendientes'),
       supabase.rpc('get_count_solicitudes_pendientes'),
-      // --- INICIO DE LA CORRECCIÓN ---
-      // Corregimos el nombre de la función para que coincida con la base de datos
-      supabase.rpc('get_desglose_adelantos_por_responsable') 
-      // --- FIN DE LA CORRECCIÓN ---
+      supabase.rpc('get_desglose_adelantos_por_responsable')
     ]);
 
-    // Procesar acciones pendientes
     if (pendientesResult.error) throw pendientesResult.error;
     actionableItems.rendicionesPendientes = pendientesResult.data;
 
     if (solicitudesResult.error) throw solicitudesResult.error;
     actionableItems.solicitudesPendientes = solicitudesResult.data;
     
-    // Procesar KPI de dinero en curso
     if (dineroEnCursoResult.error) throw dineroEnCursoResult.error;
     const data = dineroEnCursoResult.data || [];
     if (data.length > 0) {
-      // La RPC ya ordena por total_adelantado, pero lo recalculamos para seguridad
       data.sort((a, b) => b.total_adelantado - a.total_adelantado);
       dineroEnCurso.totalGeneral = data.reduce((sum, item) => sum + (item.total_adelantado || 0), 0);
       dineroEnCurso.responsablePrincipal = data[0]; 
@@ -86,7 +81,6 @@ async function fetchDashboardData() {
       dineroEnCurso.responsablePrincipal = null;
       dineroEnCurso.cantidadResponsables = 0;
     }
-
   } catch (error) {
     console.error("AdminDashboardView: Error al cargar datos:", error.message);
     actionableItems.error = `Error al cargar datos del dashboard: ${error.message}`;
@@ -98,19 +92,14 @@ async function fetchDashboardData() {
 
 onMounted(fetchDashboardData);
 
-// --- CÁLCULO PARA EL INSIGHT INTELIGENTE ---
 const insightDineroEnCurso = computed(() => {
   if (dineroEnCurso.loading || dineroEnCurso.totalGeneral === 0) {
     return 'Actualmente no hay adelantos en rendiciones activas.';
   }
   if (dineroEnCurso.responsablePrincipal) {
     const porcentaje = (dineroEnCurso.responsablePrincipal.total_adelantado / dineroEnCurso.totalGeneral) * 100;
-    
-    // --- INICIO DE LA CORRECCIÓN ---
-    // Usamos 'nombre_responsable', el alias que definimos en la RPC.
-    const nombreResponsable = dineroEnCurso.responsablePrincipal.nombre_responsable; 
-    // --- FIN DE LA CORRECCIÓN ---
-
+    // CORRECCIÓN: Usar el nombre correcto de la columna devuelta por la RPC.
+    const nombreResponsable = dineroEnCurso.responsablePrincipal.responsable_nombre;
     return `Distribuido en ${dineroEnCurso.cantidadResponsables} responsables. ${nombreResponsable} concentra el ${porcentaje.toFixed(0)}%.`;
   }
   return '';

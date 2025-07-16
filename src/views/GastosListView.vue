@@ -35,11 +35,8 @@ const showGroupModal = ref(false);
 const newGroupName = ref('');
 const isGrouping = ref(false);
 const groupError = ref('');
-
-// --- NUEVO ESTADO PARA LA AGRUPACIÓN AUTOMÁTICA ---
 const isGroupingByType = ref(false);
 
-// Lógica para Desagrupar (sin cambios)
 const canUngroup = computed(() => {
   if (selectedGastos.value.size === 0) return false;
   for (const gastoId of selectedGastos.value) {
@@ -82,7 +79,8 @@ function sortBy(key) {
   }
 }
 
-// Lógica de Renderizado (con bug de fecha corregido)
+// --- INICIO DE LA CORRECCIÓN ---
+
 const gastosRenderList = computed(() => {
   const sortedGastos = [...gastos.value].sort((a, b) => {
     const valA = a[sortKey.value];
@@ -104,17 +102,26 @@ const gastosRenderList = computed(() => {
       }
       userGroups[grupoKey].gastos.push(gasto);
     } else {
-      const fechaClave = gasto.fecha_gasto;
-      const fechaLocal = new Date(`${fechaClave}T00:00:00`);
+      // --- INICIO DE LA NUEVA CORRECCIÓN ---
+      const fechaClave = gasto.fecha_gasto; // 'YYYY-MM-DD'
+      
+      // 1. Parseamos el string manualmente para evitar problemas de zona horaria.
+      const parts = fechaClave.split('-').map(part => parseInt(part, 10));
+      // 2. Creamos la fecha como UTC, pero con los valores de la fecha local.
+      //    new Date(Date.UTC(año, mes - 1, día)) crea una fecha que no se desplazará.
+      const fechaSinConversion = new Date(Date.UTC(parts[0], parts[1] - 1, parts[2]));
+
       if (!dateGroups[fechaClave]) {
         dateGroups[fechaClave] = {
           isGroup: false,
           id: fechaClave,
-          name: formatDate(fechaLocal, { weekday: 'long', day: 'numeric', month: 'long' }),
+          // 3. Formateamos esta fecha "segura"
+          name: formatDate(fechaSinConversion, { weekday: 'long', day: 'numeric', month: 'long' }),
           gastos: []
         };
       }
       dateGroups[fechaClave].gastos.push(gasto);
+      // --- FIN DE LA NUEVA CORRECCIÓN ---
     }
   });
 
@@ -181,7 +188,6 @@ async function handleGroupCreation() {
   }
 }
 
-// --- NUEVA FUNCIÓN PARA AGRUPAR POR TIPO ---
 async function handleGroupByType() {
   if (!viajeSeleccionadoInfo.value?.id) {
     errorMessage.value = 'Por favor, selecciona una rendición primero.';
@@ -198,8 +204,8 @@ async function handleGroupByType() {
       p_viaje_id: viajeSeleccionadoInfo.value.id
     });
     if (error) throw error;
-    feedbackMessage.value = data; // La RPC devuelve un mensaje de éxito/informativo
-    await fetchGastos(); // Recargar los gastos para ver los nuevos grupos
+    feedbackMessage.value = data;
+    await fetchGastos();
   } catch(e) {
     errorMessage.value = `Error en la agrupación automática: ${e.message}`;
   } finally {
@@ -216,7 +222,6 @@ const toggleRowExpansion = (gastoId) => {
   else expandedRows.value.add(gastoId);
 };
 
-// ... (Resto de las funciones computadas y de fetch sin cambios)
 const totalGastado = computed(() => gastos.value.reduce((sum, g) => sum + (g.monto_total || 0), 0));
 const adelantoTotal = computed(() => viajeSeleccionadoInfo.value?.monto_adelanto || 0);
 const saldoActualRendicion = computed(() => adelantoTotal.value - totalGastado.value);

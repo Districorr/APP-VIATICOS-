@@ -121,9 +121,7 @@ const routes = [
     children: [
       { path: '', name: 'AdminDashboard', component: () => import('../views/admin/AdminDashboardView.vue'), meta: { title: 'Admin: Dashboard' } },
       { path: 'analiticas', name: 'AdminAnalytics', component: () => import('../views/admin/AdminAnalyticsView.vue'), meta: { title: 'Admin: Análisis' } },
-      
       { path: 'analisis-clientes', name: 'AdminAnalisisClientes', component: () => import('../views/admin/AdminAnalisisClientesView.vue'), meta: { title: 'Admin: Análisis por Cliente' } },
-
       { path: 'todos-los-viajes', name: 'AdminViajesList', component: () => import('../views/admin/AdminViajesListView.vue'), meta: { title: 'Admin: Rendiciones' } },
       { path: 'gastos', name: 'AdminGastosList', component: () => import('../views/admin/AdminGastosListView.vue'), meta: { title: 'Admin: Gastos' } },
       { path: 'usuarios', name: 'AdminUsuarios', component: () => import('../views/admin/AdminUsuariosView.vue'), meta: { title: 'Admin: Usuarios' } },
@@ -143,13 +141,20 @@ const routes = [
         component: () => import('../views/admin/AdminVehiculosView.vue'), 
         meta: { title: 'Admin: Vehículos' } 
       },
-      // --- RUTA AÑADIDA ---
       {
         path: 'vehiculos/:id',
         name: 'AdminVehiculoDetalle',
         component: () => import('../views/admin/VehiculoDetalleView.vue'),
         props: true, // Esto pasa el :id como prop al componente
         meta: { title: 'Admin: Detalle de Vehículo' }
+      },
+
+      // --- RUTA AÑADIDA PARA PROVEEDORES ---
+      { 
+        path: 'proveedores', 
+        name: 'AdminProveedores', 
+        component: () => import('../views/admin/AdminProveedoresView.vue'), 
+        meta: { title: 'Admin: Proveedores' } 
       },
     ]
   },

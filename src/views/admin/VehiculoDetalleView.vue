@@ -10,7 +10,7 @@ import StatCard from '../../components/admin/StatCard.vue';
 import ToastNotification from '../../components/ToastNotification.vue';
 import vSelect from 'vue-select';
 import 'vue-select/dist/vue-select.css';
-import { ArrowLeftIcon, PlusIcon, FireIcon, TruckIcon, CurrencyDollarIcon, MapIcon, ArrowDownTrayIcon, UsersIcon } from '@heroicons/vue/24/outline'; // <-- Icono añadido
+import { ArrowLeftIcon, PlusIcon, FireIcon, TruckIcon, CurrencyDollarIcon, MapIcon, ArrowDownTrayIcon, UsersIcon } from '@heroicons/vue/24/outline';
 
 const props = defineProps({
   id: { type: [String, Number], required: true },
@@ -24,8 +24,9 @@ const loading = ref({
   data: true,
   formOptions: true,
   formSubmit: false,
-  usuarios: true, // <-- Nuevo estado de carga
-  asignacionesSubmit: false, // <-- Nuevo estado de carga
+  usuarios: true,
+  asignacionesSubmit: false,
+  conductores: true,
 });
 const error = ref('');
 const notification = ref({});
@@ -54,12 +55,11 @@ const newChargeForm = ref({
 
 const formOptions = ref({
   proveedores: [],
+  conductores: [],
 });
 
-// --- INICIO: NUEVA LÓGICA DE ASIGNACIONES ---
 const usuariosParaAsignar = ref([]);
 const usuariosSeleccionados = ref(new Set());
-// --- FIN: NUEVA LÓGICA DE ASIGNACIONES ---
 
 const vehiculoInfo = computed(() => data.value?.info || {});
 const kpis = computed(() => data.value?.kpis || {});
@@ -95,14 +95,25 @@ async function fetchFormOptions() {
   finally { loading.value.formOptions = false; }
 }
 
-// --- INICIO: NUEVAS FUNCIONES DE ASIGNACIÓN ---
+async function fetchConductores() {
+  loading.value.conductores = true;
+  try {
+    const { data, error } = await supabase.from('perfiles').select('id, nombre_completo').order('nombre_completo');
+    if (error) throw error;
+    formOptions.value.conductores = data.map(p => ({ label: p.nombre_completo, code: p.id }));
+  } catch(e) {
+    console.error("Error cargando conductores:", e);
+  } finally {
+    loading.value.conductores = false;
+  }
+}
+
 async function fetchUsuariosParaAsignar() {
   loading.value.usuarios = true;
   try {
     const { data, error } = await supabase.rpc('get_usuarios_para_asignacion', { p_vehiculo_id: props.id });
     if (error) throw error;
     usuariosParaAsignar.value = data;
-    // Inicializamos el Set de seleccionados con los usuarios que ya vienen asignados.
     const asignadosIniciales = data.filter(u => u.esta_asignado).map(u => u.id);
     usuariosSeleccionados.value = new Set(asignadosIniciales);
   } catch (e) {
@@ -137,7 +148,6 @@ function toggleUsuario(userId) {
     usuariosSeleccionados.value.add(userId);
   }
 }
-// --- FIN: NUEVAS FUNCIONES DE ASIGNACIÓN ---
 
 function openFormModal() {
   newChargeForm.value = {
@@ -155,7 +165,7 @@ function closeFormModal() { showFormModal.value = false; }
 async function handleRegisterCharge() {
   loading.value.formSubmit = true;
   try {
-    const { data: result, error: rpcError } = await supabase.rpc('registrar_carga_combustible', {
+    const { data: result, error: rpcError } = await supabase.rpc('registrar_gasto_combustible_unificado', {
       p_vehiculo_id: props.id,
       p_fecha_carga: newChargeForm.value.fecha_carga,
       p_litros: newChargeForm.value.litros,
@@ -165,8 +175,13 @@ async function handleRegisterCharge() {
       p_conductor_id: newChargeForm.value.conductor_id,
       p_numero_comprobante: newChargeForm.value.numero_comprobante,
       p_descripcion: newChargeForm.value.descripcion,
+      p_viaje_id: null,
+      p_caja_id: null,
+      p_user_id: null
     });
+    
     if (rpcError) throw rpcError;
+
     notification.value = { title: 'Éxito', message: result.message, type: 'success', timestamp: new Date() };
     closeFormModal();
     await fetchData();
@@ -183,9 +198,17 @@ function exportToXLS() {
     return;
   }
   const dataToExport = historial.value.map(h => ({
-    'Fecha Carga': formatDate(h.fecha_carga), 'Proveedor': h.nombre_proveedor, 'N Comprobante': h.numero_comprobante,
-    'Descripcion': h.descripcion, 'Odometro (km)': h.odometro_actual, 'Distancia Recorrida (km)': h.distancia_recorrida,
-    'Litros': h.litros, 'Monto Total': h.monto_total,
+    'Fecha Carga': formatDate(h.fecha_carga), 
+    'Proveedor': h.nombre_proveedor, 
+    'N Comprobante': h.numero_comprobante,
+    'Descripcion': h.descripcion,
+    'Conductor': h.nombre_conductor,
+    'Odometro (km)': h.odometro_actual, 
+    'Distancia Recorrida (km)': h.distancia_recorrida,
+    'Litros': h.litros, 
+    'Monto Total': h.monto_total,
+    // --- NUEVA COLUMNA CALCULADA PARA EXPORTAR ---
+    'Costo por Litro': (h.monto_total && h.litros) ? (h.monto_total / h.litros).toFixed(2) : 0,
   }));
   const filename = `historial_combustible_${vehiculoInfo.value.patente}_${new Date().toISOString().split('T')[0]}`;
   exportToExcel(dataToExport, filename);
@@ -195,7 +218,8 @@ function exportToXLS() {
 onMounted(() => {
   fetchData();
   fetchFormOptions();
-  fetchUsuariosParaAsignar(); // <-- Llamada a la nueva función
+  fetchUsuariosParaAsignar();
+  fetchConductores();
 });
 
 watch(filters, fetchData, { deep: true });
@@ -258,27 +282,31 @@ watch(filters, fetchData, { deep: true });
             <thead class="bg-gray-50">
               <tr>
                 <th class="table-header">Fecha</th>
+                <th class="table-header">Conductor</th>
                 <th class="table-header">Proveedor</th>
                 <th class="table-header">N° Comp.</th>
-                <th class="table-header">Descripción</th>
                 <th class="table-header text-right">Odómetro</th>
                 <th class="table-header text-right">Dist. (km)</th>
                 <th class="table-header text-right">Litros</th>
-                <th class="table-header text-right">Monto</th>
+                <th class="table-header text-right">Costo / Litro</th>
+                <th class="table-header text-right">Monto Total</th>
               </tr>
             </thead>
             <tbody class="bg-white divide-y divide-gray-200">
               <tr v-if="historial.length === 0">
-                <td colspan="8" class="text-center py-10 text-gray-500">No hay registros de combustible en este período.</td>
+                <td colspan="9" class="text-center py-10 text-gray-500">No hay registros de combustible en este período.</td>
               </tr>
               <tr v-for="h in historial" :key="h.id">
                 <td class="table-cell">{{ formatDate(h.fecha_carga) }}</td>
+                <td class="table-cell font-medium">{{ h.nombre_conductor || 'N/A' }}</td>
                 <td class="table-cell">{{ h.nombre_proveedor || 'N/A' }}</td>
                 <td class="table-cell font-mono">{{ h.numero_comprobante }}</td>
-                <td class="table-cell max-w-xs truncate" :title="h.descripcion">{{ h.descripcion }}</td>
                 <td class="table-cell text-right">{{ h.odometro_actual.toLocaleString('es-AR') }} km</td>
                 <td class="table-cell text-right font-semibold">{{ h.distancia_recorrida ? h.distancia_recorrida.toLocaleString('es-AR') : '--' }}</td>
                 <td class="table-cell text-right">{{ h.litros }} Lts</td>
+                <td class="table-cell text-right text-gray-600">
+                  {{ (h.monto_total && h.litros) ? formatCurrency(h.monto_total / h.litros) : '$ 0,00' }}
+                </td>
                 <td class="table-cell text-right font-bold">{{ formatCurrency(h.monto_total) }}</td>
               </tr>
             </tbody>
@@ -319,22 +347,70 @@ watch(filters, fetchData, { deep: true });
           </div>
         </div>
       </section>
-
     </div>
 
     <!-- Modal para Registrar Carga -->
     <Transition name="modal-fade">
       <div v-if="showFormModal" @click.self="closeFormModal" class="fixed inset-0 bg-black bg-opacity-60 flex items-center justify-center p-4 z-50">
-        <!-- ... Contenido del modal sin cambios ... -->
+        <div class="bg-white rounded-lg shadow-xl w-full max-w-2xl transform transition-all">
+          <form @submit.prevent="handleRegisterCharge">
+            <div class="p-6 border-b">
+              <h3 class="text-lg font-semibold text-gray-900">Registrar Carga de Combustible</h3>
+            </div>
+            <div class="p-6 space-y-4">
+              <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div>
+                  <label for="form-fecha" class="form-label">Fecha de Carga</label>
+                  <input id="form-fecha" type="date" v-model="newChargeForm.fecha_carga" required class="form-input">
+                </div>
+                 <div>
+                  <label for="form-proveedor" class="form-label">Proveedor (Cta. Cte.)</label>
+                  <v-select id="form-proveedor" v-model="newChargeForm.proveedor_id" :options="formOptions.proveedores" :reduce="option => option.code" :loading="loading.formOptions" class="v-select-filter" placeholder="Seleccionar..."></v-select>
+                </div>
+              </div>
+              <div class="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                <div>
+                  <label for="form-odometro" class="form-label">Odómetro Actual (km)</label>
+                  <input id="form-odometro" type="number" step="1" v-model.number="newChargeForm.odometro_actual" required class="form-input" placeholder="Ej: 125400">
+                </div>
+                <div>
+                  <label for="form-litros" class="form-label">Litros</label>
+                  <input id="form-litros" type="number" step="0.01" v-model.number="newChargeForm.litros" required class="form-input" placeholder="Ej: 45.50">
+                </div>
+                <div>
+                  <label for="form-monto" class="form-label">Monto Total ($)</label>
+                  <input id="form-monto" type="number" step="0.01" v-model.number="newChargeForm.monto_total" required class="form-input" placeholder="Ej: 50000.00">
+                </div>
+              </div>
+              <div>
+                <label for="form-conductor" class="form-label">Conductor</label>
+                <v-select id="form-conductor" v-model="newChargeForm.conductor_id" :options="formOptions.conductores" :reduce="option => option.code" :loading="loading.conductores" class="v-select-filter" placeholder="Seleccionar..."></v-select>
+              </div>
+              <div>
+                <label for="form-comprobante" class="form-label">N° de Comprobante / Remito</label>
+                <input id="form-comprobante" type="text" v-model="newChargeForm.numero_comprobante" class="form-input" placeholder="Ej: 0001-00123456">
+              </div>
+              <div>
+                <label for="form-descripcion" class="form-label">Descripción (Opcional)</label>
+                <input id="form-descripcion" type="text" v-model="newChargeForm.descripcion" class="form-input" placeholder="Ej: Carga tanque lleno">
+              </div>
+            </div>
+            <div class="p-6 bg-gray-50 flex justify-end gap-3 rounded-b-lg">
+              <button type="button" @click="closeFormModal" class="btn-secondary">Cancelar</button>
+              <button type="submit" :disabled="loading.formSubmit" class="btn-primary disabled:bg-indigo-300">
+                {{ loading.formSubmit ? 'Guardando...' : 'Guardar Registro' }}
+              </button>
+            </div>
+          </form>
+        </div>
       </div>
     </Transition>
-
+    
     <ToastNotification :notification="notification" />
   </div>
 </template>
 
 <style scoped>
-/* Estilos existentes */
 .form-label { @apply block text-sm font-medium text-gray-700 mb-1; }
 .form-input { @apply block w-full rounded-md border-gray-300 shadow-sm focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm; }
 .btn-primary { @apply bg-indigo-600 text-white px-4 py-2 rounded-md text-sm font-semibold shadow-sm hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500; }
