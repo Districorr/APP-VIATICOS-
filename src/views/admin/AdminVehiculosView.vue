@@ -1,7 +1,10 @@
-<!-- src/views/admin/AdminVehiculosView.vue -->
+// src/views/admin/AdminVehiculosView.vue
 <script setup>
 import { ref, onMounted } from 'vue';
+import { useRouter } from 'vue-router'; // <-- 1. IMPORTAR ROUTER
 import { supabase } from '../../supabaseClient.js';
+
+const router = useRouter(); // <-- 2. INICIALIZAR ROUTER
 
 const vehiculos = ref([]);
 const loading = ref(true);
@@ -57,7 +60,10 @@ async function handleSubmit() {
   }
   
   const payload = { ...form.value };
-  delete payload.id; // No se debe enviar el id en el payload
+  // En la actualización, no se debe enviar el id en el payload principal
+  if (isEditMode.value) {
+    delete payload.id;
+  }
 
   try {
     let error;
@@ -85,8 +91,13 @@ async function handleDelete(id) {
     alert(`Error al eliminar el vehículo: ${e.message}`);
   }
 }
-</script>
 
+// <-- 3. NUEVA FUNCIÓN DE NAVEGACIÓN
+function goToDetails(vehiculoId) {
+  // Usamos el nombre de la ruta que crearemos para la vista de detalle.
+  router.push({ name: 'AdminVehiculoDetalle', params: { id: vehiculoId } });
+}
+</script>
 <template>
   <div class="container mx-auto px-4 py-8">
     <div class="flex justify-between items-center mb-8">
@@ -94,6 +105,7 @@ async function handleDelete(id) {
       <button @click="openNewForm" class="btn-primary">+ Añadir Vehículo</button>
     </div>
 
+    <!-- El formulario de añadir/editar no cambia -->
     <div v-if="showForm" class="mb-8 p-6 bg-gray-50 rounded-lg shadow-md border">
       <form @submit.prevent="handleSubmit" class="space-y-4">
         <h3 class="text-lg font-medium">{{ isEditMode ? 'Editar Vehículo' : 'Nuevo Vehículo' }}</h3>
@@ -130,7 +142,8 @@ async function handleDelete(id) {
           </tr>
         </thead>
         <tbody class="bg-white divide-y divide-gray-200">
-          <tr v-for="v in vehiculos" :key="v.id">
+          <!-- CAMBIO 1: Se añade evento click y clases para interactividad -->
+          <tr v-for="v in vehiculos" :key="v.id" @click="goToDetails(v.id)" class="cursor-pointer hover:bg-gray-50 transition-colors duration-150">
             <td class="table-cell font-mono font-semibold">{{ v.patente }}</td>
             <td class="table-cell">{{ v.marca }}</td>
             <td class="table-cell">{{ v.modelo }}</td>
@@ -139,8 +152,9 @@ async function handleDelete(id) {
               <span :class="v.activo ? 'status-badge-success' : 'status-badge-danger'">{{ v.activo ? 'Activo' : 'Inactivo' }}</span>
             </td>
             <td class="table-cell text-right space-x-2">
-              <button @click="openEditForm(v)" class="btn-icon-edit">Editar</button>
-              <button @click="handleDelete(v.id)" class="btn-icon-delete">Eliminar</button>
+              <!-- CAMBIO 2: Se añade .stop para que estos clicks no naveguen -->
+              <button @click.stop="openEditForm(v)" class="btn-icon-edit">Editar</button>
+              <button @click.stop="handleDelete(v.id)" class="btn-icon-delete">Eliminar</button>
             </td>
           </tr>
         </tbody>

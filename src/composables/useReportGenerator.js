@@ -29,50 +29,53 @@ const getReportData = async (viajeId) => {
 export function useReportGenerator() {
   
   // --- FUNCIÓN DE GENERACIÓN DE PDF (AHORA REUTILIZA getReportData) ---
-  const generateCanvaStylePDF = async (viajeId) => {
-    try {
-      // 1. Obtener los datos usando la nueva función reutilizable
-      const reporte = await getReportData(viajeId);
+// Reemplazar la función existente en useReportGenerator.js
 
-      // 2. Construir el PDF con jsPDF (el resto de tu lógica se mantiene)
-      const doc = new jsPDF({ orientation: 'landscape', unit: 'mm', format: 'a4' });
-      const pageWidth = doc.internal.pageSize.getWidth();
-      const pageHeight = doc.internal.pageSize.getHeight();
-      const margin = 10;
-      let lastY = margin;
+const generateCanvaStylePDF = async (viajeId) => {
+  try {
+    // 1. Obtener los datos usando la nueva función reutilizable
+    const reporte = await getReportData(viajeId);
 
-      const addPageHeaderAndFooter = (doc, pageNum, totalPages) => {
-        doc.setFontSize(7).setTextColor(150, 150, 150);
-        doc.text(`CUIT: 30-71598290-7 | 9 DE JULIO 1251 | Reporte generado automáticamente desde InfoGastos`, margin, pageHeight - 7);
-        doc.text(`Página ${pageNum} de ${totalPages}`, pageWidth - margin, pageHeight - 7, { align: 'right' });
-      };
+    // 2. Construir el PDF con jsPDF (el resto de tu lógica se mantiene)
+    const doc = new jsPDF({ orientation: 'landscape', unit: 'mm', format: 'a4' });
+    const pageWidth = doc.internal.pageSize.getWidth();
+    const pageHeight = doc.internal.pageSize.getHeight();
+    const margin = 10;
+    let lastY = margin;
 
-      // --- ENCABEZADO Y METADATA ---
-      if (logoImg) doc.addImage(logoImg, 'PNG', margin, margin - 6, 16, 16);
-      doc.setFontSize(20).setFont(undefined, 'bold').setTextColor(40, 56, 104);
-      doc.text("INFORME RENDICIÓN DE GASTOS", pageWidth / 2, margin + 2, { align: 'center' });
-      doc.setFontSize(8).setFont(undefined, 'normal').setTextColor(100, 100, 100);
-      doc.text("SISTEMA INFOGASTOS – DISTRICORR", pageWidth / 2, margin + 7, { align: 'center' });
-      
-      const metadataBody = [
-        ['Responsable:', reporte.metadata.responsable, 'Fecha Emisión:', reporte.metadata.fecha_emision],
-        ['Referencia:', reporte.metadata.referencia, 'ID:', `#${reporte.metadata.id}`],
-        ['Período:', reporte.metadata.periodo, 'Estado:', reporte.metadata.estado?.toUpperCase()],
-      ];
-      if (reporte.metadata.costo_promedio_diario) {
-        metadataBody.push([{content: 'Costo Promedio Diario:', styles: {fontStyle: 'bold'}}, {content: formatCurrency(reporte.metadata.costo_promedio_diario), styles: {fontStyle: 'bold', textColor: '#005a9c'}}, '', '']);
-      }
-      
-      doc.autoTable({
-        startY: margin + 12,
-        body: metadataBody,
-        theme: 'plain',
-        styles: { fontSize: 7.5, cellPadding: {top: 0.2, bottom: 0.2} },
-        columnStyles: { 0: { fontStyle: 'bold' }, 2: { fontStyle: 'bold' } }
-      });
-      lastY = doc.lastAutoTable.finalY + 4;
-      
-      // --- BUCLE PRINCIPAL: UNA TABLA POR GRUPO ---
+    const addPageHeaderAndFooter = (doc, pageNum, totalPages) => {
+      doc.setFontSize(7).setTextColor(150, 150, 150);
+      doc.text(`CUIT: 30-71598290-7 | 9 DE JULIO 1251 | Reporte generado automáticamente desde InfoGastos`, margin, pageHeight - 7);
+      doc.text(`Página ${pageNum} de ${totalPages}`, pageWidth - margin, pageHeight - 7, { align: 'right' });
+    };
+
+    // --- ENCABEZADO Y METADATA ---
+    if (logoImg) doc.addImage(logoImg, 'PNG', margin, margin - 6, 16, 16);
+    doc.setFontSize(20).setFont(undefined, 'bold').setTextColor(40, 56, 104);
+    doc.text("INFORME RENDICIÓN DE GASTOS", pageWidth / 2, margin + 2, { align: 'center' });
+    doc.setFontSize(8).setFont(undefined, 'normal').setTextColor(100, 100, 100);
+    doc.text("SISTEMA INFOGASTOS – DISTRICORR", pageWidth / 2, margin + 7, { align: 'center' });
+    
+    const metadataBody = [
+      ['Responsable:', reporte.metadata.responsable, 'Fecha Emisión:', reporte.metadata.fecha_emision],
+      ['Referencia:', reporte.metadata.referencia, 'ID:', `#${reporte.metadata.id}`],
+      ['Período:', reporte.metadata.periodo, 'Estado:', reporte.metadata.estado?.toUpperCase()],
+    ];
+    if (reporte.metadata.costo_promedio_diario) {
+      metadataBody.push([{content: 'Costo Promedio Diario:', styles: {fontStyle: 'bold'}}, {content: formatCurrency(reporte.metadata.costo_promedio_diario), styles: {fontStyle: 'bold', textColor: '#005a9c'}}, '', '']);
+    }
+    
+    doc.autoTable({
+      startY: margin + 12,
+      body: metadataBody,
+      theme: 'plain',
+      styles: { fontSize: 7.5, cellPadding: {top: 0.2, bottom: 0.2} },
+      columnStyles: { 0: { fontStyle: 'bold' }, 2: { fontStyle: 'bold' } }
+    });
+    lastY = doc.lastAutoTable.finalY + 4;
+    
+    // --- BUCLE PRINCIPAL: UNA TABLA POR GRUPO ---
+    if (reporte.grupos && Array.isArray(reporte.grupos)) {
       for (const grupo of reporte.grupos) {
         const groupTitleHeight = 7;
         const tableHeadHeight = 7;
@@ -89,30 +92,36 @@ export function useReportGenerator() {
         lastY += groupTitleHeight;
         
         const bodyData = [];
-        grupo.gastos.forEach(gasto => {
-            const detalles = [];
-            const add = (key, val) => { if (val) detalles.push(`${key}: ${val}`) };
-            
-            if (gasto.delegado_por_nombre) {
-                add('Delegado por', gasto.delegado_por_nombre);
-            }
+        
+        // --- INICIO DE LA CORRECCIÓN ---
+        // Se añade una guarda para asegurar que 'grupo.gastos' es un array antes de iterar
+        if (grupo.gastos && Array.isArray(grupo.gastos)) {
+          grupo.gastos.forEach(gasto => {
+              const detalles = [];
+              const add = (key, val) => { if (val) detalles.push(`${key}: ${val}`) };
+              
+              if (gasto.delegado_por_nombre) {
+                  add('Delegado por', gasto.delegado_por_nombre);
+              }
 
-            add('Provincia', gasto.detalles_adicionales?.provincia);
-            add('Nº Factura', gasto.detalles_adicionales?.numero_factura);
-            
-            const detallesString = detalles.join(' | ');
+              add('Provincia', gasto.detalles_adicionales?.provincia);
+              add('Nº Factura', gasto.detalles_adicionales?.numero_factura);
+              
+              const detallesString = detalles.join(' | ');
 
-            bodyData.push([
-                { content: gasto.tipo_gasto || 'Gasto General', styles: { fontStyle: 'bold', fontSize: 8, valign: 'middle' } },
-                { content: gasto.descripcion || 'Sin descripción', styles: { fontStyle: 'bold', fontSize: 8, valign: 'middle' } },
-                { content: formatCurrency(gasto.monto), styles: { fontStyle: 'bold', fontSize: 9, halign: 'right', valign: 'middle' } }
-            ]);
+              bodyData.push([
+                  { content: gasto.tipo_gasto || 'Gasto General', styles: { fontStyle: 'bold', fontSize: 8, valign: 'middle' } },
+                  { content: gasto.descripcion || 'Sin descripción', styles: { fontStyle: 'bold', fontSize: 8, valign: 'middle' } },
+                  { content: formatCurrency(gasto.monto), styles: { fontStyle: 'bold', fontSize: 9, halign: 'right', valign: 'middle' } }
+              ]);
 
-            const fullDetailsString = `Fecha: ${gasto.fecha || '--/--/----'}${detallesString ? ' | ' + detallesString : ''}`;
-            bodyData.push([
-                { content: fullDetailsString, colSpan: 3, styles: { fontSize: 7, textColor: [100, 100, 100], fillColor: [248, 249, 250] } }
-            ]);
-        });
+              const fullDetailsString = `Fecha: ${gasto.fecha || '--/--/----'}${detallesString ? ' | ' + detallesString : ''}`;
+              bodyData.push([
+                  { content: fullDetailsString, colSpan: 3, styles: { fontSize: 7, textColor: [100, 100, 100], fillColor: [248, 249, 250] } }
+              ]);
+          });
+        }
+        // --- FIN DE LA CORRECCIÓN ---
 
         doc.autoTable({
             startY: lastY,
@@ -129,60 +138,60 @@ export function useReportGenerator() {
         });
         lastY = doc.lastAutoTable.finalY;
       }
-
-      // --- SECCIÓN DE RESÚMENES ---
-      const requiredHeightForSummaries = 40;
-      if (lastY + requiredHeightForSummaries > pageHeight - margin) {
-        doc.addPage();
-        lastY = margin;
-      } else {
-        lastY += 5;
-      }
-      
-      const summaryTableConfig = { startY: lastY, theme: 'grid', headStyles: { fillColor: [40, 56, 104], fontSize: 8 }, styles: { fontSize: 7, cellPadding: 1.2 } };
-      const columnWidth = (pageWidth - margin * 2) / 3 - 3;
-      let finalY = lastY;
-
-      if (reporte.estadisticas.por_tipo?.length > 0) {
-        doc.autoTable({ ...summaryTableConfig, tableWidth: columnWidth, head: [['Gastos por Tipo', 'Monto', '%']], body: reporte.estadisticas.por_tipo.map(item => [item.tipo || 'Sin Tipo', formatCurrency(item.monto), `${item.porcentaje}%`]), margin: { left: margin } });
-        finalY = Math.max(finalY, doc.lastAutoTable.finalY);
-      }
-
-      if (reporte.estadisticas.por_provincia?.length > 0) {
-        doc.autoTable({ ...summaryTableConfig, startY: lastY, tableWidth: columnWidth, head: [['Gastos por Provincia', 'Monto']], body: reporte.estadisticas.por_provincia.map(item => [item.provincia, formatCurrency(item.monto)]), margin: { left: margin + columnWidth + 4.5 } });
-         finalY = Math.max(finalY, doc.lastAutoTable.finalY);
-      }
-      
-      doc.autoTable({ ...summaryTableConfig, startY: lastY, tableWidth: columnWidth, head: [['Resumen de Totales', '']], body: [
-        ['Total Adelantos:', { content: formatCurrency(reporte.resumen_financiero.total_adelantos), styles: { textColor: [0, 100, 0] } }],
-        ['Total Gastos (Bruto):', { content: formatCurrency(reporte.resumen_financiero.total_gastos_bruto), styles: { textColor: [192, 0, 0] } }],
-        [{ content: reporte.resumen_financiero.etiqueta_saldo, styles: { fontStyle: 'bold', fillColor: '#fef9c3' } },
-         { content: formatCurrency(Math.abs(reporte.resumen_financiero.saldo)), styles: { fontStyle: 'bold', fillColor: '#fef9c3' } }],
-      ], margin: { left: margin + (columnWidth + 4.5) * 2 }});
-      finalY = Math.max(finalY, doc.lastAutoTable.finalY);
-
-      lastY = finalY + 12;
-      if (lastY > pageHeight - margin) { doc.addPage(); lastY = margin + 10; }
-      doc.setFontSize(8).setTextColor(0,0,0);
-      doc.text("Firma Responsable", margin + 35, lastY, {align: 'center'});
-      doc.line(margin, lastY - 2, margin + 70, lastY - 2);
-      doc.text("Firma Gerencia", margin + 125, lastY, {align: 'center'});
-      doc.line(margin + 90, lastY - 2, margin + 160, lastY - 2);
-      
-      // --- PAGINACIÓN FINAL ---
-      const totalPages = doc.internal.getNumberOfPages();
-      for (let i = 1; i <= totalPages; i++) {
-        doc.setPage(i);
-        addPageHeaderAndFooter(doc, i, totalPages);
-      }
-
-      doc.save(`Rendicion_${reporte.metadata.id}_${new Date().toISOString().split('T')[0]}.pdf`);
-
-    } catch (e) {
-      console.error("Error al generar el PDF:", e);
-      // Lanzar el error para que el componente que llama (ViajesListView) pueda manejarlo
-      throw e;
     }
+
+    // --- SECCIÓN DE RESÚMENES (Sin cambios) ---
+    const requiredHeightForSummaries = 40;
+    if (lastY + requiredHeightForSummaries > pageHeight - margin) {
+      doc.addPage();
+      lastY = margin;
+    } else {
+      lastY += 5;
+    }
+    
+    const summaryTableConfig = { startY: lastY, theme: 'grid', headStyles: { fillColor: [40, 56, 104], fontSize: 8 }, styles: { fontSize: 7, cellPadding: 1.2 } };
+    const columnWidth = (pageWidth - margin * 2) / 3 - 3;
+    let finalY = lastY;
+
+    if (reporte.estadisticas.por_tipo?.length > 0) {
+      doc.autoTable({ ...summaryTableConfig, tableWidth: columnWidth, head: [['Gastos por Tipo', 'Monto', '%']], body: reporte.estadisticas.por_tipo.map(item => [item.tipo || 'Sin Tipo', formatCurrency(item.monto), `${item.porcentaje}%`]), margin: { left: margin } });
+      finalY = Math.max(finalY, doc.lastAutoTable.finalY);
+    }
+
+    if (reporte.estadisticas.por_provincia?.length > 0) {
+      doc.autoTable({ ...summaryTableConfig, startY: lastY, tableWidth: columnWidth, head: [['Gastos por Provincia', 'Monto']], body: reporte.estadisticas.por_provincia.map(item => [item.provincia, formatCurrency(item.monto)]), margin: { left: margin + columnWidth + 4.5 } });
+       finalY = Math.max(finalY, doc.lastAutoTable.finalY);
+    }
+    
+    doc.autoTable({ ...summaryTableConfig, startY: lastY, tableWidth: columnWidth, head: [['Resumen de Totales', '']], body: [
+      ['Total Adelantos:', { content: formatCurrency(reporte.resumen_financiero.total_adelantos), styles: { textColor: [0, 100, 0] } }],
+      ['Total Gastos (Bruto):', { content: formatCurrency(reporte.resumen_financiero.total_gastos_bruto), styles: { textColor: [192, 0, 0] } }],
+      [{ content: reporte.resumen_financiero.etiqueta_saldo, styles: { fontStyle: 'bold', fillColor: '#fef9c3' } },
+       { content: formatCurrency(Math.abs(reporte.resumen_financiero.saldo)), styles: { fontStyle: 'bold', fillColor: '#fef9c3' } }],
+    ], margin: { left: margin + (columnWidth + 4.5) * 2 }});
+    finalY = Math.max(finalY, doc.lastAutoTable.finalY);
+
+    lastY = finalY + 12;
+    if (lastY > pageHeight - margin) { doc.addPage(); lastY = margin + 10; }
+    doc.setFontSize(8).setTextColor(0,0,0);
+    doc.text("Firma Responsable", margin + 35, lastY, {align: 'center'});
+    doc.line(margin, lastY - 2, margin + 70, lastY - 2);
+    doc.text("Firma Gerencia", margin + 125, lastY, {align: 'center'});
+    doc.line(margin + 90, lastY - 2, margin + 160, lastY - 2);
+    
+    // --- PAGINACIÓN FINAL (Sin cambios) ---
+    const totalPages = doc.internal.getNumberOfPages();
+    for (let i = 1; i <= totalPages; i++) {
+      doc.setPage(i);
+      addPageHeaderAndFooter(doc, i, totalPages);
+    }
+
+    doc.save(`Rendicion_${reporte.metadata.id}_${new Date().toISOString().split('T')[0]}.pdf`);
+
+  } catch (e) {
+    console.error("Error al generar el PDF:", e);
+    throw e;
+  }
   };
     // --- FUNCIONES AUXILIARES Y OTRAS FUNCIONES DE REPORTE (INTACTAS DEL ORIGINAL) ---
   const formatearDetallesAdicionales = (gasto) => {
@@ -721,6 +730,37 @@ export function useReportGenerator() {
       throw e; // Re-lanzar para que el componente lo atrape
     }
   };
+
+    // --- NUEVA FUNCIÓN GENÉRICA PARA EXPORTAR JSON A EXCEL ---
+  /**
+   * Exporta un array de objetos JSON a un archivo .xlsx.
+   * @param {Array<Object>} jsonData - El array de objetos a exportar. Las keys de los objetos serán los encabezados.
+   * @param {string} fileNamePrefix - El prefijo del nombre del archivo a generar.
+   */
+  const exportJsonToExcel = (jsonData, fileNamePrefix = 'reporte') => {
+    if (!jsonData || jsonData.length === 0) {
+      alert('No hay datos para exportar.');
+      return;
+    }
+    try {
+      // Crea una hoja de cálculo a partir de los datos JSON.
+      const worksheet = XLSX.utils.json_to_sheet(jsonData);
+      
+      // Crea un nuevo libro de trabajo.
+      const workbook = XLSX.utils.book_new();
+      
+      // Adjunta la hoja de cálculo al libro con el nombre 'Datos'.
+      XLSX.utils.book_append_sheet(workbook, worksheet, 'Datos');
+
+      // Genera el archivo y dispara la descarga.
+      XLSX.writeFile(workbook, `${fileNamePrefix}_${new Date().toISOString().split('T')[0]}.xlsx`);
+
+    } catch (error) {
+      console.error("Error al generar el archivo Excel:", error);
+      alert("Ocurrió un error al intentar generar el archivo Excel. Revisa la consola para más detalles.");
+    }
+  };
+
     // --- NUEVA FUNCIÓN PARA EXPORTAR LA LISTA DE RENDICIONES ---
   const generateRendicionesListPDF = (rendiciones, filtros) => {
     if (!rendiciones || rendiciones.length === 0) {
@@ -738,7 +778,7 @@ export function useReportGenerator() {
     lastY += 8;
     doc.setFontSize(10).setFont(undefined, 'normal').text(`Fecha de Emisión: ${formatDate(new Date())}`, pageWidth / 2, lastY, { align: 'center' });
     lastY += 10;
-
+    
     // Tabla de rendiciones
     const head = [['ID', 'Concepto', 'Responsable', 'Inicio', 'Estado', 'Aprobación', 'Saldo']];
     const body = rendiciones.map(v => [
@@ -790,5 +830,6 @@ export function useReportGenerator() {
     generateAdminReporteConsolidadoPDF,
     generateAdminReporteConsolidadoExcel,
     generateUserReportPDF,
+    exportJsonToExcel,
   };
 }

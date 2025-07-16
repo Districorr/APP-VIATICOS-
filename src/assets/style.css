@@ -144,3 +144,83 @@
 .fade-leave-to {
   opacity: 0;
 }
+/* ==========================================================================
+   Estilos de Apoyo para InfoGastos
+   ========================================================================== */
+
+/* --- Componentes de Formulario --- */
+.form-label {
+  @apply block text-sm font-medium text-gray-700 mb-1;
+}
+.form-input {
+  @apply block w-full rounded-md border-gray-300 shadow-sm focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm transition-colors;
+}
+
+/* --- Botones --- */
+.btn-sm {
+  @apply px-3 py-1.5 text-xs font-semibold rounded-md shadow-sm transition-all duration-200 ease-in-out transform hover:scale-105;
+}
+.btn-base {
+  @apply px-4 py-2 text-sm font-semibold rounded-lg shadow-md transition-all duration-200 ease-in-out transform hover:scale-105;
+}
+
+/* Colores de Botones */
+.btn-blue {
+  @apply bg-blue-600 text-white hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2;
+}
+.btn-success {
+  @apply bg-green-600 text-white hover:bg-green-700 focus:outline-none focus:ring-2 focus:ring-green-500 focus:ring-offset-2;
+}
+.btn-warning {
+  @apply bg-yellow-500 text-white hover:bg-yellow-600 focus:outline-none focus:ring-2 focus:ring-yellow-400 focus:ring-offset-2;
+}
+.btn-danger {
+  @apply bg-red-600 text-white hover:bg-red-700 focus:outline-none focus:ring-2 focus:ring-red-500 focus:ring-offset-2;
+}
+.btn-secondary {
+    @apply bg-gray-200 text-gray-800 hover:bg-gray-300 focus:outline-none focus:ring-2 focus:ring-gray-400 focus:ring-offset-2;
+}
+
+/* --- Modales --- */
+.modal-backdrop {
+  @apply fixed inset-0 bg-black bg-opacity-60 flex justify-center items-center z-40;
+}
+.modal-container {
+  @apply bg-white rounded-xl shadow-2xl p-6 w-full max-w-md m-4 transform transition-all;
+}
+.modal-title {
+  @apply text-xl font-bold text-gray-900;
+}
+.modal-actions {
+  @apply mt-6 flex justify-end gap-3;
+}
+.modal-error {
+  @apply mt-3 text-sm text-red-600 font-medium;
+}
+
+/* --- Pestañas --- */
+.tab-button {
+  @apply whitespace-nowrap py-4 px-1 border-b-2 font-medium text-sm border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300 flex items-center gap-2;
+}
+.tab-active {
+  @apply border-indigo-500 text-indigo-600;
+}
+.tab-badge {
+  @apply ml-2 py-0.5 px-2.5 rounded-full text-xs font-medium;
+}
+
+/* --- Estados Vacíos y Errores --- */
+.empty-state {
+  @apply text-center py-16 px-6 bg-white rounded-lg border-2 border-dashed;
+}
+.error-banner {
+  @apply bg-red-100 border-l-4 border-red-500 text-red-700 p-4 rounded-md;
+}
+
+/* --- Tablas --- */
+.table-th {
+  @apply px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider;
+}
+.table-td {
+  @apply px-4 py-4 whitespace-nowrap text-sm text-gray-600;
+}

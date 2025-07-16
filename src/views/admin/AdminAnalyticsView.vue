@@ -1,4 +1,4 @@
-<!-- src/views/admin/AdminAnalyticsView.vue -->
+// src/views/admin/AdminAnalyticsView.vue
 <script setup>
 import { ref, onMounted, computed, watch, nextTick } from 'vue';
 import { supabase } from '../../supabaseClient';
@@ -12,7 +12,7 @@ import ToastNotification from '../../components/ToastNotification.vue';
 import StatCard from '../../components/admin/StatCard.vue';
 import vSelect from 'vue-select';
 import 'vue-select/dist/vue-select.css';
-import { ChartPieIcon, MagnifyingGlassIcon, ArrowDownTrayIcon, BriefcaseIcon } from '@heroicons/vue/24/outline';
+import { ChartPieIcon, MagnifyingGlassIcon, ArrowDownTrayIcon, BriefcaseIcon, UsersIcon } from '@heroicons/vue/24/outline';
 
 ChartJS.register(Title, Tooltip, Legend, BarElement, CategoryScale, LinearScale, PointElement, LineElement, Filler, TimeScale, ArcElement);
 const router = useRouter();
@@ -25,17 +25,26 @@ const loading = ref({
   exploration: false,
   tipoGastoOptions: true,
   dashboardRendiciones: true,
-  perfilesOptions: true
+  perfilesOptions: true,
+  adelantos: true,
+  desgloseAdelantos: false
 });
 const error = ref({
   dashboardGastos: '',
   exploration: '',
-  dashboardRendiciones: ''
+  dashboardRendiciones: '',
+  adelantos: ''
 });
 const notification = ref({});
 const showNotification = (title, message, type = 'info') => {
   notification.value = { title, message, type, timestamp: new Date() };
 };
+
+// --- ESTADO: ADELANTOS EN CIRCULACIÓN ---
+const adelantosEnCirculacion = ref(null);
+const desgloseAdelantos = ref([]);
+const isDesgloseModalOpen = ref(false);
+
 
 // --- PESTAÑA: ANÁLISIS DE GASTOS ---
 const gastosDashboardData = ref(null);
@@ -46,7 +55,7 @@ const gastosDoughnutChartRef = ref(null);
 const gastosHoveredSliceIndex = ref(null);
 const gastosPeriodOptions = [ { label: 'Últimos 7 días', value: '7d' }, { label: 'Últimos 30 días', value: '30d' }, { label: 'Este Mes', value: 'this_month' }, { label: 'Mes Pasado', value: 'last_month' }];
 
-// --- PESTAÑA: ANÁLISIS DE RENDICIONES (NUEVO) ---
+// --- PESTAÑA: ANÁLISIS DE RENDICIONES ---
 const rendicionesDashboardData = ref(null);
 const rendicionesFilters = ref({
   fechaDesde: new Date(new Date().setFullYear(new Date().getFullYear() - 1)).toISOString().split('T')[0],
@@ -86,6 +95,56 @@ const gastosDateRange = computed(() => {
   return { p_start_date: start.toISOString().split('T')[0], p_end_date: end.toISOString().split('T')[0] };
 });
 
+// --- FUNCIONES PARA ADELANTOS ---
+async function fetchAdelantosData() {
+  loading.value.adelantos = true;
+  error.value.adelantos = '';
+  try {
+    const { data, error: rpcError } = await supabase.rpc('get_total_adelantos_activos');
+    if (rpcError) throw rpcError;
+    adelantosEnCirculacion.value = data;
+  } catch (e) {
+    console.error("Error al cargar los adelantos en circulación:", e);
+    error.value.adelantos = "No se pudo obtener el total de adelantos.";
+  } finally {
+    loading.value.adelantos = false;
+  }
+}
+
+async function openDesgloseModal() {
+  isDesgloseModalOpen.value = true;
+  if (desgloseAdelantos.value.length > 0) return;
+
+  loading.value.desgloseAdelantos = true;
+  try {
+    const { data, error: rpcError } = await supabase.rpc('get_desglose_adelantos_por_responsable');
+    if (rpcError) throw rpcError;
+    desgloseAdelantos.value = data || [];
+  } catch(e) {
+    console.error("Error al cargar desglose de adelantos:", e);
+    showNotification('Error', 'No se pudo cargar el detalle por responsable.', 'error');
+  } finally {
+    loading.value.desgloseAdelantos = false;
+  }
+}
+
+function closeDesgloseModal() {
+  isDesgloseModalOpen.value = false;
+}
+
+function verRendicionesResponsable(responsable) {
+  closeDesgloseModal();
+  router.push({
+    name: 'AdminViajesList',
+    query: {
+      responsableId: responsable.responsable_id,
+      responsableNombre: responsable.responsable_nombre,
+      estado: 'en_curso'
+    }
+  });
+}
+
+
 async function fetchGastosDashboardData() {
   loading.value.dashboardGastos = true;
   error.value.dashboardGastos = '';
@@ -120,10 +179,12 @@ async function applyExplorationFilters() {
     loading.value.exploration = true;
     error.value.exploration = '';
     try {
+        // --- CAMBIO CLAVE ---
+        // Se utilizan los valores de los filtros directamente, ya que :reduce los convierte en IDs.
         const params = {
-            p_cliente_id: explorationFilters.value.clienteId?.code || null,
-            p_transporte_id: explorationFilters.value.transporteId?.code || null,
-            p_tipo_gasto_id: explorationFilters.value.tipoGastoId?.code || null,
+            p_cliente_id: explorationFilters.value.clienteId || null,
+            p_transporte_id: explorationFilters.value.transporteId || null,
+            p_tipo_gasto_id: explorationFilters.value.tipoGastoId || null,
             p_provincia: explorationFilters.value.provincia || null,
             p_paciente: explorationFilters.value.paciente || null,
             p_fecha_desde: explorationFilters.value.fechaDesde || null,
@@ -176,7 +237,7 @@ async function fetchRendicionesDashboardData() {
     const params = {
       p_start_date: rendicionesFilters.value.fechaDesde,
       p_end_date: rendicionesFilters.value.fechaHasta,
-      p_user_id: rendicionesFilters.value.responsableId?.code || null
+      p_user_id: rendicionesFilters.value.responsableId || null 
     };
     const { data, error: rpcError } = await supabase.rpc('get_dashboard_analisis_rendiciones', params);
     if (rpcError) throw rpcError;
@@ -194,10 +255,12 @@ async function drillDown(filterType, value) {
   activeTab.value = 'exploracion';
   await nextTick();
   await fetchExplorationOptions();
-  
+
   if (filterType === 'tipoGasto') {
     const option = gastosTipoGastoOptions.value.find(o => o.code === value);
-    if (option) explorationFilters.value.tipoGastoId = option;
+    if (option) {
+      explorationFilters.value.tipoGastoId = option.code; // Asignar el ID directamente
+    }
   }
   document.getElementById('exploration-content')?.scrollIntoView({ behavior: 'smooth' });
 }
@@ -262,7 +325,7 @@ const rendicionesDesgloseData = computed(() => {
 // --- LÓGICA DE EXPORTACIÓN ---
 const handleExport = (exportFn, successMsg) => {
   showNotification('Exportando', 'Preparando tu reporte...', 'info');
-  try { exportFn(); setTimeout(() => { showNotification('Éxito', successMsg, 'success'); }, 500); } 
+  try { exportFn(); setTimeout(() => { showNotification('Éxito', successMsg, 'success'); }, 500); }
   catch (e) { showNotification('Error', 'No se pudo generar el reporte.', 'error'); console.error("Error al exportar:", e); }
 };
 const handleExportGastosEvolution = () => handleExport(() => {
@@ -280,6 +343,7 @@ const handleExportExploration = () => handleExport(() => {
 onMounted(() => {
   fetchTipoGastoOptions();
   fetchGastosDashboardData();
+  fetchAdelantosData();
 });
 watch([gastosSelectedPeriod, gastosGlobalTipoGastoFilter], fetchGastosDashboardData);
 watch(activeTab, async (newTab) => {
@@ -331,7 +395,7 @@ watch(explorationFilters, () => {
           </nav>
         </div>
 
-        <!-- PESTAÑA 1: ANÁLISIS DE GASTOS -->
+        <!-- PESTAÑA 1: ANÁLISIS DE GASTOS (sin cambios) -->
         <div v-if="activeTab === 'gastos'">
           <div class="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
             <div>
@@ -344,74 +408,185 @@ watch(explorationFilters, () => {
               </select>
             </div>
           </div>
-          <div v-if="loading.dashboardGastos" class="text-center py-20">
+          <div v-if="loading.dashboardGastos && !gastosDashboardData" class="text-center py-20">
               <svg class="animate-spin h-12 w-12 text-blue-600 mx-auto" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg>
           </div>
           <div v-else-if="error.dashboardGastos" class="error-banner">{{ error.dashboardGastos }}</div>
-          <div v-else-if="gastosDashboardData" class="space-y-8">
-            <section><div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
-                <StatCard :title="`Gasto Total (${gastosPeriodOptions.find(p=>p.value === gastosSelectedPeriod)?.label || ''})`" :value="gastosKPIs.gasto_total_periodo" format="currency" />
-                <StatCard title="Saldo en Cajas" :value="gastosKPIs.saldo_cajas_chicas" format="currency" />
-                <StatCard title="Delegados Pendientes" :value="gastosKPIs.delegados_pendientes" format="currency" />
-                <StatCard title="Valor Rendiciones Pendientes" :value="gastosKPIs.rendiciones_pendientes_valor" format="currency" />
+          <div v-else class="space-y-8">
+            <section><div class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-6">
+                <StatCard :title="`Gasto Total (${gastosPeriodOptions.find(p=>p.value === gastosSelectedPeriod)?.label || ''})`" :value="gastosKPIs?.gasto_total_periodo" format="currency" :loading="loading.dashboardGastos" />
+                <StatCard title="Saldo en Cajas" :value="gastosKPIs?.saldo_cajas_chicas" format="currency" :loading="loading.dashboardGastos" />
+                <StatCard 
+                  title="Adelantos en Circulación" 
+                  :value="adelantosEnCirculacion" 
+                  :loading="loading.adelantos"
+                  :icon="UsersIcon"
+                  format="currency" 
+                  @click="openDesgloseModal" 
+                  class="cursor-pointer transition-all duration-300 hover:shadow-xl hover:border-blue-500"
+                />
+                <StatCard title="Delegados Pendientes" :value="gastosKPIs?.delegados_pendientes" format="currency" :loading="loading.dashboardGastos" />
+                <StatCard title="Valor Rendiciones Pendientes" :value="gastosKPIs?.rendiciones_pendientes_valor" format="currency" :loading="loading.dashboardGastos" />
             </div></section>
+            
             <div class="grid grid-cols-1 lg:grid-cols-3 gap-8">
-              <section class="lg:col-span-2 section-container"><h2 class="section-title">Evolución por Origen</h2><div class="h-96"><LineChart v-if="gastosProcessedEvolutionData" :data="gastosProcessedEvolutionData" :options="{ responsive: true, maintainAspectRatio: false, plugins: { legend: { position: 'bottom' } } }"/></div></section>
-              <section class="lg:col-span-1 section-container"><h2 class="section-title">Desglose por Tipo</h2><div class="relative h-48"><Doughnut ref="gastosDoughnutChartRef" v-if="gastosDesgloseTipoData?.datasets[0].data.length" :data="gastosDesgloseTipoData" :options="{responsive: true, maintainAspectRatio: false, cutout: '70%', plugins: { legend: { display: false }, tooltip: { enabled: false } }, onClick: handleDoughnutClick }"/><div class="absolute inset-0 flex flex-col justify-center items-center pointer-events-none"><span class="text-gray-500 text-sm">Gasto Total</span><span class="text-2xl font-bold text-gray-800">{{ formatCurrency(gastosTotalDesglose) }}</span></div></div><div class="mt-4 space-y-2 max-h-48 overflow-y-auto pr-2"><div v-for="(item, index) in gastosDashboardData.charts.desglose_tipo" :key="item.tipo_gasto_id" @mouseover="gastosHoveredSliceIndex = index" @mouseleave="gastosHoveredSliceIndex = null" @click="drillDown('tipoGasto', item.tipo_gasto_id)" class="flex items-center justify-between p-2 rounded-lg cursor-pointer hover:bg-gray-100"><div class="flex items-center gap-3"><span class="h-3 w-3 rounded-full" :style="{ backgroundColor: chartColors[index % chartColors.length] }"></span><span class="text-sm font-medium text-gray-700">{{ item.tipo }}</span></div><span class="text-sm font-semibold text-gray-800">{{ formatCurrency(item.total) }}</span></div><div v-if="!gastosDashboardData.charts.desglose_tipo.length" class="text-center text-gray-500 py-4">No hay desglose para mostrar.</div></div></section>
+              <section class="lg:col-span-2 section-container"><h2 class="section-title">Evolución por Origen</h2><button @click="handleExportGastosEvolution" class="btn-icon absolute top-4 right-4"><ArrowDownTrayIcon class="h-5 w-5"/></button><div class="h-96"><LineChart v-if="gastosProcessedEvolutionData" :data="gastosProcessedEvolutionData" :options="{ responsive: true, maintainAspectRatio: false, plugins: { legend: { position: 'bottom' } } }"/></div></section>
+              <section class="lg:col-span-1 section-container"><h2 class="section-title">Desglose por Tipo</h2><div class="relative h-48"><Doughnut ref="gastosDoughnutChartRef" v-if="gastosDesgloseTipoData?.datasets[0].data.length" :data="gastosDesgloseTipoData" :options="{responsive: true, maintainAspectRatio: false, cutout: '70%', plugins: { legend: { display: false }, tooltip: { enabled: false } }, onClick: handleDoughnutClick }"/><div class="absolute inset-0 flex flex-col justify-center items-center pointer-events-none"><span class="text-gray-500 text-sm">Gasto Total</span><span class="text-2xl font-bold text-gray-800">{{ formatCurrency(gastosTotalDesglose) }}</span></div></div><div class="mt-4 space-y-2 max-h-48 overflow-y-auto pr-2"><div v-for="(item, index) in gastosDashboardData?.charts.desglose_tipo || []" :key="item.tipo_gasto_id" @mouseover="gastosHoveredSliceIndex = index" @mouseleave="gastosHoveredSliceIndex = null" @click="drillDown('tipoGasto', item.tipo_gasto_id)" class="flex items-center justify-between p-2 rounded-lg cursor-pointer hover:bg-gray-100"><div class="flex items-center gap-3"><span class="h-3 w-3 rounded-full" :style="{ backgroundColor: chartColors[index % chartColors.length] }"></span><span class="text-sm font-medium text-gray-700">{{ item.tipo }}</span></div><span class="text-sm font-semibold text-gray-800">{{ formatCurrency(item.total) }}</span></div><div v-if="!gastosDashboardData?.charts.desglose_tipo.length" class="text-center text-gray-500 py-4">No hay desglose para mostrar.</div></div></section>
             </div>
           </div>
         </div>
 
-        <!-- PESTAÑA 2: ANÁLISIS DE RENDICIONES -->
+        <!-- PESTAÑA 2: ANÁLISIS DE RENDICIONES (MODIFICADA) -->
         <div v-if="activeTab === 'rendiciones'">
           <div class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
-              <div class="md:col-span-1"><label class="form-label">Rango de Fechas (Cierre)</label><div class="flex gap-2"><input type="date" v-model="rendicionesFilters.fechaDesde" class="form-input"><input type="date" v-model="rendicionesFilters.fechaHasta" class="form-input"></div></div>
-              <div class="md:col-span-1"><label class="form-label">Filtrar por Responsable</label><v-select v-model="rendicionesFilters.responsableId" :options="perfilesOptions" :loading="loading.perfilesOptions" placeholder="Todos" class="v-select-filter bg-white"></v-select></div>
-          </div>
-          <div v-if="loading.dashboardRendiciones" class="text-center py-20"><svg class="animate-spin h-12 w-12 text-blue-600 mx-auto" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg></div>
-          <div v-else-if="error.dashboardRendiciones" class="error-banner">{{ error.dashboardRendiciones }}</div>
-          <div v-else-if="rendicionesDashboardData" class="space-y-8">
-            <section><div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
-                <StatCard title="Costo Promedio / Rendición" :value="rendicionesKPIs.costo_promedio_rendicion" format="currency" />
-                <StatCard title="Rendiciones Cerradas" :value="rendicionesKPIs.numero_rendiciones_cerradas" />
-                <StatCard title="Duración Promedio (Días)" :value="rendicionesKPIs.duracion_promedio_dias.toFixed(1)" />
-                <StatCard title="Monto Total en Rendiciones" :value="rendicionesKPIs.monto_total_rendiciones" format="currency" />
-            </div></section>
-            <section class="section-container">
-                <div class="flex justify-between items-center mb-4"><h2 class="section-title mb-0">Eficiencia por Responsable</h2><button @click="handleExportRendicionesEficiencia" class="btn-icon" title="Exportar a XLS"><ArrowDownTrayIcon class="h-5 w-5" /></button></div>
-                <div class="overflow-x-auto"><table class="min-w-full text-sm">
-                    <thead class="bg-gray-50"><tr><th class="table-header">Responsable</th><th class="table-header text-center">N° Rendiciones</th><th class="table-header text-right">Costo Promedio</th><th class="table-header text-right">Gasto Total</th></tr></thead>
-                    <tbody class="divide-y divide-gray-200"><tr v-for="item in rendicionesDashboardData.tabla_eficiencia" :key="item.responsable"><td class="table-cell font-medium">{{ item.responsable }}</td><td class="table-cell text-center">{{ item.numero_rendiciones }}</td><td class="table-cell text-right">{{ formatCurrency(item.costo_promedio) }}</td><td class="table-cell text-right font-bold">{{ formatCurrency(item.gasto_total) }}</td></tr></tbody>
-                </table></div>
-            </section>
-            <div class="grid grid-cols-1 lg:grid-cols-2 gap-8">
-              <section class="section-container"><h2 class="section-title">Evolución del Costo de Rendiciones</h2><div class="h-80"><LineChart v-if="rendicionesEvolucionData" :data="rendicionesEvolucionData" :options="{responsive:true, maintainAspectRatio: false, plugins: {legend: {display:false}}}" /></div></section>
-              <section class="section-container"><h2 class="section-title">Desglose de Gastos en Rendiciones</h2><div class="h-80"><Bar v-if="rendicionesDesgloseData" :data="rendicionesDesgloseData" :options="{responsive:true, maintainAspectRatio: false, indexAxis: 'y', plugins: {legend: {display:false}}}" /></div></section>
+            <div><label class="form-label">Fecha Desde</label><input type="date" v-model="rendicionesFilters.fechaDesde" class="form-input"></div>
+            <div><label class="form-label">Fecha Hasta</label><input type="date" v-model="rendicionesFilters.fechaHasta" class="form-input"></div>
+            <div>
+              <label class="form-label">Responsable</label>
+              <v-select v-model="rendicionesFilters.responsableId" :options="perfilesOptions" :loading="loading.perfilesOptions" :reduce="option => option.code" placeholder="Todos" class="v-select-filter bg-white"></v-select>
             </div>
+          </div>
+          <div v-if="loading.dashboardRendiciones && !rendicionesDashboardData" class="text-center py-20"><svg class="animate-spin h-12 w-12 text-blue-600 mx-auto" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg></div>
+          <div v-else-if="error.dashboardRendiciones" class="error-banner">{{ error.dashboardRendiciones }}</div>
+          <div v-else class="space-y-8">
+            <section><div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
+              <StatCard title="Costo Promedio / Rendición" :value="rendicionesKPIs?.costo_promedio" format="currency" :loading="loading.dashboardRendiciones" />
+              <StatCard title="Duración Promedio" :value="rendicionesKPIs?.duracion_promedio" :suffix="rendicionesKPIs?.duracion_promedio === 1 ? ' día' : ' días'" :loading="loading.dashboardRendiciones" />
+              <StatCard title="Rendiciones Procesadas" :value="rendicionesKPIs?.total_rendiciones" :loading="loading.dashboardRendiciones" />
+              <StatCard title="Total Gastado" :value="rendicionesKPIs?.costo_total" format="currency" :loading="loading.dashboardRendiciones" />
+            </div></section>
+            <div class="grid grid-cols-1 lg:grid-cols-3 gap-8">
+              <section class="lg:col-span-2 section-container"><h2 class="section-title">Evolución de Costos de Rendición</h2><div class="h-96"><LineChart v-if="rendicionesEvolucionData" :data="rendicionesEvolucionData" :options="{ responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false } } }" /></div></section>
+              <section class="lg:col-span-1 section-container"><h2 class="section-title">Gasto por Tipo en Rendiciones</h2><div class="h-96"><Bar v-if="rendicionesDesgloseData" :data="rendicionesDesgloseData" :options="{ responsive: true, maintainAspectRatio: false, indexAxis: 'y', plugins: { legend: { display: false } } }" /></div></section>
+            </div>
+            <section class="section-container">
+                <div class="flex justify-between items-center mb-4">
+                    <h2 class="section-title !mb-0">Eficiencia por Responsable</h2>
+                    <button @click="handleExportRendicionesEficiencia" class="btn-primary btn-sm inline-flex items-center gap-2">
+                        <ArrowDownTrayIcon class="h-4 w-4"/>Exportar
+                    </button>
+                </div>
+                <div class="overflow-x-auto">
+                    <table class="min-w-full">
+                        <thead>
+                            <tr>
+                                <th class="table-header">Responsable</th>
+                                <th class="table-header text-right"># Rend.</th>
+                                <th class="table-header text-right">Costo Total</th>
+                                <th class="table-header text-right">Duración Prom. (Días)</th>
+                                <!-- CAMBIO 1: Nueva columna clave -->
+                                <th class="table-header text-right bg-blue-50/50">Costo Diario Promedio</th>
+                            </tr>
+                        </thead>
+                        <tbody class="divide-y divide-gray-200">
+                            <tr v-for="item in rendicionesDashboardData?.tabla_eficiencia || []" :key="item.responsable_nombre" class="hover:bg-gray-50">
+                                <td class="table-cell font-medium">{{ item.responsable_nombre }}</td>
+                                <td class="table-cell text-right">{{ item.cantidad_rendiciones }}</td>
+                                <td class="table-cell text-right">{{ formatCurrency(item.costo_total) }}</td>
+                                <td class="table-cell text-right">{{ item.duracion_promedio }}</td>
+                                <!-- CAMBIO 2: Celda con la nueva métrica formateada y estilizada -->
+                                <td class="table-cell text-right font-bold text-blue-700 bg-blue-50/50">
+                                    {{ formatCurrency(item.costo_diario_promedio) }}
+                                </td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+            </section>
           </div>
         </div>
 
-        <!-- PESTAÑA 3: EXPLORACIÓN AVANZADA -->
+        <!-- PESTAÑA 3: EXPLORACIÓN AVANZADA (sin cambios) -->
         <div v-if="activeTab === 'exploracion'" id="exploration-content">
-          <div v-if="loading.exploration && explorationGastosFiltrados.length === 0" class="text-center py-20"><svg class="animate-spin h-12 w-12 text-blue-600 mx-auto" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg></div>
-          <div v-else-if="error.exploration" class="error-banner">{{ error.exploration }}</div>
-          <div v-else class="space-y-8">
-            <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-              <div><label class="form-label">Tipo de Gasto</label><v-select v-model="explorationFilters.tipoGastoId" :options="explorationOptions.tiposGasto" placeholder="Todos" class="v-select-filter"></v-select></div>
-              <div><label class="form-label">Cliente</label><v-select v-model="explorationFilters.clienteId" :options="explorationOptions.clientes" placeholder="Todos" class="v-select-filter"></v-select></div>
-              <div><label class="form-label">Transporte</label><v-select v-model="explorationFilters.transporteId" :options="explorationOptions.transportes" placeholder="Todos" class="v-select-filter"></v-select></div>
-              <div><label class="form-label">Provincia</label><v-select v-model="explorationFilters.provincia" :options="explorationOptions.provincias" placeholder="Todas" class="v-select-filter"></v-select></div>
-              <div class="md:col-span-2 lg:col-span-2"><label class="form-label">Rango de Fechas</label><div class="flex gap-2"><input type="date" v-model="explorationFilters.fechaDesde" class="form-input"><input type="date" v-model="explorationFilters.fechaHasta" class="form-input"></div></div>
-              <div class="md:col-span-2 lg:col-span-2"><label class="form-label">Buscar por Paciente / Descripción</label><input type="text" v-model="explorationFilters.paciente" placeholder="Nombre de paciente o descripción..." class="form-input"></div>
+          <section class="section-container mb-8">
+            <h2 class="section-title">Filtros de Exploración</h2>
+            <div class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
+              <div><label class="form-label">Cliente</label><v-select v-model="explorationFilters.clienteId" :options="explorationOptions.clientes" :reduce="option => option.code" placeholder="Todos" class="v-select-filter"></v-select></div>
+              <div><label class="form-label">Transporte</label><v-select v-model="explorationFilters.transporteId" :options="explorationOptions.transportes" :reduce="option => option.code" placeholder="Todos" class="v-select-filter"></v-select></div>
+              <div><label class="form-label">Tipo de Gasto</label><v-select v-model="explorationFilters.tipoGastoId" :options="explorationOptions.tiposGasto" :reduce="option => option.code" placeholder="Todos" class="v-select-filter"></v-select></div>
+              <div><label class="form-label">Provincia</label><v-select v-model="explorationFilters.provincia" :options="explorationOptions.provincias" placeholder="Todas"></v-select></div>
+              <div class="lg:col-span-2"><label class="form-label">Paciente / Referencia</label><input type="text" v-model.lazy="explorationFilters.paciente" placeholder="Buscar por paciente..." class="form-input"></div>
+              <div><label class="form-label">Fecha Desde</label><input type="date" v-model="explorationFilters.fechaDesde" class="form-input"></div>
+              <div><label class="form-label">Fecha Hasta</label><input type="date" v-model="explorationFilters.fechaHasta" class="form-input"></div>
             </div>
-            <div class="flex justify-end"><button @click="handleExportExploration" :disabled="explorationGastosFiltrados.length === 0" class="btn-primary flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"><ArrowDownTrayIcon class="h-5 w-5" />Exportar a XLS</button></div>
-            <div><h3 class="section-title">Detalle de Gastos Filtrados</h3><div v-if="explorationGastosFiltrados.length > 0" class="overflow-x-auto section-container !p-0"><table class="min-w-full text-sm"><thead class="bg-gray-50"><tr><th class="table-header">Fecha</th><th class="table-header">Responsable</th><th class="table-header">Tipo</th><th class="table-header">Descripción</th><th class="table-header text-right">Monto</th></tr></thead><tbody class="divide-y divide-gray-200"><tr v-for="gasto in explorationGastosFiltrados" :key="gasto.gasto_id" class="hover:bg-gray-50"><td class="table-cell">{{ formatDate(gasto.fecha_gasto) }}</td><td class="table-cell font-medium text-gray-800">{{ gasto.responsable_gasto_nombre }}</td><td class="table-cell">{{ gasto.nombre_tipo_gasto }}</td><td class="table-cell max-w-xs truncate" :title="gasto.gasto_descripcion">{{ gasto.gasto_descripcion }}</td><td class="table-cell text-right font-bold">{{ formatCurrency(gasto.gasto_monto_total) }}</td></tr></tbody></table></div><div v-else class="no-data-placeholder py-10">No se encontraron gastos con los filtros aplicados.</div></div>
-          </div>
+          </section>
+
+          <section class="section-container">
+            <div class="flex justify-between items-center mb-4">
+              <h2 class="section-title !mb-0">Resultados ({{ explorationGastosFiltrados.length }})</h2>
+              <button @click="handleExportExploration" :disabled="explorationGastosFiltrados.length === 0" class="btn-primary btn-sm inline-flex items-center gap-2 disabled:bg-gray-400 disabled:cursor-not-allowed"><ArrowDownTrayIcon class="h-4 w-4"/>Exportar Resultados</button>
+            </div>
+            <div v-if="loading.exploration" class="text-center py-20"><svg class="animate-spin h-10 w-10 text-blue-600 mx-auto" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg></div>
+            <div v-else-if="error.exploration" class="error-banner">{{ error.exploration }}</div>
+            <div v-else-if="explorationGastosFiltrados.length > 0" class="overflow-x-auto">
+              <table class="min-w-full text-sm">
+                <thead><tr><th class="table-header">Fecha</th><th class="table-header">Responsable</th><th class="table-header">Tipo Gasto</th><th class="table-header">Descripción</th><th class="table-header">Rendición/Caja</th><th class="table-header text-right">Monto</th></tr></thead>
+                <tbody class="divide-y divide-gray-200">
+                  <tr v-for="gasto in explorationGastosFiltrados" :key="gasto.gasto_id" class="hover:bg-gray-50">
+                    <td class="table-cell">{{ formatDate(gasto.fecha_gasto) }}</td>
+                    <td class="table-cell font-medium">{{ gasto.responsable_gasto_nombre }}</td>
+                    <td class="table-cell">{{ gasto.nombre_tipo_gasto }}</td>
+                    <td class="table-cell max-w-xs truncate" :title="gasto.gasto_descripcion">{{ gasto.gasto_descripcion }}</td>
+                    <td class="table-cell text-xs">{{ gasto.nombre_viaje || 'Caja Chica' }}</td>
+                    <td class="table-cell text-right font-semibold">{{ formatCurrency(gasto.gasto_monto_total) }}</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+            <div v-else class="no-data-placeholder py-16"><div class="text-center"><MagnifyingGlassIcon class="h-12 w-12 mx-auto text-gray-400" /><h4 class="mt-2 text-lg font-medium text-gray-800">Sin Resultados</h4><p class="mt-1 text-sm text-gray-500">Ajusta los filtros para comenzar una nueva búsqueda.</p></div></div>
+          </section>
         </div>
 
       </div>
     </div>
     <ToastNotification :notification="notification" />
+
+    <Transition name="modal-fade">
+      <div v-if="isDesgloseModalOpen" @click.self="closeDesgloseModal" class="fixed inset-0 bg-black bg-opacity-60 flex items-center justify-center p-4 z-50">
+        <div class="bg-white rounded-xl shadow-2xl w-full max-w-2xl transform transition-all">
+          <div class="flex items-center justify-between p-5 border-b border-gray-200">
+            <h3 class="text-lg font-semibold text-gray-900">Desglose de Adelantos por Responsable</h3>
+            <button @click="closeDesgloseModal" class="p-2 rounded-full hover:bg-gray-100 transition-colors">
+              <svg class="h-6 w-6 text-gray-500" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" /></svg>
+            </button>
+          </div>
+          <div class="p-6 min-h-[20rem]">
+            <div v-if="loading.desgloseAdelantos" class="flex justify-center items-center h-full">
+              <svg class="animate-spin h-8 w-8 text-blue-600" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg>
+            </div>
+            <div v-else-if="desgloseAdelantos.length === 0" class="no-data-placeholder h-full">
+              <div class="text-center">
+                <UsersIcon class="h-12 w-12 mx-auto text-gray-400" />
+                <h4 class="mt-2 text-lg font-medium text-gray-800">Todo en orden</h4>
+                <p class="mt-1 text-sm text-gray-500">No hay adelantos activos en circulación en este momento.</p>
+              </div>
+            </div>
+            <div v-else class="overflow-y-auto max-h-96">
+              <table class="min-w-full text-sm">
+                <thead class="bg-gray-50 sticky top-0">
+                  <tr>
+                    <th class="table-header">Responsable</th>
+                    <th class="table-header text-center"># Rendiciones</th>
+                    <th class="table-header text-right">Monto Total Adelantado</th>
+                    <th class="table-header"></th>
+                  </tr>
+                </thead>
+                <tbody class="divide-y divide-gray-200">
+                  <tr v-for="item in desgloseAdelantos" :key="item.responsable_id" class="hover:bg-gray-50">
+                    <td class="table-cell font-medium">{{ item.responsable_nombre }}</td>
+                    <td class="table-cell text-center">{{ item.cantidad_rendiciones }}</td>
+                    <td class="table-cell text-right font-bold text-gray-800">{{ formatCurrency(item.total_adelantado) }}</td>
+                    <td class="table-cell text-right">
+                      <button @click="verRendicionesResponsable(item)" class="text-blue-600 hover:text-blue-800 font-semibold text-xs py-1 px-2 rounded hover:bg-blue-50">Ver Rendiciones →</button>
+                    </td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      </div>
+    </Transition>
   </div>
 </template>
 
@@ -419,13 +594,33 @@ watch(explorationFilters, () => {
 .form-label { @apply block text-sm font-medium text-gray-700 mb-1; }
 .form-input { @apply block w-full rounded-md border-gray-300 shadow-sm focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm; }
 .section-title { @apply text-xl font-semibold text-gray-700 mb-4; }
-.section-container { @apply bg-white p-6 rounded-xl shadow-lg border; }
+.section-container { @apply bg-white p-6 rounded-xl shadow-lg border relative; }
 .kpi-card { @apply bg-white p-6 rounded-xl shadow-lg border text-center transition-shadow hover:shadow-md; }
 .no-data-placeholder { @apply flex justify-center items-center h-full text-center text-gray-500; }
 .error-banner { @apply p-4 bg-red-50 text-red-700 border border-red-200 rounded-md; }
 .table-header { @apply px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider; }
 .table-cell { @apply px-4 py-4 whitespace-nowrap text-sm text-gray-600; }
 .btn-primary { @apply bg-blue-600 text-white font-semibold py-2 px-4 rounded-lg shadow-md hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 transition-colors; }
+.btn-primary.btn-sm { @apply py-1.5 px-3 text-sm; }
 .btn-icon { @apply p-2 rounded-full bg-gray-100 text-gray-600 hover:bg-gray-200 hover:text-gray-800 transition-colors; }
 .v-select-filter { --vs-controls-color: #6b7280; --vs-border-color: #d1d5db; --vs-dropdown-bg: #ffffff; --vs-dropdown-option-bg: #ffffff; --vs-dropdown-option-color: #374151; --vs-dropdown-option-padding: 0.5rem 1rem; --vs-dropdown-option--active-bg: #3b82f6; --vs-dropdown-option--active-color: #ffffff; --vs-selected-bg: #3b82f6; --vs-selected-color: #ffffff; --vs-search-input-color: #4b5563; --vs-line-height: 1.5; --vs-font-size: 0.875rem; }
+
+/* ESTILOS PARA LA TRANSICIÓN DEL MODAL */
+.modal-fade-enter-active,
+.modal-fade-leave-active {
+  transition: opacity 0.3s ease;
+}
+.modal-fade-enter-from,
+.modal-fade-leave-to {
+  opacity: 0;
+}
+.modal-fade-enter-active .transform,
+.modal-fade-leave-active .transform {
+  transition: all 0.3s ease;
+}
+.modal-fade-enter-from .transform,
+.modal-fade-leave-to .transform {
+  transform: scale(0.95);
+  opacity: 0;
+}
 </style>

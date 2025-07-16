@@ -20,13 +20,12 @@ const editableGasto = ref({});
 const modalLoading = ref(false);
 const modalError = ref('');
 
-// --- MODIFICACIÓN: Estados para selección de destino ---
 const rendicionesActivas = ref([]);
-const cajasChicasDisponibles = ref([]); // NUEVO: Para guardar las cajas del usuario
+const cajasChicasDisponibles = ref([]);
 const tiposDeGasto = ref([]);
 const selectedRendicionId = ref(null);
-const selectedCajaChicaId = ref(null); // NUEVO: Para el ID de la caja seleccionada
-const destinoAceptacion = ref('rendicion'); // NUEVO: 'rendicion' o 'caja_chica'
+const selectedCajaChicaId = ref(null);
+const destinoAceptacion = ref('rendicion');
 
 // --- LÓGICA DE DATOS ---
 const filteredHistory = computed(() => {
@@ -78,7 +77,6 @@ async function loadAllData() {
 
 onMounted(loadAllData);
 
-// MODIFICACIÓN: Ahora también carga las Cajas Chicas
 async function fetchDropdownData() {
   try {
     const { data: { user } } = await supabase.auth.getUser();
@@ -86,14 +84,14 @@ async function fetchDropdownData() {
     const [rendicionesRes, tiposRes, cajasRes] = await Promise.all([
       supabase.from('viajes').select('id, nombre_viaje').eq('user_id', user.id).is('cerrado_en', null),
       supabase.from('tipos_gasto_config').select('id, nombre_tipo_gasto').eq('activo', true),
-      supabase.from('cajas_chicas').select('id, nombre, saldo_actual').eq('responsable_id', user.id).eq('activo', true) // NUEVO
+      supabase.from('cajas_chicas').select('id, nombre, saldo_actual').eq('responsable_id', user.id).eq('activo', true)
     ]);
     if (rendicionesRes.error) throw rendicionesRes.error;
     rendicionesActivas.value = rendicionesRes.data || [];
     if (tiposRes.error) throw tiposRes.error;
     tiposDeGasto.value = tiposRes.data || [];
     if (cajasRes.error) throw cajasRes.error;
-    cajasChicasDisponibles.value = cajasRes.data || []; // NUEVO
+    cajasChicasDisponibles.value = cajasRes.data || [];
   } catch (e) {
     console.error("Error cargando datos para modales:", e);
   }
@@ -103,8 +101,8 @@ async function fetchDropdownData() {
 function openAcceptModal(gasto) {
   selectedGasto.value = gasto;
   selectedRendicionId.value = null;
-  selectedCajaChicaId.value = null; // NUEVO: Resetear
-  destinoAceptacion.value = 'rendicion'; // NUEVO: Resetear
+  selectedCajaChicaId.value = null;
+  destinoAceptacion.value = 'rendicion';
   modalError.value = '';
   showAcceptModal.value = true;
 }
@@ -113,8 +111,8 @@ function openEditModal(gasto) {
   selectedGasto.value = gasto;
   editableGasto.value = { ...gasto };
   selectedRendicionId.value = null;
-  selectedCajaChicaId.value = null; // NUEVO: Resetear
-  destinoAceptacion.value = 'rendicion'; // NUEVO: Resetear
+  selectedCajaChicaId.value = null;
+  destinoAceptacion.value = 'rendicion';
   modalError.value = '';
   showEditModal.value = true;
 }
@@ -126,7 +124,6 @@ function closeModal() {
   modalLoading.value = false;
 }
 
-// --- MODIFICACIÓN: Lógica de aceptación refactorizada ---
 async function handleAccept() {
   modalLoading.value = true;
   modalError.value = '';
@@ -149,7 +146,6 @@ async function handleAccept() {
   }
 }
 
-// NUEVO: Lógica específica para aceptar en una rendición
 async function handleAcceptToRendicion(gasto, rendicionId) {
   const { data: { user } } = await supabase.auth.getUser();
   const { error: updateError } = await supabase
@@ -159,15 +155,13 @@ async function handleAcceptToRendicion(gasto, rendicionId) {
     .select()
     .single();
   if (updateError) throw updateError;
-  await registrarDecisionEnHistorial(gasto.id, gasto.creado_por_id, user.id);
-  await notificarDelegador(gasto.creado_por_id, gasto.monto_total, gasto.id);
+  await registrarDecisionEnHistorial(gasto.id, gasto.creado_por_id, user.id, 'aceptado');
+  await notificarDelegador(gasto.creado_por_id, gasto.monto_total, gasto.id, 'aceptado');
 }
 
-// NUEVO: Lógica específica para aceptar en una caja chica
 async function handleAcceptToCajaChica(gasto, cajaId) {
   const { data: { user } } = await supabase.auth.getUser();
   
-  // 1. Actualizar el gasto para asociarlo a la caja
   const { data: gastoActualizado, error: updateError } = await supabase
     .from('gastos')
     .update({ caja_id: cajaId, viaje_id: null, estado_delegacion: 'aceptado' })
@@ -176,35 +170,40 @@ async function handleAcceptToCajaChica(gasto, cajaId) {
     .single();
   if (updateError) throw updateError;
 
-  // 2. Registrar el movimiento en la caja chica llamando a la RPC
   const { error: rpcError } = await supabase
     .rpc('registrar_gasto_caja_chica', { p_gasto_id: gastoActualizado.id, p_caja_id: cajaId });
   if (rpcError) {
-    // Si la RPC falla, es importante intentar revertir el estado del gasto para no dejar datos inconsistentes.
     await supabase.from('gastos').update({ estado_delegacion: 'pendiente_aceptacion', caja_id: null }).eq('id', gasto.id);
     throw new Error(`No se pudo registrar el gasto en la caja chica: ${rpcError.message}. El gasto ha sido devuelto a pendientes.`);
   }
 
-  await registrarDecisionEnHistorial(gasto.id, gasto.creado_por_id, user.id);
-  await notificarDelegador(gasto.creado_por_id, gasto.monto_total, gasto.id);
+  await registrarDecisionEnHistorial(gasto.id, gasto.creado_por_id, user.id, 'aceptado');
+  await notificarDelegador(gasto.creado_por_id, gasto.monto_total, gasto.id, 'aceptado');
 }
 
-// NUEVO: Funciones de ayuda reutilizables
-async function registrarDecisionEnHistorial(gastoId, delegadorId, receptorId) {
+async function registrarDecisionEnHistorial(gastoId, delegadorId, receptorId, decision, motivo = null) {
   return supabase.from('historial_delegaciones').insert({
     gasto_id: gastoId,
     delegador_id: delegadorId,
     receptor_id: receptorId,
-    decision: 'aceptado'
+    decision: decision,
+    motivo_rechazo: motivo
   });
 }
 
-async function notificarDelegador(delegadorId, monto, gastoId) {
+async function notificarDelegador(delegadorId, monto, gastoId, decision, motivo = '') {
+  let mensaje = '';
+  if (decision === 'aceptado') {
+    mensaje = `Tu gasto delegado de ${formatCurrency(monto)} fue aceptado.`;
+  } else {
+    mensaje = `Tu gasto delegado de ${formatCurrency(monto)} fue rechazado. ${motivo ? 'Motivo: ' + motivo : ''}`;
+  }
+
   return supabase.from('notificaciones').insert({
     user_id: delegadorId,
-    mensaje: `Tu gasto delegado de ${formatCurrency(monto)} fue aceptado.`,
-    link_a: `/gastos/editar/${gastoId}`, // Esto puede necesitar ajuste si la ruta de edición de un gasto aceptado es diferente
-    tipo: 'aprobacion'
+    mensaje: mensaje,
+    link_a: `/gastos/editar/${gastoId}`,
+    tipo: decision === 'aceptado' ? 'aprobacion' : 'rechazo'
   });
 }
 
@@ -222,7 +221,6 @@ async function handleUpdateAndAccept() {
       .eq('id', selectedGasto.value.id);
     if (updateError) throw updateError;
 
-    // Después de actualizar, llamamos al handleAccept general que decidirá el destino
     await handleAccept();
 
   } catch (e) {
@@ -232,42 +230,33 @@ async function handleUpdateAndAccept() {
   }
 }
 
+// --- INICIO DE LA CORRECCIÓN ---
 async function handleReject(gasto) {
   const motivo = prompt("Por favor, ingresa un motivo para el rechazo (opcional):");
-  if (motivo === null) return;
+  if (motivo === null) return; // El usuario canceló el prompt
 
   try {
     const { data: { user } } = await supabase.auth.getUser();
+    if (!user) throw new Error('Usuario no autenticado.');
+
+    // Llamamos a la nueva RPC segura en lugar de un update directo
+    const { error: rpcError } = await supabase
+      .rpc('rechazar_gasto_delegado', { p_gasto_id: gasto.id });
     
-    const { error: updateError } = await supabase
-      .from('gastos')
-      .update({ 
-        estado_delegacion: 'rechazado',
-        user_id: gasto.creado_por_id
-      })
-      .eq('id', gasto.id);
-    if (updateError) throw updateError;
+    if (rpcError) throw rpcError;
 
-    await supabase.from('historial_delegaciones').insert({
-      gasto_id: gasto.id,
-      delegador_id: gasto.creado_por_id,
-      receptor_id: user.id,
-      decision: 'rechazado',
-      motivo_rechazo: motivo || null
-    });
+    // Si la RPC tuvo éxito, registramos la decisión y notificamos
+    await registrarDecisionEnHistorial(gasto.id, gasto.creado_por_id, user.id, 'rechazado', motivo || null);
+    await notificarDelegador(gasto.creado_por_id, gasto.monto_total, gasto.id, 'rechazado', motivo || null);
 
-    await supabase.from('notificaciones').insert({
-      user_id: gasto.creado_por_id,
-      mensaje: `Tu gasto delegado de ${formatCurrency(gasto.monto_total)} fue rechazado. ${motivo ? 'Motivo: ' + motivo : ''}`,
-      link_a: `/gastos/editar/${gasto.id}`,
-      tipo: 'rechazo'
-    });
-
+    // Recargamos los datos para que el gasto desaparezca de la lista de pendientes
     await loadAllData();
   } catch (e) {
+    // Mostramos el error al usuario
     alert(`Error al rechazar el gasto: ${e.message}`);
   }
 }
+// --- FIN DE LA CORRECCIÓN ---
 </script>
 --- START OF FILE src/views/GastosDelegadosView.vue (template ONLY) ---
 <template>

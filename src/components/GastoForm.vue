@@ -1,3 +1,4 @@
+// src/components/GastoForm.vue
 <script setup>
 import { ref, reactive, onMounted, computed, watch, nextTick } from 'vue';
 import { supabase } from '../supabaseClient.js';
@@ -5,7 +6,11 @@ import { formatCurrency, formatCurrencyForInput } from '../utils/formatters.js';
 import vSelect from 'vue-select';
 import 'vue-select/dist/vue-select.css';
 import TipoGastoSelector from './TipoGastoSelector.vue';
-import { useRouter } from 'vue-router'; // Importar useRouter
+import { useRouter } from 'vue-router';
+
+// --- INICIO DE MODIFICACIONES ---
+const ID_TIPO_GASTO_COMBUSTIBLE = 14;
+// --- FIN DE MODIFICACIONES ---
 
 const props = defineProps({
   formatoId: { type: [Number, String], required: true },
@@ -14,10 +19,9 @@ const props = defineProps({
   viajeIdPredeterminado: { type: [Number, String], default: null },
   cajaIdPredeterminada: { type: [Number, String], default: null }
 });
-const emit = defineEmits(['gasto-guardado', 'cancelar']); // Corregido: defineEmits('gasto-guardado', 'cancelar') a defineEmits(['gasto-guardado', 'cancelar'])
+const emit = defineEmits(['gasto-guardado', 'cancelar']);
 
-const router = useRouter(); // Inicializar router
-
+const router = useRouter();
 const currentStep = ref(1);
 const stepError = ref('');
 const loading = ref(true);
@@ -49,7 +53,6 @@ const opcionesSelect = ref({
 
 const facturaFile = ref(null);
 const facturaPreview = ref(null);
-const sugerenciasGastos = ref([]);
 const sinFactura = ref(false);
 const useCajaDiaria = ref(false);
 const selectedCajaId = ref(null);
@@ -65,6 +68,11 @@ const duplicationWarning = ref('');
 const duplicationCheckTimeout = ref(null);
 
 const provincias = ref(['Buenos Aires', 'CABA', 'Catamarca', 'Chaco', 'Chubut', 'Córdoba', 'Corrientes', 'Entre Ríos', 'Formosa', 'Jujuy', 'La Pampa', 'La Rioja', 'Mendoza', 'Misiones', 'Neuquén', 'Río Negro', 'Salta', 'San Juan', 'San Luis', 'Santa Cruz', 'Santa Fe', 'Santiago del Estero', 'Tierra del Fuego', 'Tucumán']);
+
+// --- INICIO DE MODIFICACIONES ---
+const isCombustibleGasto = computed(() => formState.tipo_gasto_id === ID_TIPO_GASTO_COMBUSTIBLE);
+// --- FIN DE MODIFICACIONES ---
+
 
 const handleMontoInput = (event) => {
   const input = event.target;
@@ -94,10 +102,9 @@ async function cargarDatosCriticos() {
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) throw new Error("Usuario no autenticado.");
 
-    const [camposResult, tiposResult, sugerenciasResult] = await Promise.all([
+    const [camposResult, tiposResult] = await Promise.all([
       supabase.from('campos_formato_config').select('*').eq('formato_id', props.formatoId).order('orden_visualizacion'),
-      supabase.from('tipos_gasto_config').select('id, nombre_tipo_gasto, icono_svg, color_accent').eq('activo', true),
-      supabase.rpc('get_sugerencias_gastos_usuario')
+      supabase.from('tipos_gasto_config').select('id, nombre_tipo_gasto, icono_svg, color_accent').eq('activo', true)
     ]);
 
     if (camposResult.error) throw camposResult.error;
@@ -107,9 +114,6 @@ async function cargarDatosCriticos() {
 
     if (tiposResult.error) throw tiposResult.error;
     opcionesSelect.value.tipos_gasto = tiposResult.data || [];
-
-    if (sugerenciasResult.error) console.warn('No se pudieron cargar las sugerencias', sugerenciasResult.error.message);
-    else sugerenciasGastos.value = sugerenciasResult.data || [];
 
     inicializarFormState();
 
@@ -186,7 +190,12 @@ function inicializarFormState() {
       otrosCamposDinamicos[campo.nombre_campo_tecnico] = campo.valor_por_defecto || null;
     }
   });
-  Object.assign(formState, { ...camposFijos, ...camposDeIdNormalizados, ...otrosCamposDinamicos });
+
+  // --- INICIO DE MODIFICACIONES ---
+  const camposCombustible = { vehiculo_id: null, litros: null, odometro_actual: null };
+  Object.assign(formState, { ...camposFijos, ...camposDeIdNormalizados, ...otrosCamposDinamicos, ...camposCombustible });
+  // --- FIN DE MODIFICACIONES ---
+
   formattedMontoTotal.value = formatCurrencyForInput(formState.monto_total);
   if (!isEditMode.value) {
     const lastProvincia = localStorage.getItem('lastUsedProvincia');
@@ -197,7 +206,20 @@ function inicializarFormState() {
 async function cargarGastoParaEditar() {
   const { data: gastoData, error: gastoError } = await supabase.from('gastos').select('*, datos_adicionales, clientes(id, nombre_cliente), transportes(id, nombre), proveedores(id, nombre)').eq('id', props.gastoId).single();
   if (gastoError) throw gastoError;
-  Object.assign(formState, gastoData, gastoData.datos_adicionales);
+
+  // --- INICIO DE MODIFICACIONES ---
+  // Extraer datos del vehículo de datos_adicionales si es un gasto de combustible
+  let datosVehiculo = {};
+  if (gastoData.tipo_gasto_id === ID_TIPO_GASTO_COMBUSTIBLE && gastoData.datos_adicionales) {
+    datosVehiculo = {
+        vehiculo_id: gastoData.datos_adicionales.vehiculo_id,
+        litros: gastoData.datos_adicionales.litros,
+        odometro_actual: gastoData.datos_adicionales.odometro,
+    };
+  }
+  Object.assign(formState, gastoData, gastoData.datos_adicionales, datosVehiculo);
+  // --- FIN DE MODIFICACIONES ---
+  
   if (gastoData.caja_id) {
     useCajaDiaria.value = true;
     selectedCajaId.value = gastoData.caja_id;
@@ -233,28 +255,16 @@ watch(sinFactura, (esSinFactura) => { if (esSinFactura) formState.numero_factura
 watch(() => [formState.numero_factura, formState.proveedor_id], ([numFactura, provId]) => {
   clearTimeout(duplicationCheckTimeout.value);
   duplicationWarning.value = '';
-  if (!numFactura || sinFactura.value || !provId) {
-    return;
-  }
+  if (!numFactura || sinFactura.value || !provId) return;
+  
   duplicationCheckTimeout.value = setTimeout(async () => {
     try {
       const proveedorIdFinal = provId.value || provId;
-      let query = supabase
-        .from('gastos')
-        .select('id', { count: 'exact', head: true })
-        .eq('numero_factura', numFactura)
-        .eq('proveedor_id', proveedorIdFinal);
-      
-      if (isEditMode.value) {
-        query = query.neq('id', props.gastoId);
-      }
-      
+      let query = supabase.from('gastos').select('id', { count: 'exact', head: true }).eq('numero_factura', numFactura).eq('proveedor_id', proveedorIdFinal);
+      if (isEditMode.value) query = query.neq('id', props.gastoId);
       const { count, error } = await query;
       if (error) throw error;
-
-      if (count > 0) {
-        duplicationWarning.value = 'Alerta: Ya existe un gasto con este N° de factura y proveedor.';
-      }
+      if (count > 0) duplicationWarning.value = 'Alerta: Ya existe un gasto con este N° de factura y proveedor.';
     } catch (e) {
       console.error("Error verificando duplicados:", e.message);
     }
@@ -269,12 +279,6 @@ const handleFacturaChange = (event) => {
   }
 };
 
-function aplicarSugerencia() {
-  const desc = formState.descripcion_general;
-  const sugerenciaEncontrada = sugerenciasGastos.value.find(s => s.descripcion_general === desc);
-  if (sugerenciaEncontrada) formState.tipo_gasto_id = sugerenciaEncontrada.tipo_gasto_id;
-}
-
 function validateStep1() {
   if (!formState.monto_total || formState.monto_total <= 0) { stepError.value = 'Por favor, ingresa un monto total válido.'; return false; }
   if (useCajaDiaria.value && !selectedCajaId.value) { stepError.value = 'Si pagas con Caja Diaria, debes seleccionar una caja.'; return false; }
@@ -285,6 +289,15 @@ function validateStep2() {
   if (!useCajaDiaria.value && !isDelegating.value && !formState.viaje_id) { stepError.value = 'Debes asociar este gasto a una rendición o delegarlo.'; return false; }
   if (isDelegating.value && !delegatedToUserId.value) { stepError.value = 'Debes seleccionar un responsable a quien delegar el gasto.'; return false; }
   if (!formState.tipo_gasto_id) { stepError.value = 'Debes seleccionar un tipo de gasto.'; return false; }
+  
+  // --- INICIO DE MODIFICACIONES ---
+  if (isCombustibleGasto.value) {
+    if (!formState.vehiculo_id) { stepError.value = 'Debes seleccionar un vehículo para un gasto de combustible.'; return false; }
+    if (!formState.litros || formState.litros <= 0) { stepError.value = 'Debes ingresar una cantidad de litros válida.'; return false; }
+    if (!formState.odometro_actual || formState.odometro_actual <= 0) { stepError.value = 'Debes ingresar el odómetro actual del vehículo.'; return false; }
+  }
+  // --- FIN DE MODIFICACIONES ---
+  
   return true;
 }
 
@@ -299,6 +312,35 @@ async function handleSubmit() {
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) throw new Error('Usuario no autenticado.');
 
+    // --- INICIO DE MODIFICACIONES ---
+    // Si es un gasto de combustible, usamos la nueva función unificada.
+    if (isCombustibleGasto.value && !isDelegating.value && !isEditMode.value) {
+        const { data: result, error: rpcError } = await supabase.rpc('registrar_gasto_combustible_unificado', {
+            p_vehiculo_id: formState.vehiculo_id,
+            p_fecha_carga: formState.fecha_gasto,
+            p_litros: formState.litros,
+            p_monto_total: formState.monto_total,
+            p_odometro_actual: formState.odometro_actual,
+            p_proveedor_id: formState.proveedor_id?.value || formState.proveedor_id,
+            p_numero_comprobante: formState.numero_factura,
+            p_descripcion: formState.descripcion_general,
+            p_viaje_id: useCajaDiaria.value ? null : formState.viaje_id,
+            p_caja_id: useCajaDiaria.value ? selectedCajaId.value : null,
+            p_user_id: user.id
+        });
+
+        if (rpcError) throw rpcError;
+
+        emit('gasto-guardado', {
+            viaje_id: useCajaDiaria.value ? null : formState.viaje_id,
+            caja_id: useCajaDiaria.value ? selectedCajaId.value : null
+        });
+        return; // Terminamos aquí el flujo para combustible
+    }
+    // Si no es combustible (o es delegado/edición), sigue el flujo original.
+    // --- FIN DE MODIFICACIONES ---
+
+
     let finalFacturaUrl = formState.factura_url;
     if (facturaFile.value) {
       const filePath = `${user.id}/${Date.now()}-${facturaFile.value.name}`;
@@ -307,7 +349,19 @@ async function handleSubmit() {
       finalFacturaUrl = supabase.storage.from('facturas').getPublicUrl(filePath).data.publicUrl;
     }
 
-    const payloadBase = {
+    let finalClienteId = formState.cliente_id?.value || formState.cliente_id || null;
+    if (formState.cliente_id && typeof formState.cliente_id === 'string') {
+        const nuevoNombreCliente = formState.cliente_id.trim();
+        const { data: nuevoCliente, error: clienteError } = await supabase
+          .from('clientes')
+          .insert({ nombre_cliente: nuevoNombreCliente, creado_por_id: user.id })
+          .select('id')
+          .single();
+        if (clienteError) throw new Error(`Error al crear el nuevo cliente: ${clienteError.message}`);
+        finalClienteId = nuevoCliente.id;
+    }
+    
+    const payload = {
       formato_id: props.formatoId,
       fecha_gasto: formState.fecha_gasto,
       monto_total: formState.monto_total,
@@ -316,7 +370,7 @@ async function handleSubmit() {
       descripcion_general: formState.descripcion_general,
       numero_factura: sinFactura.value ? null : formState.numero_factura,
       tipo_gasto_id: formState.tipo_gasto_id,
-      cliente_id: formState.cliente_id?.value || formState.cliente_id || null,
+      cliente_id: finalClienteId,
       transporte_id: formState.transporte_id?.value || formState.transporte_id || null,
       proveedor_id: formState.proveedor_id?.value || formState.proveedor_id || null,
       adelanto_especifico_aplicado: formState.adelanto_especifico_aplicado,
@@ -335,127 +389,55 @@ async function handleSubmit() {
         }
       }
     });
-    payloadBase.datos_adicionales = Object.keys(datosAdicionales).length > 0 ? datosAdicionales : null;
+    payload.datos_adicionales = Object.keys(datosAdicionales).length > 0 ? datosAdicionales : null;
 
     let gastoGuardadoData;
     let error;
 
-    // --- INICIO DE LA MODIFICACIÓN CRÍTICA ---
-    // Ajuste en la lógica para garantizar que se usa el RPC para delegar,
-    // y para depuración.
-    console.log("Submit: isDelegating.value:", isDelegating.value); // DEBUG
-    console.log("Submit: isEditMode.value:", isEditMode.value); // DEBUG
-    
-    if (isEditMode.value) { // Edición de un gasto existente
-        const payloadUpdate = { ...payloadBase };
-        if (isDelegating.value) { // Si se está editando Y re-delegando
-            console.log("Submit: Editando y Re-delegando. Llamando a RPC."); // DEBUG
-            // Aunque es edición, si se delega, es un nuevo flujo que debe pasar por RPC de creación
-            // ya que el estado original del gasto cambia drásticamente.
-            // Para simplificar, asumimos que re-delegar es casi como crear uno nuevo en otro contexto.
-            // La BD asignará el estado 'pendiente_aceptacion'.
-            const { data, error: rpcError } = await supabase.rpc('crear_gasto_delegado', {
-                payload: {
-                    ...payloadBase,
-                    user_id: delegatedToUserId.value, // Nuevo receptor
-                }
-            });
+    if (isEditMode.value) {
+        if (isDelegating.value) {
+            const { data, error: rpcError } = await supabase.rpc('crear_gasto_delegado', { payload: { ...payload, user_id: delegatedToUserId.value } });
             gastoGuardadoData = data;
             error = rpcError;
-
-            // Si es edición Y re-delegación, el gasto original DEBE ser marcado como inválido o borrado
-            // para evitar duplicados. Esto es una consideración de negocio.
-            // Por ahora, solo lanzamos un error para evitar un estado inconsistente.
-            if (!error) { // Si el nuevo gasto delegado se creó bien, invalidar el original si no es el mismo
-                if (props.gastoId && gastoGuardadoData.id !== props.gastoId) {
-                    const { error: deleteOriginalError } = await supabase.from('gastos').delete().eq('id', props.gastoId);
-                    if (deleteOriginalError) console.error("Error al borrar el gasto original en re-delegación:", deleteOriginalError);
-                }
+            if (!error && props.gastoId && gastoGuardadoData.id !== props.gastoId) {
+                const { error: deleteOriginalError } = await supabase.from('gastos').delete().eq('id', props.gastoId);
+                if (deleteOriginalError) console.error("Error al borrar gasto original en re-delegación:", deleteOriginalError);
             }
-
-        } else { // Edición normal (no delegando)
-            console.log("Submit: Editando gasto existente (normal)."); // DEBUG
-            payloadUpdate.user_id = user.id; // El usuario sigue siendo el dueño
-            payloadUpdate.creado_por_id = null; // Si se edita, ya no es "creado por otro"
-            payloadUpdate.estado_delegacion = 'directo'; // Vuelve a estado normal
-            payloadUpdate.viaje_id = useCajaDiaria.value ? null : formState.viaje_id;
-            payloadUpdate.caja_id = useCajaDiaria.value ? selectedCajaId.value : null;
-
+        } else {
+            const payloadUpdate = { ...payload, user_id: user.id, creado_por_id: null, estado_delegacion: 'directo', viaje_id: useCajaDiaria.value ? null : formState.viaje_id, caja_id: useCajaDiaria.value ? selectedCajaId.value : null };
             ({ data: gastoGuardadoData, error } = await supabase.from('gastos').update(payloadUpdate).eq('id', props.gastoId).select().single());
         }
-
-    } else { // Creación de un gasto nuevo
+    } else {
         if (isDelegating.value) {
-            console.log("Submit: Creando y Delegando (NUEVO GASTO). Llamando a RPC."); // DEBUG
-            const payloadDelegado = {
-                ...payloadBase,
-                user_id: delegatedToUserId.value,
-            };
+            const payloadDelegado = { ...payload, user_id: delegatedToUserId.value };
             const { data, error: rpcError } = await supabase.rpc('crear_gasto_delegado', { payload: payloadDelegado });
             gastoGuardadoData = data;
             error = rpcError;
         } else {
-            console.log("Submit: Creando gasto propio (NUEVO GASTO). Llamando a INSERT directo."); // DEBUG
-            let payloadPropio = {
-                ...payloadBase,
-                user_id: user.id,
-                creado_por_id: null,
-                estado_delegacion: 'directo',
-                viaje_id: useCajaDiaria.value ? null : formState.viaje_id,
-                caja_id: useCajaDiaria.value ? selectedCajaId.value : null,
-            };
+            let payloadPropio = { ...payload, user_id: user.id, creado_por_id: null, estado_delegacion: 'directo', viaje_id: useCajaDiaria.value ? null : formState.viaje_id, caja_id: useCajaDiaria.value ? selectedCajaId.value : null };
             ({ data: gastoGuardadoData, error } = await supabase.from('gastos').insert(payloadPropio).select().single());
         }
     }
-    // --- FIN DE LA MODIFICACIÓN CRÍTICA ---
 
     if (error) {
-      if (error.code === '23505' && error.message.includes('unique_factura_proveedor')) {
-        throw new Error('Error: Ya existe un gasto con este número de factura para este proveedor. No se puede guardar un duplicado.');
-      }
-      throw new Error(`Error al guardar el gasto: ${error.message}`);
+        if (error.code === '23505' && error.message.includes('unique_factura_proveedor')) {
+            throw new Error('Error: Ya existe un gasto con este número de factura para este proveedor.');
+        }
+        throw new Error(`Error al guardar el gasto: ${error.message}`);
     }
 
     if (useCajaDiaria.value && !isDelegating.value) {
-      const { error: rpcError } = await supabase.rpc('registrar_gasto_caja_chica', { p_gasto_id: gastoGuardadoData.id, p_caja_id: selectedCajaId.value }).single();
-      if (rpcError) throw new Error(`Problema con Caja Diaria: ${rpcError.message}`);
+        const { error: rpcError } = await supabase.rpc('registrar_gasto_caja_chica', { p_gasto_id: gastoGuardadoData.id, p_caja_id: selectedCajaId.value });
+        if (rpcError) throw new Error(`Problema con Caja Diaria: ${rpcError.message}`);
     }
-
-    if (isDelegating.value) { // Solo si se delegó (o re-delegó)
-      const { data: delegadorProfile } = await supabase.from('perfiles').select('nombre_completo').eq('id', user.id).single();
-      const nombreDelegador = delegadorProfile?.nombre_completo || user.email;
-      
-      const { error: notifError } = await supabase.rpc('crear_notificacion_delegacion', {
-        p_receptor_id: delegatedToUserId.value,
-        p_mensaje: `${nombreDelegador} te ha delegado un gasto de ${formatCurrency(gastoGuardadoData.monto_total)} para que lo incluyas en una de tus rendiciones.`,
-        p_link: '/rendiciones/delegados'
-      });
-
-      if (notifError) console.warn("Gasto delegado guardado, pero falló la notificación:", notifError.message);
-    }
-
-    let feedbackMessage = `Gasto ${isEditMode.value ? 'actualizado' : 'creado'} con éxito.`;
-    let redirectTo = { name: 'Dashboard' };
 
     if (isDelegating.value) {
-      const receptor = opcionesSelect.value.usuariosParaDelegar.find(u => u.id === delegatedToUserId.value);
-      const nombreReceptor = receptor?.nombre_completo || 'el usuario seleccionado';
-      feedbackMessage = `Gasto delegado a ${nombreReceptor} con éxito. Serás notificado de su decisión.`;
-      // Redirigimos al usuario a su lista de rendiciones para que continúe su trabajo.
-      redirectTo = { name: 'ViajesListUser' }; 
-    } else if (gastoGuardadoData?.caja_id) {
-      redirectTo = { name: 'CajaDiaria' };
-    } else if (gastoGuardadoData?.viaje_id) {
-      redirectTo = { name: 'GastosListUser', query: { viajeId: gastoGuardadoData.viaje_id } };
+        const { data: delegadorProfile } = await supabase.from('perfiles').select('nombre_completo').eq('id', user.id).single();
+        const nombreDelegador = delegadorProfile?.nombre_completo || user.email;
+        const { error: notifError } = await supabase.rpc('crear_notificacion_delegacion', { p_receptor_id: delegatedToUserId.value, p_mensaje: `${nombreDelegador} te ha delegado un gasto por ${formatCurrency(gastoGuardadoData.monto_total)}`, p_link: '/rendiciones/delegados' });
+        if (notifError) console.warn("Gasto delegado guardado, pero falló la notificación:", notifError.message);
     }
-
-    successMessage.value = feedbackMessage;
-    if (formState.provincia) localStorage.setItem('lastUsedProvincia', formState.provincia);
-    if (formState.viaje_id) localStorage.setItem('lastUsedViajeId', formState.viaje_id);
-
-    setTimeout(() => {
-      router.push({ ...redirectTo, query: { ...redirectTo.query, feedback: feedbackMessage } });
-    }, 1500); 
+    
     emit('gasto-guardado', gastoGuardadoData);
 
   } catch (e) {
@@ -491,6 +473,7 @@ async function handleSubmit() {
       </div>
 
       <div class="space-y-8">
+        <!-- PASO 1 (sin cambios) -->
         <div v-show="currentStep === 1">
           <fieldset>
             <div class="grid grid-cols-1 sm:grid-cols-2 gap-6">
@@ -509,9 +492,8 @@ async function handleSubmit() {
               </transition>
               <div class="sm:col-span-2 grid grid-cols-1 sm:grid-cols-2 gap-x-6 gap-y-2 items-start">
                   <div class="input-wrapper">
-                      <label for="numero_factura" class="form-label">N° de Factura</label>
+                      <label for="numero_factura" class="form-label">N° de Factura / Comprobante</label>
                       <input type="text" id="numero_factura" v-model="formState.numero_factura" :disabled="sinFactura" class="form-input mt-1" :class="{ 'bg-gray-100 cursor-not-allowed': sinFactura }" title="Número del comprobante o factura"/>
-                      <!-- Alerta de Duplicados (Prioridad 2) -->
                       <div v-if="duplicationWarning" class="mt-2 p-2 bg-yellow-100 border-l-4 border-yellow-500 text-yellow-800 text-xs rounded-md">
                         <p>{{ duplicationWarning }}</p>
                       </div>
@@ -545,17 +527,37 @@ async function handleSubmit() {
           </fieldset>
         </div>
 
+        <!-- PASO 2 (MODIFICADO) -->
         <div v-show="currentStep === 2">
           <fieldset>
             <div class="grid grid-cols-1 sm:grid-cols-2 gap-6">
               <div class="input-wrapper"><label for="fecha_gasto" class="form-label">Fecha del Gasto <span class="text-red-500">*</span></label><input type="date" id="fecha_gasto" v-model="formState.fecha_gasto" required class="form-input mt-1" /></div>
               <div class="sm:col-span-2"><label class="form-label">Tipo de Gasto <span class="text-red-500">*</span></label><TipoGastoSelector v-model="formState.tipo_gasto_id" :options="opcionesSelect.tipos_gasto" class="mt-2"/></div>
-              <div class="sm:col-span-2 input-wrapper"><label for="descripcion_general" class="form-label">Descripción General</label><input type="text" id="descripcion_general" v-model="formState.descripcion_general" @change="aplicarSugerencia" list="sugerencias-gastos" class="form-input mt-1" placeholder="Ej: Nafta YPF, Almuerzo en..." /><datalist id="sugerencias-gastos"><option v-for="sugerencia in sugerenciasGastos" :key="sugerencia.descripcion_general" :value="sugerencia.descripcion_general"></option></datalist></div>
+              <div class="sm:col-span-2 input-wrapper"><label for="descripcion_general" class="form-label">Descripción General</label><input type="text" id="descripcion_general" v-model="formState.descripcion_general" class="form-input mt-1" placeholder="Ej: Nafta YPF, Almuerzo en..." /></div>
               <div class="input-wrapper"><label for="provincia" class="form-label">Provincia del Gasto</label><select id="provincia" v-model="formState.provincia" class="form-input mt-1"><option disabled :value="null">-- Seleccione una provincia --</option><option v-for="prov in provincias" :key="prov" :value="prov">{{ prov }}</option></select></div>
             </div>
           </fieldset>
           
-          <fieldset v-if="camposObligatorios.length > 0" class="mt-8"><legend class="form-legend">Detalles Específicos del Formato</legend><div class="grid grid-cols-1 sm:grid-cols-2 gap-6"><div v-for="campo in camposObligatorios" :key="campo.id" class="input-wrapper"><label :for="campo.nombre_campo_tecnico" class="form-label">{{ campo.etiqueta_visible }} <span v-if="campo.es_obligatorio" class="text-red-500">*</span></label><input v-if="campo.tipo_input === 'texto'" type="text" :id="campo.nombre_campo_tecnico" v-model="formState[campo.nombre_campo_tecnico]" :required="campo.es_obligatorio" class="form-input mt-1" /><v-select v-else-if="campo.tipo_input === 'select_cliente'" :id="campo.nombre_campo_tecnico" v-model="formState.cliente_id" :options="opcionesSelect.clientes" placeholder="-- Buscar cliente --" class="mt-1" :class="{ 'v-select-required': campo.es_obligatorio && !formState.cliente_id }"></v-select><v-select v-else-if="campo.tipo_input === 'select_transporte'" :id="campo.nombre_campo_tecnico" v-model="formState.transporte_id" :options="opcionesSelect.transportes" placeholder="-- Buscar transporte --" class="mt-1" :class="{ 'v-select-required': campo.es_obligatorio && !formState.transporte_id }"></v-select><v-select v-else-if="campo.tipo_input === 'select_proveedor'" :id="campo.nombre_campo_tecnico" v-model="formState.proveedor_id" :options="opcionesSelect.proveedores" placeholder="-- Buscar proveedor --" class="mt-1" :class="{ 'v-select-required': campo.es_obligatorio && !formState.proveedor_id }"></v-select></div></div></fieldset>
+          <!-- SECCIÓN DE COMBUSTIBLE CONDICIONAL -->
+          <fieldset v-if="isCombustibleGasto && !isEditMode" class="mt-8 border-t pt-6">
+            <legend class="form-legend">Datos de Combustible</legend>
+            <div class="grid grid-cols-1 sm:grid-cols-3 gap-6">
+              <div class="input-wrapper sm:col-span-1">
+                <label for="vehiculo_id" class="form-label">Vehículo <span class="text-red-500">*</span></label>
+                <v-select id="vehiculo_id" v-model="formState.vehiculo_id" :options="opcionesSelect.vehiculos" :loading="loadingSelects.vehiculos" placeholder="-- Seleccionar --" class="mt-1 bg-white" :reduce="option => option.value"></v-select>
+              </div>
+              <div class="input-wrapper">
+                <label for="litros" class="form-label">Litros <span class="text-red-500">*</span></label>
+                <input type="number" step="0.01" id="litros" v-model.number="formState.litros" class="form-input mt-1" placeholder="Ej: 45.5" />
+              </div>
+              <div class="input-wrapper">
+                <label for="odometro_actual" class="form-label">Odómetro Actual (km) <span class="text-red-500">*</span></label>
+                <input type="number" step="1" id="odometro_actual" v-model.number="formState.odometro_actual" class="form-input mt-1" placeholder="Ej: 150000" />
+              </div>
+            </div>
+          </fieldset>
+
+          <fieldset v-if="camposObligatorios.length > 0" class="mt-8 border-t pt-6"><legend class="form-legend">Detalles Específicos del Formato</legend><div class="grid grid-cols-1 sm:grid-cols-2 gap-6"><div v-for="campo in camposObligatorios" :key="campo.id" class="input-wrapper"><label :for="campo.nombre_campo_tecnico" class="form-label">{{ campo.etiqueta_visible }} <span v-if="campo.es_obligatorio" class="text-red-500">*</span></label><input v-if="campo.tipo_input === 'texto'" type="text" :id="campo.nombre_campo_tecnico" v-model="formState[campo.nombre_campo_tecnico]" :required="campo.es_obligatorio" class="form-input mt-1" /><v-select v-else-if="campo.tipo_input === 'select_cliente'" :id="campo.nombre_campo_tecnico" v-model="formState.cliente_id" :options="opcionesSelect.clientes" taggable :create-option="(newOption) => newOption" placeholder="-- Buscar o crear cliente --" class="mt-1" :class="{ 'v-select-required': campo.es_obligatorio && !formState.cliente_id }"></v-select><v-select v-else-if="campo.tipo_input === 'select_transporte'" :id="campo.nombre_campo_tecnico" v-model="formState.transporte_id" :options="opcionesSelect.transportes" placeholder="-- Buscar transporte --" class="mt-1" :class="{ 'v-select-required': campo.es_obligatorio && !formState.transporte_id }"></v-select><v-select v-else-if="campo.tipo_input === 'select_proveedor'" :id="campo.nombre_campo_tecnico" v-model="formState.proveedor_id" :options="opcionesSelect.proveedores" placeholder="-- Buscar proveedor --" class="mt-1" :class="{ 'v-select-required': campo.es_obligatorio && !formState.proveedor_id }"></v-select></div></div></fieldset>
           
           <div class="border-t border-gray-200 pt-6 mt-8">
             <h3 class="text-base font-semibold leading-7 text-gray-900">¿Necesitas más detalles?</h3>
@@ -564,7 +566,6 @@ async function handleSubmit() {
               <template v-for="campo in camposOpcionales" :key="`btn-${campo.id}`">
                 <button v-if="!camposOpcionalesVisibles.has(campo.nombre_campo_tecnico)" type="button" @click="agregarCampoOpcional(campo)" class="btn-add-optional">+ {{ campo.etiqueta_visible }}</button>
               </template>
-              <button v-if="!camposOpcionalesVisibles.has('vehiculo_id')" type="button" @click="agregarCampoOpcional({nombre_campo_tecnico: 'vehiculo_id'})" class="btn-add-optional">+ Vehículo</button>
             </div>
             
             <fieldset v-if="camposOpcionalesVisibles.size > 0" class="mt-6">
@@ -573,30 +574,12 @@ async function handleSubmit() {
                   <div v-if="camposOpcionalesVisibles.has(campo.nombre_campo_tecnico)" class="relative group input-wrapper">
                     <label :for="`opcional-${campo.nombre_campo_tecnico}`" class="form-label">{{ campo.etiqueta_visible }}</label>
                     <input v-if="campo.tipo_input === 'texto'" type="text" :id="`opcional-${campo.nombre_campo_tecnico}`" v-model="formState[campo.nombre_campo_tecnico]" class="form-input mt-1" />
-                    <v-select v-else-if="campo.tipo_input === 'select_cliente'" :id="`opcional-${campo.nombre_campo_tecnico}`" v-model="formState.cliente_id" :options="opcionesSelect.clientes" placeholder="-- Buscar cliente --" class="mt-1"></v-select>
+                    <v-select v-else-if="campo.tipo_input === 'select_cliente'" :id="`opcional-${campo.nombre_campo_tecnico}`" v-model="formState.cliente_id" :options="opcionesSelect.clientes" taggable :create-option="(newOption) => newOption" placeholder="-- Buscar o crear cliente --" class="mt-1"></v-select>
                     <v-select v-else-if="campo.tipo_input === 'select_transporte'" :id="`opcional-${campo.nombre_campo_tecnico}`" v-model="formState.transporte_id" :options="opcionesSelect.transportes" placeholder="-- Buscar transporte --" class="mt-1"></v-select>
                     <v-select v-else-if="campo.tipo_input === 'select_proveedor'" :id="`opcional-${campo.nombre_campo_tecnico}`" v-model="formState.proveedor_id" :options="opcionesSelect.proveedores" placeholder="-- Buscar proveedor --" class="mt-1"></v-select>
                     <button type="button" @click="quitarCampoOpcional(campo)" class="btn-remove-optional" aria-label="Quitar campo"><svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z" clip-rule="evenodd" /></svg></button>
                   </div>
                 </template>
-                
-                <div v-if="camposOpcionalesVisibles.has('vehiculo_id')" class="relative group input-wrapper sm:col-span-2 p-4 border border-gray-200 rounded-lg bg-gray-50">
-                   <button type="button" @click="quitarCampoOpcional({nombre_campo_tecnico: 'vehiculo_id'})" class="btn-remove-optional" aria-label="Quitar sección de vehículo"><svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z" clip-rule="evenodd" /></svg></button>
-                   <div class="grid grid-cols-1 sm:grid-cols-3 gap-4">
-                      <div>
-                        <label for="vehiculo_id" class="form-label">Unidad</label>
-                        <v-select id="vehiculo_id" v-model="formState.vehiculo_id" :options="opcionesSelect.vehiculos" :loading="loadingSelects.vehiculos" placeholder="-- Seleccionar --" class="mt-1 bg-white"></v-select>
-                      </div>
-                      <div>
-                        <label for="kilometraje_actual" class="form-label">KM Actual</label>
-                        <input type="number" id="kilometraje_actual" v-model="formState.kilometraje_actual" class="form-input mt-1" placeholder="Ej: 150000" />
-                      </div>
-                      <div>
-                        <label for="numero_remito_vehiculo" class="form-label">N° Remito</label>
-                        <input type="text" id="numero_remito_vehiculo" v-model="formState.numero_remito_vehiculo" class="form-input mt-1" />
-                      </div>
-                   </div>
-                </div>
               </div>
             </fieldset>
           </div>

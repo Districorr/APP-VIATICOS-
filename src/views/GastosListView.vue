@@ -2,7 +2,6 @@
 import { ref, onMounted, computed, watch, inject } from 'vue';
 import { supabase } from '../supabaseClient.js';
 import { useRouter, useRoute } from 'vue-router';
-// MODIFICACIÓN: Importamos la nueva función junto con la vieja
 import { useReportGenerator } from '../composables/useReportGenerator.js';
 import { formatDate, formatCurrency } from '../utils/formatters.js';
 import DetallesJson from '../components/DetallesJson.vue';
@@ -14,9 +13,7 @@ import IconRenderer from '../components/IconRenderer.vue';
 const router = useRouter();
 const route = useRoute();
 const userProfile = inject('userProfile', ref(null));
-
-// MODIFICACIÓN: Desestructuramos la nueva función
-const { generateCanvaStylePDF, generateRendicionCompletaPDF } = useReportGenerator();
+const { generateCanvaStylePDF } = useReportGenerator();
 
 const gastos = ref([]);
 const viajeSeleccionadoInfo = ref(null);
@@ -39,25 +36,24 @@ const newGroupName = ref('');
 const isGrouping = ref(false);
 const groupError = ref('');
 
-// Lógica para Desagrupar
+// --- NUEVO ESTADO PARA LA AGRUPACIÓN AUTOMÁTICA ---
+const isGroupingByType = ref(false);
+
+// Lógica para Desagrupar (sin cambios)
 const canUngroup = computed(() => {
   if (selectedGastos.value.size === 0) return false;
-  // Verifica si TODOS los gastos seleccionados tienen un grupo_id asignado
   for (const gastoId of selectedGastos.value) {
     const gasto = gastos.value.find(g => g.id === gastoId);
-    // Si algún gasto seleccionado no se encuentra o NO tiene grupo_id, no se puede desagrupar
     if (!gasto || !gasto.grupo_id) {
       return false;
     }
   }
-  // Si el bucle termina, significa que todos los gastos seleccionados tienen grupo_id
   return true;
 });
 
 async function handleUngroup() {
   if (!canUngroup.value) return;
   if (!confirm(`¿Estás seguro de que quieres quitar estos ${selectedGastos.value.size} gastos de su grupo actual?`)) return;
-
   isGrouping.value = true;
   try {
     const gastoIdsToUpdate = Array.from(selectedGastos.value);
@@ -76,7 +72,6 @@ async function handleUngroup() {
     isGrouping.value = false;
   }
 }
-// Fin Lógica para Desagrupar
 
 function sortBy(key) {
   if (sortKey.value === key) {
@@ -87,7 +82,7 @@ function sortBy(key) {
   }
 }
 
-// Lógica de Renderizado Mejorada (Agrupación por Grupo de Usuario o por Fecha)
+// Lógica de Renderizado (con bug de fecha corregido)
 const gastosRenderList = computed(() => {
   const sortedGastos = [...gastos.value].sort((a, b) => {
     const valA = a[sortKey.value];
@@ -103,20 +98,19 @@ const gastosRenderList = computed(() => {
 
   sortedGastos.forEach(gasto => {
     if (gasto.grupos_gastos) {
-      // Si el gasto pertenece a un grupo creado por el usuario
       const grupoKey = `group-${gasto.grupos_gastos.id}`;
       if (!userGroups[grupoKey]) {
         userGroups[grupoKey] = { isGroup: true, id: gasto.grupos_gastos.id, name: gasto.grupos_gastos.nombre_grupo, gastos: [] };
       }
       userGroups[grupoKey].gastos.push(gasto);
     } else {
-      // Si el gasto NO pertenece a un grupo, agrupar por fecha
-      const fechaClave = gasto.fecha_gasto; // Asumimos que fecha_gasto es una string 'YYYY-MM-DD'
+      const fechaClave = gasto.fecha_gasto;
+      const fechaLocal = new Date(`${fechaClave}T00:00:00`);
       if (!dateGroups[fechaClave]) {
         dateGroups[fechaClave] = {
           isGroup: false,
           id: fechaClave,
-          name: formatDate(gasto.fecha_gasto, { weekday: 'long', day: 'numeric', month: 'long' }), // Formato para mostrar el día
+          name: formatDate(fechaLocal, { weekday: 'long', day: 'numeric', month: 'long' }),
           gastos: []
         };
       }
@@ -124,15 +118,11 @@ const gastosRenderList = computed(() => {
     }
   });
 
-  // Convertir objetos a arrays y ordenar
   const finalUserGroups = Object.values(userGroups).sort((a, b) => a.name.localeCompare(b.name));
-  // Ordenar grupos por fecha de forma descendente
   const finalDateGroups = Object.values(dateGroups).sort((a, b) => new Date(b.id) - new Date(a.id));
 
-  // Concatenar grupos de usuario y grupos por fecha
   return { userGroups: finalUserGroups, dateGroups: finalDateGroups };
 });
-// Fin Lógica de Renderizado Mejorada
 
 function toggleGastoSelection(gastoId) {
   if (selectedGastos.value.has(gastoId)) selectedGastos.value.delete(gastoId);
@@ -141,17 +131,15 @@ function toggleGastoSelection(gastoId) {
 
 function openGroupModal() {
   if (selectedGastos.value.size === 0) return;
-  // Opcional: Verificar si todos los seleccionados NO están ya agrupados
   const allSelectedUngrouped = Array.from(selectedGastos.value).every(gastoId => {
     const gasto = gastos.value.find(g => g.id === gastoId);
     return gasto && !gasto.grupo_id;
   });
   if (!allSelectedUngrouped) {
       groupError.value = "Solo puedes agrupar gastos que no pertenecen a un grupo existente.";
-      setTimeout(() => groupError.value = '', 5000); // Limpiar mensaje después de 5s
+      setTimeout(() => groupError.value = '', 5000);
       return;
   }
-
   newGroupName.value = '';
   groupError.value = '';
   showGroupModal.value = true;
@@ -167,8 +155,6 @@ async function handleGroupCreation() {
   try {
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) throw new Error("Usuario no autenticado.");
-
-    // Verificar nuevamente si todos los seleccionados NO están ya agrupados antes de crear el grupo
     const allSelectedUngrouped = Array.from(selectedGastos.value).every(gastoId => {
         const gasto = gastos.value.find(g => g.id === gastoId);
         return gasto && !gasto.grupo_id;
@@ -178,7 +164,6 @@ async function handleGroupCreation() {
         isGrouping.value = false;
         return;
     }
-
     const { data: newGroup, error: groupError } = await supabase.from('grupos_gastos').insert({ nombre_grupo: newGroupName.value, viaje_id: viajeSeleccionadoInfo.value.id, creado_por_id: user.id }).select().single();
     if (groupError) throw groupError;
     const gastoIdsToUpdate = Array.from(selectedGastos.value);
@@ -196,11 +181,42 @@ async function handleGroupCreation() {
   }
 }
 
+// --- NUEVA FUNCIÓN PARA AGRUPAR POR TIPO ---
+async function handleGroupByType() {
+  if (!viajeSeleccionadoInfo.value?.id) {
+    errorMessage.value = 'Por favor, selecciona una rendición primero.';
+    return;
+  }
+  if (!confirm('¿Estás seguro de que quieres agrupar todos los gastos sin grupo por su tipo? Esta acción es masiva.')) {
+    return;
+  }
+  isGroupingByType.value = true;
+  errorMessage.value = '';
+  feedbackMessage.value = '';
+  try {
+    const { data, error } = await supabase.rpc('agrupar_gastos_por_tipo', {
+      p_viaje_id: viajeSeleccionadoInfo.value.id
+    });
+    if (error) throw error;
+    feedbackMessage.value = data; // La RPC devuelve un mensaje de éxito/informativo
+    await fetchGastos(); // Recargar los gastos para ver los nuevos grupos
+  } catch(e) {
+    errorMessage.value = `Error en la agrupación automática: ${e.message}`;
+  } finally {
+    isGroupingByType.value = false;
+    setTimeout(() => {
+      feedbackMessage.value = '';
+      errorMessage.value = '';
+    }, 5000);
+  }
+}
+
 const toggleRowExpansion = (gastoId) => {
   if (expandedRows.value.has(gastoId)) expandedRows.value.delete(gastoId);
   else expandedRows.value.add(gastoId);
 };
 
+// ... (Resto de las funciones computadas y de fetch sin cambios)
 const totalGastado = computed(() => gastos.value.reduce((sum, g) => sum + (g.monto_total || 0), 0));
 const adelantoTotal = computed(() => viajeSeleccionadoInfo.value?.monto_adelanto || 0);
 const saldoActualRendicion = computed(() => adelantoTotal.value - totalGastado.value);
@@ -225,10 +241,9 @@ const fetchInitialData = async () => {
     } else if (listaViajesParaFiltro.value.length > 0) {
       filtroViajeId.value = listaViajesParaFiltro.value[0].id;
     } else {
-      // Si no hay viajes y no hay viajeId en la URL, no hay nada que cargar
       loading.value = false;
-      gastos.value = []; // Asegurarse de que la lista de gastos esté vacía
-      viajeSeleccionadoInfo.value = null; // Asegurarse de que la info del viaje esté vacía
+      gastos.value = [];
+      viajeSeleccionadoInfo.value = null;
     }
   } catch (error) {
     errorMessage.value = "Error al cargar datos iniciales: " + error.message;
@@ -240,7 +255,7 @@ const fetchGastos = async () => {
   if (!filtroViajeId.value) {
     gastos.value = [];
     viajeSeleccionadoInfo.value = null;
-    loading.value = false; // Asegurarse de que loading sea false si no hay viaje seleccionado
+    loading.value = false;
     return;
   }
   loading.value = true;
@@ -269,15 +284,12 @@ const fetchGastos = async () => {
 function showFeedbackMessage() {
   if (route.query.feedback) {
     feedbackMessage.value = route.query.feedback;
-    // Reemplazar la ruta para limpiar el query param sin recargar
-    router.replace({ query: { ...route.query, feedback: undefined } }).catch(()=>{}); // Catch para evitar error si la navegación es redundante
+    router.replace({ query: { ...route.query, feedback: undefined } }).catch(()=>{});
     setTimeout(() => { feedbackMessage.value = ''; }, 4000);
   }
 }
 
-// Modificado para recibir el objeto gasto completo
 function editarGasto(gasto) {
-  // Verificar si el objeto gasto o su ID están presentes
   if (!gasto || !gasto.id) {
     console.error("editarGasto fue llamado sin un objeto gasto válido o con ID faltante.", gasto);
     errorMessage.value = "Error: No se pudo identificar el gasto a editar.";
@@ -288,7 +300,6 @@ function editarGasto(gasto) {
     setTimeout(() => feedbackMessage.value = '', 4000);
     return;
   }
-  // CORRECCIÓN: Usar 'id' en params para que coincida con la definición de ruta esperada
   router.push({ name: 'GastoFormEdit', params: { id: gasto.id } });
 }
 
@@ -300,13 +311,11 @@ onMounted(() => {
 watch(filtroViajeId, (newId, oldId) => {
   if (newId && newId !== oldId) {
     selectedGastos.value.clear();
-    // Actualizar la URL solo si el viajeId en la URL es diferente
     if (String(route.query.viajeId || '') !== String(newId)) {
-        router.push({ query: { ...route.query, viajeId: newId } }).catch(()=>{}); // Catch para evitar error si la navegación es redundante
+        router.push({ query: { ...route.query, viajeId: newId } }).catch(()=>{});
     }
     fetchGastos();
   } else if (!newId && oldId) {
-      // Caso donde se deselecciona un viaje (si fuera posible) o se queda sin viajes
       gastos.value = [];
       viajeSeleccionadoInfo.value = null;
       selectedGastos.value.clear();
@@ -344,7 +353,7 @@ const eliminarGasto = async (gastoId) => {
     if (error) throw error;
     feedbackMessage.value = "Gasto eliminado con éxito.";
     setTimeout(() => feedbackMessage.value = '', 4000);
-    fetchGastos(); // Volver a cargar los gastos después de eliminar
+    fetchGastos();
   } catch (error) {
     errorMessage.value = 'Error al eliminar el gasto: ' + error.message;
   }
@@ -362,17 +371,11 @@ async function cerrarRendicion() {
   isClosingRendicion.value = true;
   errorMessage.value = '';
   try {
-    // La base de datos se encarga de la notificación a los admins via trigger
     const { error } = await supabase.from('viajes').update({ cerrado_en: new Date().toISOString(), estado_aprobacion: 'pendiente_aprobacion' }).eq('id', viajeSeleccionadoInfo.value.id);
     if (error) throw error;
     feedbackMessage.value = "Rendición cerrada y enviada para aprobación con éxito.";
     setTimeout(() => feedbackMessage.value = '', 4000);
-    // Refrescar la info del viaje seleccionado para actualizar el estado
-    await fetchInitialData(); // Esto recargará la lista de viajes y seleccionará el mismo si existe
-    // Si el viaje seleccionado ya no está en la lista (ej. si el fetchInitialData lo filtra por estado),
-    // el watch de filtroViajeId se encargará de limpiar los gastos.
-    // Si sigue seleccionado, fetchGastos se llamará automáticamente via watch.
-
+    await fetchInitialData();
   } catch (error) {
     errorMessage.value = `No se pudo cerrar la rendición: ${error.message}`;
   } finally {
@@ -380,17 +383,13 @@ async function cerrarRendicion() {
   }
 }
 
-// MODIFICACIÓN: Esta función ahora llamará al nuevo generador
 const generarRendicionPDFWrapper = () => {
   if (!viajeSeleccionadoInfo.value || !viajeSeleccionadoInfo.value.id) {
     feedbackMessage.value = 'Selecciona una rendición con gastos para generar el PDF.';
     setTimeout(() => feedbackMessage.value = '', 4000);
     return;
   }
-  
-  // Llamamos a la nueva función, que es mucho más simple. Solo necesita el ID del viaje.
   generateCanvaStylePDF(viajeSeleccionadoInfo.value.id);
-
   isExportMenuOpen.value = false;
 };
 </script>
@@ -404,7 +403,6 @@ const generarRendicionPDFWrapper = () => {
      <div v-if="errorMessage && !feedbackMessage" class="fixed top-24 right-6 bg-red-500 text-white px-6 py-3 rounded-lg shadow-lg z-50 transition-opacity duration-300" role="alert">
       {{ errorMessage }}
     </div>
-
 
     <div class="container mx-auto px-4 sm:px-6 lg:px-8 py-8">
       <!-- Encabezado Fijo con Título, Botones y Resumen -->
@@ -454,39 +452,58 @@ const generarRendicionPDFWrapper = () => {
         </div>
       </div>
 
-      <!-- Filtros -->
+      <!-- Filtros y Acciones Automáticas -->
+      <!-- --- INICIO DE LA MODIFICACIÓN --- -->
       <div class="bg-white p-4 rounded-xl shadow-sm border border-gray-200 mb-6">
-        <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-          <div>
-            <label for="filtro-viaje" class="form-label-filter">Rendición Activa</label>
-            <select id="filtro-viaje" v-model="filtroViajeId" class="form-input mt-1">
-              <option value="" disabled>Selecciona una rendición</option>
-              <option v-if="listaViajesParaFiltro.length === 0" value="" disabled>No tienes rendiciones</option>
-              <option v-for="viaje in listaViajesParaFiltro" :key="viaje.id" :value="viaje.id">{{ viaje.nombre_viaje }}</option>
-            </select>
-          </div>
-          <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+        <div class="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4">
+          
+          <!-- Contenedor de Filtros -->
+          <div class="flex-grow grid grid-cols-1 md:grid-cols-2 gap-4">
             <div>
-              <label for="filtro-tipo" class="form-label-filter">Filtrar por Tipo</label>
-              <v-select id="filtro-tipo" v-model="filtroTipoGastoIds" :options="tiposDeGastoDisponibles" multiple placeholder="Todos" class="v-select-filter mt-1"></v-select>
+              <label for="filtro-viaje" class="form-label-filter">Rendición Activa</label>
+              <select id="filtro-viaje" v-model="filtroViajeId" class="form-input mt-1">
+                <option value="" disabled>Selecciona una rendición</option>
+                <option v-if="listaViajesParaFiltro.length === 0" value="" disabled>No tienes rendiciones</option>
+                <option v-for="viaje in listaViajesParaFiltro" :key="viaje.id" :value="viaje.id">{{ viaje.nombre_viaje }}</option>
+              </select>
             </div>
-            <div>
-              <label for="filtro-descripcion" class="form-label-filter">Buscar en Descripción</label>
-              <input id="filtro-descripcion" type="text" v-model="filtroDescripcion" placeholder="Ej: Nafta, Hotel..." class="form-input mt-1">
+            <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <div>
+                <label for="filtro-tipo" class="form-label-filter">Filtrar por Tipo</label>
+                <v-select id="filtro-tipo" v-model="filtroTipoGastoIds" :options="tiposDeGastoDisponibles" multiple placeholder="Todos" class="v-select-filter mt-1"></v-select>
+              </div>
+              <div>
+                <label for="filtro-descripcion" class="form-label-filter">Buscar en Descripción</label>
+                <input id="filtro-descripcion" type="text" v-model="filtroDescripcion" placeholder="Ej: Nafta, Hotel..." class="form-input mt-1">
+              </div>
             </div>
           </div>
+
+          <!-- Contenedor de Acciones -->
+          <div class="flex-shrink-0 pt-4 lg:pt-0">
+             <button
+              @click="handleGroupByType"
+              :disabled="isGroupingByType || isViajeActualCerrado || gastos.length === 0"
+              class="w-full lg:w-auto text-indigo-600 font-semibold text-sm hover:text-indigo-800 disabled:text-gray-400 disabled:cursor-not-allowed transition-colors flex items-center justify-center gap-2"
+              title="Agrupa todos los gastos sin grupo por su tipo de gasto."
+            >
+              <svg v-if="isGroupingByType" class="animate-spin h-5 w-5" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path></svg>
+              <svg v-else xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="w-5 h-5"><path fill-rule="evenodd" d="M2.5 12.5a.5.5 0 01.5-.5h3.5a.5.5 0 010 1h-3.5a.5.5 0 01-.5-.5zm0-4a.5.5 0 01.5-.5h3.5a.5.5 0 010 1h-3.5a.5.5 0 01-.5-.5zm0-4a.5.5 0 01.5-.5h3.5a.5.5 0 010 1h-3.5a.5.5 0 01-.5-.5z" clip-rule="evenodd" /><path d="M10.273 4.23a.75.75 0 10-1.046-1.06l-3.5 3.25a.75.75 0 000 1.06l3.5 3.25a.75.75 0 001.046-1.06L7.697 8.25l2.576-2.384V4.23zM13 15.25a.75.75 0 001.06 1.06l3.5-3.25a.75.75 0 000-1.06l-3.5-3.25a.75.75 0 10-1.06 1.06L15.303 11.75l-2.303 2.138v1.362z" /></svg>
+              {{ isGroupingByType ? 'Agrupando...' : 'Agrupar por Tipo' }}
+            </button>
+          </div>
+
         </div>
       </div>
+      <!-- --- FIN DE LA MODIFICACIÓN --- -->
 
       <!-- Acciones de Selección (Agrupar/Desagrupar) -->
       <div v-if="selectedGastos.size > 0" class="mb-4 p-3 bg-indigo-50 border border-indigo-200 rounded-lg flex items-center justify-between flex-wrap gap-2">
         <span class="font-semibold text-indigo-800">{{ selectedGastos.size }} gasto(s) seleccionado(s)</span>
         <div class="flex gap-2">
-          <!-- Botón Desagrupar: Visible si hay seleccionados, habilitado si canUngroup es true -->
           <button @click="handleUngroup" :disabled="!canUngroup || isGrouping" class="btn-secondary text-sm">
              {{ isGrouping ? '...' : 'Desagrupar' }}
           </button>
-          <!-- Botón Agrupar: Visible si hay seleccionados, habilitado si no se está agrupando -->
           <button @click="openGroupModal" :disabled="isGrouping" class="btn-primary text-sm">Agrupar</button>
         </div>
       </div>
@@ -519,7 +536,6 @@ const generarRendicionPDFWrapper = () => {
                     <th class="table-header sortable" @click="sortBy('fecha_gasto')">Fecha <span v-if="sortKey === 'fecha_gasto'">{{ sortOrder === 'asc' ? '▲' : '▼' }}</span></th>
                     <th class="table-header">Tipo de Gasto</th>
                     <th class="table-header">Descripción</th>
-                    <!-- Nuevas columnas para Provincia y N° Factura -->
                     <th class="table-header">Provincia</th>
                     <th class="table-header">N° Factura</th>
                     <th class="table-header text-right sortable" @click="sortBy('monto_total')">Monto <span v-if="sortKey === 'monto_total'">{{ sortOrder === 'asc' ? '▲' : '▼' }}</span></th>
@@ -528,29 +544,23 @@ const generarRendicionPDFWrapper = () => {
                 </thead>
                 <tbody class="divide-y divide-gray-200">
                   <template v-for="gasto in grupo.gastos" :key="gasto.id">
-                    <!-- Fila principal del gasto -->
                     <tr class="hover:bg-blue-50/50 transition-colors cursor-pointer" :class="{'bg-indigo-50': selectedGastos.has(gasto.id)}" @click="toggleRowExpansion(gasto.id)">
-                      <!-- CORRECCIÓN: Checkbox solo deshabilitado si la rendición está cerrada -->
                       <td class="table-cell text-center" @click.stop><input type="checkbox" :checked="selectedGastos.has(gasto.id)" @change="toggleGastoSelection(gasto.id)" class="h-4 w-4 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500" :disabled="isViajeActualCerrado"></td>
                       <td class="table-cell text-center"><IconRenderer :icon-data="gasto.tipos_gasto_config?.icono_svg" :color="gasto.tipos_gasto_config?.color_accent" /></td>
                       <td class="table-cell font-semibold text-gray-700 w-28">{{ formatDate(gasto.fecha_gasto) }}</td>
                       <td class="table-cell w-48">{{ gasto.tipos_gasto_config?.nombre_tipo_gasto }}</td>
                       <td class="table-cell font-medium text-gray-900 max-w-xs truncate">{{ gasto.descripcion_general }}</td>
-                       <!-- Celdas para Provincia y N° Factura -->
                       <td class="table-cell w-28">{{ gasto.provincia || '-' }}</td>
                       <td class="table-cell w-28">{{ gasto.numero_factura || '-' }}</td>
                       <td class="table-cell text-right font-bold text-gray-800 w-36">{{ formatCurrency(gasto.monto_total) }}</td>
                       <td class="table-cell text-center w-28" @click.stop>
                         <div class="flex justify-center items-center gap-2">
                           <a v-if="gasto.factura_url" :href="gasto.factura_url" target="_blank" class="btn-icon-action btn-icon-link" aria-label="Ver factura"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" fill="currentColor" class="w-4 h-4"><path d="M4.25 2A2.25 2.25 0 0 0 2 4.25v7.5A2.25 2.25 0 0 0 4.25 14h7.5A2.25 2.25 0 0 0 14 11.75V7.5a.75.75 0 0 0-1.5 0v4.25a.75.75 0 0 1-.75.75h-7.5a.75.75 0 0 1-.75-.75v-7.5a.75.75 0 0 1 .75-.75h3.5a.75.75 0 0 0 0-1.5h-3.5Z" /><path d="M10 .75a.75.75 0 0 1 .75.75v3.5a.75.75 0 0 1-1.5 0V2.56L6.03 6.28a.75.75 0 0 1-1.06-1.06L8.69 1.5H7.25a.75.75 0 0 1 0-1.5h3.5Z" /></svg></a>
-                          <!-- Pasamos el objeto gasto completo -->
                           <button @click="editarGasto(gasto)" :disabled="isViajeActualCerrado" class="btn-icon-action btn-icon-edit" aria-label="Editar Gasto Completo"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" fill="currentColor" class="w-4 h-4"><path d="M11.013 2.513a1.75 1.75 0 0 1 2.475 2.474L6.523 11.952l-2.756.87a.75.75 0 0 1-.917-.917l.87-2.756L11.013 2.513Z" /></svg></button>
                           <button @click="eliminarGasto(gasto.id)" :disabled="isViajeActualCerrado" class="btn-icon-action btn-icon-delete" aria-label="Eliminar Gasto"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" fill="currentColor" class="w-4 h-4"><path fill-rule="evenodd" d="M5 3.25V4H2.75a.75.75 0 0 0 0 1.5h.3l.815 8.15A1.5 1.5 0 0 0 5.357 15h5.285a1.5 1.5 0 0 0 1.493-1.35l.815-8.15h.3a.75.75 0 0 0 0-1.5H11v-.75A2.25 2.25 0 0 0 8.75 1h-1.5A2.25 2.25 0 0 0 5 3.25Zm2.25-.75a.75.75 0 0 0-.75.75V4h3v-.75a.75.75 0 0 0-.75-.75h-1.5Z" clip-rule="evenodd" /></svg></button>
                         </div>
                       </td>
                     </tr>
-                    <!-- Fila expandida para detalles adicionales -->
-                    <!-- Colspan ajustado para cubrir las nuevas columnas -->
                     <tr v-if="expandedRows.has(gasto.id)"><td colspan="9" class="p-0"><div class="px-6 py-4"><DetallesJson :datos="gasto.datos_adicionales" /></div></td></tr>
                   </template>
                 </tbody>
@@ -566,7 +576,6 @@ const generarRendicionPDFWrapper = () => {
             <div class="bg-white rounded-lg shadow-sm border border-gray-200 divide-y divide-gray-200">
               <div v-for="gasto in grupo.gastos" :key="gasto.id" class="p-4" @click="toggleRowExpansion(gasto.id)">
                 <div class="flex justify-between items-start gap-4">
-                  <!-- CORRECCIÓN: Checkbox de selección en móvil solo deshabilitado si la rendición está cerrada -->
                   <div class="flex-shrink-0 mt-1" @click.stop>
                      <input type="checkbox" :checked="selectedGastos.has(gasto.id)" @change="toggleGastoSelection(gasto.id)" class="h-4 w-4 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500" :disabled="isViajeActualCerrado">
                   </div>
@@ -574,7 +583,6 @@ const generarRendicionPDFWrapper = () => {
                   <div class="flex-grow min-w-0">
                     <p class="font-semibold text-gray-800">{{ gasto.tipos_gasto_config?.nombre_tipo_gasto || 'Gasto' }}</p>
                     <p class="text-sm text-gray-600 truncate">{{ gasto.descripcion_general }}</p>
-                    <!-- Provincia y N° Factura en móvil (debajo de descripción) -->
                     <p class="text-xs text-gray-500 mt-1">
                         <span v-if="gasto.provincia">Prov: {{ gasto.provincia }}</span>
                         <span v-if="gasto.provincia && gasto.numero_factura"> • </span>
@@ -583,14 +591,11 @@ const generarRendicionPDFWrapper = () => {
                   </div>
                   <p class="font-bold text-lg text-gray-800 flex-shrink-0 ml-2">{{ formatCurrency(gasto.monto_total) }}</p>
                 </div>
-                <!-- Detalles adicionales expandidos -->
                 <div v-if="expandedRows.has(gasto.id)" class="mt-3 pt-3 border-t border-gray-100"><DetallesJson :datos="gasto.datos_adicionales" /></div>
-                <!-- Acciones y Fecha en móvil -->
                 <div class="mt-3 pt-3 border-t border-gray-100 flex justify-between items-center">
                   <p class="text-xs text-gray-400">{{ formatDate(gasto.fecha_gasto) }}</p>
                   <div class="flex items-center gap-2" @click.stop>
                     <a v-if="gasto.factura_url" :href="gasto.factura_url" target="_blank" class="btn-icon-action btn-icon-link" aria-label="Ver factura"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" fill="currentColor" class="w-4 h-4"><path d="M4.25 2A2.25 2.25 0 0 0 2 4.25v7.5A2.25 2.25 0 0 0 4.25 14h7.5A2.25 2.25 0 0 0 14 11.75V7.5a.75.75 0 0 0-1.5 0v4.25a.75.75 0 0 1-.75.75h-7.5a.75.75 0 0 1-.75-.75v-7.5a.75.75 0 0 1 .75-.75h3.5a.75.75 0 0 0 0-1.5h-3.5Z" /><path d="M10 .75a.75.75 0 0 1 .75.75v3.5a.75.75 0 0 1-1.5 0V2.56L6.03 6.28a.75.75 0 0 1-1.06-1.06L8.69 1.5H7.25a.75.75 0 0 1 0-1.5h3.5Z" /></svg></a>
-                    <!-- Pasamos el objeto gasto completo -->
                     <button @click="editarGasto(gasto)" :disabled="isViajeActualCerrado" class="btn-icon-action btn-icon-edit" aria-label="Editar Gasto"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" fill="currentColor" class="w-4 h-4"><path d="M11.013 2.513a1.75 1.75 0 0 1 2.475 2.474L6.523 11.952l-2.756.87a.75.75 0 0 1-.917-.917l.87-2.756L11.013 2.513Z" /></svg></button>
                     <button @click="eliminarGasto(gasto.id)" :disabled="isViajeActualCerrado" class="btn-icon-action btn-icon-delete" aria-label="Eliminar Gasto"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" fill="currentColor" class="w-4 h-4"><path fill-rule="evenodd" d="M5 3.25V4H2.75a.75.75 0 0 0 0 1.5h.3l.815 8.15A1.5 1.5 0 0 0 5.357 15h5.285a1.5 1.5 0 0 0 1.493-1.35l.815-8.15h.3a.75.75 0 0 0 0-1.5H11v-.75A2.25 2.25 0 0 0 8.75 1h-1.5A2.25 2.25 0 0 0 5 3.25Zm2.25-.75a.75.75 0 0 0-.75.75V4h3v-.75a.75.75 0 0 0-.75-.75h-1.5Z" clip-rule="evenodd" /></svg></button>
                   </div>
@@ -608,11 +613,6 @@ const generarRendicionPDFWrapper = () => {
         <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" class="w-7 h-7"><path fill-rule="evenodd" d="M12 3.75a.75.75 0 01.75.75v6.75h6.75a.75.75 0 010 1.5h-6.75v6.75a.75.75 0 01-1.5 0v-6.75H4.5a.75.75 0 010-1.5h6.75V4.5a.75.75 0 01.75-.75z" clip-rule="evenodd" /></svg>
       </button>
     </div>
-    <!-- En GastosListView.vue, cerca del otro botón de exportar -->
-    <div class="relative flex-shrink-0 flex items-center gap-2">
-    </div>
-<!-- Mensaje de Selección de Rendición -->
-
     <!-- Modal para Crear Grupo -->
     <div v-if="showGroupModal" class="fixed inset-0 bg-gray-600 bg-opacity-75 z-50 flex justify-center items-center" @click.self="showGroupModal = false">
       <div class="bg-white rounded-lg shadow-xl max-w-md w-full p-6">
