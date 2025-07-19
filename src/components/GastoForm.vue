@@ -1,4 +1,3 @@
-// src/components/GastoForm.vue
 <script setup>
 import { ref, reactive, onMounted, computed, watch, nextTick } from 'vue';
 import { supabase } from '../supabaseClient.js';
@@ -7,10 +6,6 @@ import vSelect from 'vue-select';
 import 'vue-select/dist/vue-select.css';
 import TipoGastoSelector from './TipoGastoSelector.vue';
 import { useRouter } from 'vue-router';
-
-// --- INICIO DE MODIFICACIONES ---
-const ID_TIPO_GASTO_COMBUSTIBLE = 14;
-// --- FIN DE MODIFICACIONES ---
 
 const props = defineProps({
   formatoId: { type: [Number, String], required: true },
@@ -29,6 +24,10 @@ const errorMessage = ref('');
 const successMessage = ref('');
 const isEditMode = computed(() => !!props.gastoId);
 
+// --- INICIO CORRECCIÓN: AÑADIR FLAG DE CARGA ---
+const isInitialLoad = ref(true);
+// --- FIN CORRECCIÓN ---
+
 const loadingSelects = reactive({
   viajes: true,
   clientes: true,
@@ -37,8 +36,10 @@ const loadingSelects = reactive({
   cajas_chicas: true,
   usuariosParaDelegar: true,
   vehiculos: true,
+  provincias: true,
+  localidadesOrigen: false,
+  localidadesDestino: false,
 });
-
 const formState = reactive({});
 const opcionesSelect = ref({
   viajes: [],
@@ -49,6 +50,9 @@ const opcionesSelect = ref({
   cajas_chicas: [],
   usuariosParaDelegar: [],
   vehiculos: [],
+  provincias: [],
+  localidadesOrigen: [],
+  localidadesDestino: [],
 });
 
 const facturaFile = ref(null);
@@ -58,21 +62,19 @@ const useCajaDiaria = ref(false);
 const selectedCajaId = ref(null);
 const isDelegating = ref(false);
 const delegatedToUserId = ref(null);
-
 const camposObligatorios = ref([]);
 const camposOpcionales = ref([]);
 const camposOpcionalesVisibles = ref(new Set());
 const formattedMontoTotal = ref('');
-
 const duplicationWarning = ref('');
 const duplicationCheckTimeout = ref(null);
-
-const provincias = ref(['Buenos Aires', 'CABA', 'Catamarca', 'Chaco', 'Chubut', 'Córdoba', 'Corrientes', 'Entre Ríos', 'Formosa', 'Jujuy', 'La Pampa', 'La Rioja', 'Mendoza', 'Misiones', 'Neuquén', 'Río Negro', 'Salta', 'San Juan', 'San Luis', 'Santa Cruz', 'Santa Fe', 'Santiago del Estero', 'Tierra del Fuego', 'Tucumán']);
-
-// --- INICIO DE MODIFICACIONES ---
-const isCombustibleGasto = computed(() => formState.tipo_gasto_id === ID_TIPO_GASTO_COMBUSTIBLE);
-// --- FIN DE MODIFICACIONES ---
-
+const showTransporteFields = computed(() => {
+  if (!formState.tipo_gasto_id) return false;
+  const tipoGastoSeleccionado = opcionesSelect.value.tipos_gasto.find(
+    (t) => t.id === formState.tipo_gasto_id
+  );
+  return tipoGastoSeleccionado?.es_tipo_transporte === true;
+});
 
 const handleMontoInput = (event) => {
   const input = event.target;
@@ -91,43 +93,34 @@ const handleMontoInput = (event) => {
     input.setSelectionRange(newCursorPos, newCursorPos);
   });
 };
-
 const formattedMontoIva = computed(() => {
   if (formState.monto_total > 0) return formatCurrency(formState.monto_iva);
   return '';
 });
-
 async function cargarDatosCriticos() {
   try {
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) throw new Error("Usuario no autenticado.");
-
     const [camposResult, tiposResult] = await Promise.all([
       supabase.from('campos_formato_config').select('*').eq('formato_id', props.formatoId).order('orden_visualizacion'),
-      supabase.from('tipos_gasto_config').select('id, nombre_tipo_gasto, icono_svg, color_accent').eq('activo', true)
+      supabase.from('tipos_gasto_config').select('id, nombre_tipo_gasto, icono_svg, color_accent, es_tipo_transporte').eq('activo', true)
     ]);
-
     if (camposResult.error) throw camposResult.error;
     const todosLosCampos = camposResult.data || [];
     camposObligatorios.value = todosLosCampos.filter(c => c.es_obligatorio);
     camposOpcionales.value = todosLosCampos.filter(c => !c.es_obligatorio);
-
     if (tiposResult.error) throw tiposResult.error;
     opcionesSelect.value.tipos_gasto = tiposResult.data || [];
-
     inicializarFormState();
-
   } catch (e) {
     errorMessage.value = `Error crítico al cargar el formulario: ${e.message}`;
     loading.value = false;
   }
 }
-
 async function cargarDatosSecundarios() {
   try {
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) return;
-
     const promesas = {
       viajes: supabase.from('viajes').select('id, nombre_viaje').eq('user_id', user.id).is('cerrado_en', null),
       clientes: supabase.from('clientes').select('id, nombre_cliente'),
@@ -136,13 +129,13 @@ async function cargarDatosSecundarios() {
       cajasChicas: supabase.from('cajas_chicas').select('id, nombre, saldo_actual').eq('responsable_id', user.id).eq('activo', true),
       todosLosUsuarios: supabase.from('perfiles').select('id, nombre_completo, email'),
       vehiculos: supabase.from('vehiculos').select('id, patente, marca, modelo').eq('activo', true),
+      provincias: supabase.from('provincias').select('id, nombre').order('nombre'),
     };
-
     for (const key in promesas) {
       promesas[key].then(({ data, error }) => {
         if (error) console.error(`Error cargando ${key}:`, error);
         else {
-          if (key === 'clientes' || key === 'transportes' || key === 'proveedores') {
+          if (key === 'clientes' || key === 'transportes' || key === 'proveedores' || key === 'provincias') {
             opcionesSelect.value[key] = (data || []).map(item => ({ label: item.nombre_cliente || item.nombre, value: item.id }));
           } else if (key === 'cajasChicas') {
             opcionesSelect.value.cajas_chicas = (data || []).map(c => ({ label: `${c.nombre} (Saldo: ${formatCurrency(c.saldo_actual)})`, value: c.id }));
@@ -157,7 +150,6 @@ async function cargarDatosSecundarios() {
         loadingSelects[key] = false;
       });
     }
-
   } catch (e) {
     console.error("Error al iniciar carga de datos secundarios:", e);
   }
@@ -169,20 +161,22 @@ onMounted(async () => {
   
   if (isEditMode.value) {
     await cargarGastoParaEditar();
-  } else {
-    if (props.viajeIdPredeterminado) formState.viaje_id = parseInt(props.viajeIdPredeterminado);
-    if (props.cajaIdPredeterminada) {
-      useCajaDiaria.value = true;
-      selectedCajaId.value = parseInt(props.cajaIdPredeterminada);
-    }
   }
-
+  
   loading.value = false;
   cargarDatosSecundarios();
+  
+  // --- INICIO CORRECCIÓN: BAJAR LA BANDERA DESPUÉS DE LA CARGA ---
+  await nextTick();
+  isInitialLoad.value = false;
+  // --- FIN CORRECCIÓN ---
 });
 
 function inicializarFormState() {
-  const camposFijos = { fecha_gasto: new Date().toISOString().split('T')[0], monto_total: 0, monto_iva: 0, moneda: 'ARS', descripcion_general: '', numero_factura: '', viaje_id: null, caja_id: null, tipo_gasto_id: null, adelanto_especifico_aplicado: null, factura_url: null, provincia: null };
+  const hoy = new Date();
+  hoy.setMinutes(hoy.getMinutes() - hoy.getTimezoneOffset());
+  const fechaHoyISO = hoy.toISOString().split('T')[0];
+  const camposFijos = { fecha_gasto: fechaHoyISO, monto_total: 0, monto_iva: 0, moneda: 'ARS', descripcion_general: '', numero_factura: '', viaje_id: null, caja_id: null, tipo_gasto_id: null, adelanto_especifico_aplicado: null, factura_url: null, provincia: null, provincia_id: null, provincia_origen_id: null, localidad_origen_id: null, provincia_destino_id: null, localidad_destino_id: null };
   const camposDeIdNormalizados = { cliente_id: null, transporte_id: null, proveedor_id: null };
   const otrosCamposDinamicos = {};
   [...camposObligatorios.value, ...camposOpcionales.value].forEach(campo => {
@@ -190,43 +184,36 @@ function inicializarFormState() {
       otrosCamposDinamicos[campo.nombre_campo_tecnico] = campo.valor_por_defecto || null;
     }
   });
-
-  // --- INICIO DE MODIFICACIONES ---
-  const camposCombustible = { vehiculo_id: null, litros: null, odometro_actual: null };
-  Object.assign(formState, { ...camposFijos, ...camposDeIdNormalizados, ...otrosCamposDinamicos, ...camposCombustible });
-  // --- FIN DE MODIFICACIONES ---
-
+  Object.assign(formState, { ...camposFijos, ...camposDeIdNormalizados, ...otrosCamposDinamicos });
   formattedMontoTotal.value = formatCurrencyForInput(formState.monto_total);
-  if (!isEditMode.value) {
-    const lastProvincia = localStorage.getItem('lastUsedProvincia');
-    if (lastProvincia) formState.provincia = lastProvincia;
-  }
 }
 
 async function cargarGastoParaEditar() {
-  const { data: gastoData, error: gastoError } = await supabase.from('gastos').select('*, datos_adicionales, clientes(id, nombre_cliente), transportes(id, nombre), proveedores(id, nombre)').eq('id', props.gastoId).single();
+  const { data: gastoData, error: gastoError } = await supabase
+    .from('gastos')
+    .select(`*, datos_adicionales, clientes(id, nombre_cliente), transportes(id, nombre), proveedores(id, nombre), localidad_origen:localidades!localidad_origen_id(id, nombre), localidad_destino:localidades!localidad_destino_id(id, nombre)`)
+    .eq('id', props.gastoId).single();
+
   if (gastoError) throw gastoError;
 
-  // --- INICIO DE MODIFICACIONES ---
-  // Extraer datos del vehículo de datos_adicionales si es un gasto de combustible
-  let datosVehiculo = {};
-  if (gastoData.tipo_gasto_id === ID_TIPO_GASTO_COMBUSTIBLE && gastoData.datos_adicionales) {
-    datosVehiculo = {
-        vehiculo_id: gastoData.datos_adicionales.vehiculo_id,
-        litros: gastoData.datos_adicionales.litros,
-        odometro_actual: gastoData.datos_adicionales.odometro,
-    };
-  }
-  Object.assign(formState, gastoData, gastoData.datos_adicionales, datosVehiculo);
-  // --- FIN DE MODIFICACIONES ---
-  
-  if (gastoData.caja_id) {
-    useCajaDiaria.value = true;
-    selectedCajaId.value = gastoData.caja_id;
-  }
+  Object.assign(formState, gastoData, gastoData.datos_adicionales);
+  if (gastoData.fecha_gasto) formState.fecha_gasto = gastoData.fecha_gasto;
+  if (gastoData.caja_id) { useCajaDiaria.value = true; selectedCajaId.value = gastoData.caja_id; }
   if (gastoData.cliente_id && gastoData.clientes) formState.cliente_id = { label: gastoData.clientes.nombre_cliente, value: gastoData.cliente_id };
   if (gastoData.transporte_id && gastoData.transportes) formState.transporte_id = { label: gastoData.transportes.nombre, value: gastoData.transporte_id };
   if (gastoData.proveedor_id && gastoData.proveedores) formState.proveedor_id = { label: gastoData.proveedores.nombre, value: gastoData.proveedor_id };
+  
+  if (gastoData.provincia_origen_id && gastoData.localidad_origen) {
+    const localidadObj = { label: gastoData.localidad_origen.nombre, value: gastoData.localidad_origen.id };
+    opcionesSelect.value.localidadesOrigen = [localidadObj];
+    formState.localidad_origen_id = localidadObj;
+  }
+  if (gastoData.provincia_destino_id && gastoData.localidad_destino) {
+    const localidadObj = { label: gastoData.localidad_destino.nombre, value: gastoData.localidad_destino.id };
+    opcionesSelect.value.localidadesDestino = [localidadObj];
+    formState.localidad_destino_id = localidadObj;
+  }
+
   if (gastoData.factura_url) facturaPreview.value = gastoData.factura_url;
   sinFactura.value = !gastoData.numero_factura;
   formattedMontoTotal.value = formatCurrencyForInput(formState.monto_total || 0);
@@ -237,30 +224,25 @@ async function cargarGastoParaEditar() {
     }
   });
 }
-
 function agregarCampoOpcional(campo) { camposOpcionalesVisibles.value.add(campo.nombre_campo_tecnico); }
 function quitarCampoOpcional(campo) {
   const campoTecnico = campo.nombre_campo_tecnico;
   camposOpcionalesVisibles.value.delete(campoTecnico);
   formState[campoTecnico] = null;
 }
-
 watch([() => formState.monto_total, sinFactura], ([newMonto, noTieneFactura]) => {
   if (noTieneFactura) formState.monto_iva = 0;
   else formState.monto_iva = parseFloat(((newMonto || 0) - ((newMonto || 0) / 1.21)).toFixed(2));
 }, { immediate: true });
-
 watch(sinFactura, (esSinFactura) => { if (esSinFactura) formState.numero_factura = ''; });
-
 watch(() => [formState.numero_factura, formState.proveedor_id], ([numFactura, provId]) => {
   clearTimeout(duplicationCheckTimeout.value);
   duplicationWarning.value = '';
-  if (!numFactura || sinFactura.value || !provId) return;
-  
+  const proveedorIdObj = provId && typeof provId === 'object' ? provId.value : provId;
+  if (!numFactura || sinFactura.value || !proveedorIdObj) return;
   duplicationCheckTimeout.value = setTimeout(async () => {
     try {
-      const proveedorIdFinal = provId.value || provId;
-      let query = supabase.from('gastos').select('id', { count: 'exact', head: true }).eq('numero_factura', numFactura).eq('proveedor_id', proveedorIdFinal);
+      let query = supabase.from('gastos').select('id', { count: 'exact', head: true }).eq('numero_factura', numFactura).eq('proveedor_id', proveedorIdObj);
       if (isEditMode.value) query = query.neq('id', props.gastoId);
       const { count, error } = await query;
       if (error) throw error;
@@ -271,6 +253,37 @@ watch(() => [formState.numero_factura, formState.proveedor_id], ([numFactura, pr
   }, 800);
 });
 
+// --- INICIO REFACTORIZACIÓN WATCHERS ---
+watch(() => formState.provincia_origen_id, async (provinciaId) => {
+  if (isInitialLoad.value) return; // No hacer nada durante la carga inicial
+  formState.localidad_origen_id = null;
+  opcionesSelect.value.localidadesOrigen = [];
+  
+  const provinciaIdFinal = provinciaId?.value || provinciaId;
+  if (!provinciaIdFinal) return;
+
+  loadingSelects.localidadesOrigen = true;
+  const { data, error } = await supabase.from('localidades').select('id, nombre').eq('provincia_id', provinciaIdFinal).order('nombre');
+  if (error) console.error('Error cargando localidades de origen:', error);
+  opcionesSelect.value.localidadesOrigen = (data || []).map(l => ({ label: l.nombre, value: l.id }));
+  loadingSelects.localidadesOrigen = false;
+});
+watch(() => formState.provincia_destino_id, async (provinciaId) => {
+  if (isInitialLoad.value) return; // No hacer nada durante la carga inicial
+  formState.localidad_destino_id = null;
+  opcionesSelect.value.localidadesDestino = [];
+  
+  const provinciaIdFinal = provinciaId?.value || provinciaId;
+  if (!provinciaIdFinal) return;
+  
+  loadingSelects.localidadesDestino = true;
+  const { data, error } = await supabase.from('localidades').select('id, nombre').eq('provincia_id', provinciaIdFinal).order('nombre');
+  if (error) console.error('Error cargando localidades de destino:', error);
+  opcionesSelect.value.localidadesDestino = (data || []).map(l => ({ label: l.nombre, value: l.id }));
+  loadingSelects.localidadesDestino = false;
+});
+// --- FIN REFACTORIZACIÓN WATCHERS ---
+
 const handleFacturaChange = (event) => {
   const file = event.target.files[0];
   if (file) {
@@ -278,29 +291,17 @@ const handleFacturaChange = (event) => {
     facturaPreview.value = URL.createObjectURL(file);
   }
 };
-
 function validateStep1() {
   if (!formState.monto_total || formState.monto_total <= 0) { stepError.value = 'Por favor, ingresa un monto total válido.'; return false; }
   if (useCajaDiaria.value && !selectedCajaId.value) { stepError.value = 'Si pagas con Caja Diaria, debes seleccionar una caja.'; return false; }
   return true;
 }
-
 function validateStep2() {
   if (!useCajaDiaria.value && !isDelegating.value && !formState.viaje_id) { stepError.value = 'Debes asociar este gasto a una rendición o delegarlo.'; return false; }
   if (isDelegating.value && !delegatedToUserId.value) { stepError.value = 'Debes seleccionar un responsable a quien delegar el gasto.'; return false; }
   if (!formState.tipo_gasto_id) { stepError.value = 'Debes seleccionar un tipo de gasto.'; return false; }
-  
-  // --- INICIO DE MODIFICACIONES ---
-  if (isCombustibleGasto.value) {
-    if (!formState.vehiculo_id) { stepError.value = 'Debes seleccionar un vehículo para un gasto de combustible.'; return false; }
-    if (!formState.litros || formState.litros <= 0) { stepError.value = 'Debes ingresar una cantidad de litros válida.'; return false; }
-    if (!formState.odometro_actual || formState.odometro_actual <= 0) { stepError.value = 'Debes ingresar el odómetro actual del vehículo.'; return false; }
-  }
-  // --- FIN DE MODIFICACIONES ---
-  
   return true;
 }
-
 function nextStep() { if (validateStep1()) { stepError.value = ''; currentStep.value = 2; } }
 function prevStep() { currentStep.value = 1; }
 
@@ -312,35 +313,41 @@ async function handleSubmit() {
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) throw new Error('Usuario no autenticado.');
 
-    // --- INICIO DE MODIFICACIONES ---
-    // Si es un gasto de combustible, usamos la nueva función unificada.
-    if (isCombustibleGasto.value && !isDelegating.value && !isEditMode.value) {
-        const { data: result, error: rpcError } = await supabase.rpc('registrar_gasto_combustible_unificado', {
-            p_vehiculo_id: formState.vehiculo_id,
-            p_fecha_carga: formState.fecha_gasto,
-            p_litros: formState.litros,
-            p_monto_total: formState.monto_total,
-            p_odometro_actual: formState.odometro_actual,
-            p_proveedor_id: formState.proveedor_id?.value || formState.proveedor_id,
-            p_numero_comprobante: formState.numero_factura,
-            p_descripcion: formState.descripcion_general,
-            p_viaje_id: useCajaDiaria.value ? null : formState.viaje_id,
-            p_caja_id: useCajaDiaria.value ? selectedCajaId.value : null,
-            p_user_id: user.id
-        });
+    const resolverEntidadId = async (valorEntidad, tipoEntidad, idRelacionado = null) => {
+      if (typeof valorEntidad === 'number') return valorEntidad;
+      if (typeof valorEntidad === 'object' && valorEntidad?.value) return valorEntidad.value;
+      if (typeof valorEntidad === 'string' && valorEntidad.trim() !== '') {
+        if (tipoEntidad === 'localidades') {
+            if (!idRelacionado) throw new Error(`Para crear la localidad "${valorEntidad}", primero debes seleccionar una provincia.`);
+            const { data, error } = await supabase.rpc('crear_localidad_al_vuelo', { p_nombre_localidad: valorEntidad, p_provincia_id: idRelacionado });
+            if (error) throw new Error(`Error al crear nueva localidad: ${error.message}`);
+            return data;
+        } else {
+            const { data, error } = await supabase.rpc('crear_entidad_al_vuelo', {
+                p_nombre_entidad: valorEntidad.trim(),
+                p_nombre_tabla: tipoEntidad
+            });
+            if (error) throw new Error(`Error al crear nueva entidad en '${tipoEntidad}': ${error.message}`);
+            return data;
+        }
+      }
+      return null;
+    };
 
-        if (rpcError) throw rpcError;
+    const provinciaOrigenIdFinal = formState.provincia_origen_id?.value || formState.provincia_origen_id;
+    const provinciaDestinoIdFinal = formState.provincia_destino_id?.value || formState.provincia_destino_id;
 
-        emit('gasto-guardado', {
-            viaje_id: useCajaDiaria.value ? null : formState.viaje_id,
-            caja_id: useCajaDiaria.value ? selectedCajaId.value : null
-        });
-        return; // Terminamos aquí el flujo para combustible
-    }
-    // Si no es combustible (o es delegado/edición), sigue el flujo original.
-    // --- FIN DE MODIFICACIONES ---
-
-
+    const [finalClienteId, finalProveedorId, finalTransporteId, finalLocalidadOrigenId, finalLocalidadDestinoId] = await Promise.all([
+      resolverEntidadId(formState.cliente_id, 'clientes'),
+      resolverEntidadId(formState.proveedor_id, 'proveedores'),
+      resolverEntidadId(formState.transporte_id, 'transportes'),
+      showTransporteFields.value ? resolverEntidadId(formState.localidad_origen_id, 'localidades', provinciaOrigenIdFinal) : Promise.resolve(null),
+      showTransporteFields.value ? resolverEntidadId(formState.localidad_destino_id, 'localidades', provinciaDestinoIdFinal) : Promise.resolve(null)
+    ]);
+    
+    const provinciaSeleccionada = formState.provincia_id ? opcionesSelect.value.provincias.find(p => p.value === formState.provincia_id) : null;
+    const nombreProvincia = provinciaSeleccionada ? provinciaSeleccionada.label : null;
+    
     let finalFacturaUrl = formState.factura_url;
     if (facturaFile.value) {
       const filePath = `${user.id}/${Date.now()}-${facturaFile.value.name}`;
@@ -349,64 +356,59 @@ async function handleSubmit() {
       finalFacturaUrl = supabase.storage.from('facturas').getPublicUrl(filePath).data.publicUrl;
     }
 
-    let finalClienteId = formState.cliente_id?.value || formState.cliente_id || null;
-    if (formState.cliente_id && typeof formState.cliente_id === 'string') {
-        const nuevoNombreCliente = formState.cliente_id.trim();
-        const { data: nuevoCliente, error: clienteError } = await supabase
-          .from('clientes')
-          .insert({ nombre_cliente: nuevoNombreCliente, creado_por_id: user.id })
-          .select('id')
-          .single();
-        if (clienteError) throw new Error(`Error al crear el nuevo cliente: ${clienteError.message}`);
-        finalClienteId = nuevoCliente.id;
-    }
-    
-    const payload = {
-      formato_id: props.formatoId,
-      fecha_gasto: formState.fecha_gasto,
-      monto_total: formState.monto_total,
-      monto_iva: formState.monto_iva,
-      moneda: formState.moneda,
-      descripcion_general: formState.descripcion_general,
-      numero_factura: sinFactura.value ? null : formState.numero_factura,
-      tipo_gasto_id: formState.tipo_gasto_id,
-      cliente_id: finalClienteId,
-      transporte_id: formState.transporte_id?.value || formState.transporte_id || null,
-      proveedor_id: formState.proveedor_id?.value || formState.proveedor_id || null,
-      adelanto_especifico_aplicado: formState.adelanto_especifico_aplicado,
-      factura_url: finalFacturaUrl,
-      provincia: formState.provincia,
-    };
-
     const datosAdicionales = {};
-    const CAMPOS_FIJOS_TABLA = ['id', 'user_id', 'creado_por_id', 'estado_delegacion', 'formato_id', 'fecha_gasto', 'monto_total', 'monto_iva', 'moneda', 'descripcion_general', 'numero_factura', 'viaje_id', 'caja_id', 'tipo_gasto_id', 'cliente_id', 'transporte_id', 'proveedor_id', 'adelanto_especifico_aplicado', 'factura_url', 'datos_adicionales', 'provincia'];
+    const CAMPOS_DIRECTOS_EN_GASTOS = new Set(['id', 'user_id', 'creado_por_id', 'estado_delegacion', 'formato_id', 'fecha_gasto', 'monto_total', 'monto_iva', 'moneda', 'descripcion_general', 'numero_factura', 'viaje_id', 'caja_id', 'tipo_gasto_id', 'cliente_id', 'transporte_id', 'proveedor_id', 'adelanto_especifico_aplicado', 'factura_url', 'datos_adicionales', 'provincia_id', 'provincia', 'provincia_origen_id', 'localidad_origen_id', 'provincia_destino_id', 'localidad_destino_id', 'vehiculo_id', 'paciente_referido', 'nombre_chofer']);
+    
     const todosLosCamposDelFormato = [...camposObligatorios.value, ...camposOpcionales.value];
     todosLosCamposDelFormato.forEach(campo => {
       const nombreTecnico = campo.nombre_campo_tecnico;
-      if (!CAMPOS_FIJOS_TABLA.includes(nombreTecnico)) {
+      if (!CAMPOS_DIRECTOS_EN_GASTOS.has(nombreTecnico)) {
         if (formState[nombreTecnico] !== null && formState[nombreTecnico] !== undefined && formState[nombreTecnico] !== '') {
           datosAdicionales[nombreTecnico] = formState[nombreTecnico];
         }
       }
     });
-    payload.datos_adicionales = Object.keys(datosAdicionales).length > 0 ? datosAdicionales : null;
+    
+    if (formState.kilometraje_actual) datosAdicionales.kilometraje_actual = formState.kilometraje_actual;
+    if (formState.numero_remito_vehiculo) datosAdicionales.numero_remito_vehiculo = formState.numero_remito_vehiculo;
 
+    const payload = {
+      formato_id: props.formatoId,
+      fecha_gasto: formState.fecha_gasto ? `${formState.fecha_gasto}T12:00:00Z` : null,
+      monto_total: formState.monto_total,
+      monto_iva: formState.monto_iva,
+      moneda: formState.moneda,
+      descripcion_general: formState.descripcion_general,
+      numero_factura: sinFactura.value ? null : formState.numero_factura,
+      factura_url: finalFacturaUrl,
+      
+      tipo_gasto_id: formState.tipo_gasto_id,
+      cliente_id: finalClienteId,
+      transporte_id: finalTransporteId,
+      proveedor_id: finalProveedorId,
+      
+      provincia_id: formState.provincia_id,
+      provincia: nombreProvincia,
+      
+      provincia_origen_id: showTransporteFields.value ? provinciaOrigenIdFinal : null,
+      localidad_origen_id: showTransporteFields.value ? finalLocalidadOrigenId : null,
+      provincia_destino_id: showTransporteFields.value ? provinciaDestinoIdFinal : null,
+      localidad_destino_id: showTransporteFields.value ? finalLocalidadDestinoId : null,
+      
+      vehiculo_id: formState.vehiculo_id || null,
+      
+      paciente_referido: formState.paciente_referido || null,
+      nombre_chofer: formState.nombre_chofer || null,
+
+      datos_adicionales: Object.keys(datosAdicionales).length > 0 ? datosAdicionales : null
+    };
+    
     let gastoGuardadoData;
     let error;
 
     if (isEditMode.value) {
-        if (isDelegating.value) {
-            const { data, error: rpcError } = await supabase.rpc('crear_gasto_delegado', { payload: { ...payload, user_id: delegatedToUserId.value } });
-            gastoGuardadoData = data;
-            error = rpcError;
-            if (!error && props.gastoId && gastoGuardadoData.id !== props.gastoId) {
-                const { error: deleteOriginalError } = await supabase.from('gastos').delete().eq('id', props.gastoId);
-                if (deleteOriginalError) console.error("Error al borrar gasto original en re-delegación:", deleteOriginalError);
-            }
-        } else {
-            const payloadUpdate = { ...payload, user_id: user.id, creado_por_id: null, estado_delegacion: 'directo', viaje_id: useCajaDiaria.value ? null : formState.viaje_id, caja_id: useCajaDiaria.value ? selectedCajaId.value : null };
-            ({ data: gastoGuardadoData, error } = await supabase.from('gastos').update(payloadUpdate).eq('id', props.gastoId).select().single());
-        }
+      const payloadUpdate = { ...payload, user_id: user.id, creado_por_id: null, estado_delegacion: 'directo', viaje_id: useCajaDiaria.value ? null : formState.viaje_id, caja_id: useCajaDiaria.value ? selectedCajaId.value : null };
+      ({ data: gastoGuardadoData, error } = await supabase.from('gastos').update(payloadUpdate).eq('id', props.gastoId).select().single());
     } else {
         if (isDelegating.value) {
             const payloadDelegado = { ...payload, user_id: delegatedToUserId.value };
@@ -420,24 +422,45 @@ async function handleSubmit() {
     }
 
     if (error) {
-        if (error.code === '23505' && error.message.includes('unique_factura_proveedor')) {
-            throw new Error('Error: Ya existe un gasto con este número de factura para este proveedor.');
-        }
-        throw new Error(`Error al guardar el gasto: ${error.message}`);
+      if (error.code === '23505' && error.message.includes('unique_factura_proveedor')) {
+          throw new Error('Error: Ya existe un gasto con este número de factura para este proveedor.');
+      }
+      throw new Error(`Error al guardar el gasto: ${error.message}`);
     }
 
     if (useCajaDiaria.value && !isDelegating.value) {
         const { error: rpcError } = await supabase.rpc('registrar_gasto_caja_chica', { p_gasto_id: gastoGuardadoData.id, p_caja_id: selectedCajaId.value });
         if (rpcError) throw new Error(`Problema con Caja Diaria: ${rpcError.message}`);
     }
-
+    
     if (isDelegating.value) {
         const { data: delegadorProfile } = await supabase.from('perfiles').select('nombre_completo').eq('id', user.id).single();
         const nombreDelegador = delegadorProfile?.nombre_completo || user.email;
         const { error: notifError } = await supabase.rpc('crear_notificacion_delegacion', { p_receptor_id: delegatedToUserId.value, p_mensaje: `${nombreDelegador} te ha delegado un gasto por ${formatCurrency(gastoGuardadoData.monto_total)}`, p_link: '/rendiciones/delegados' });
         if (notifError) console.warn("Gasto delegado guardado, pero falló la notificación:", notifError.message);
     }
-    
+
+    let feedbackMessage = `Gasto ${isEditMode.value ? 'actualizado' : 'creado'} con éxito.`;
+    let redirectTo = { name: 'Dashboard' };
+
+    if (isDelegating.value) {
+        const receptor = opcionesSelect.value.usuariosParaDelegar.find(u => u.id === delegatedToUserId.value);
+        const nombreReceptor = receptor?.nombre_completo || 'el usuario seleccionado';
+        feedbackMessage = `Gasto delegado a ${nombreReceptor} con éxito.`;
+        redirectTo = { name: 'ViajesListUser' }; 
+    } else if (gastoGuardadoData?.caja_id) {
+        redirectTo = { name: 'CajaDiaria' };
+    } else if (gastoGuardadoData?.viaje_id) {
+        redirectTo = { name: 'GastosListUser', query: { viajeId: gastoGuardadoData.viaje_id } };
+    }
+
+    successMessage.value = feedbackMessage;
+    if (formState.provincia_id) localStorage.setItem('lastUsedProvinciaId', formState.provincia_id);
+    if (formState.viaje_id) localStorage.setItem('lastUsedViajeId', formState.viaje_id);
+
+    setTimeout(() => {
+        router.push({ ...redirectTo, query: { ...redirectTo.query, feedback: feedbackMessage } });
+    }, 1500); 
     emit('gasto-guardado', gastoGuardadoData);
 
   } catch (e) {
@@ -532,23 +555,58 @@ async function handleSubmit() {
               <div class="input-wrapper"><label for="fecha_gasto" class="form-label">Fecha del Gasto <span class="text-red-500">*</span></label><input type="date" id="fecha_gasto" v-model="formState.fecha_gasto" required class="form-input mt-1" /></div>
               <div class="sm:col-span-2"><label class="form-label">Tipo de Gasto <span class="text-red-500">*</span></label><TipoGastoSelector v-model="formState.tipo_gasto_id" :options="opcionesSelect.tipos_gasto" class="mt-2"/></div>
               <div class="sm:col-span-2 input-wrapper"><label for="descripcion_general" class="form-label">Descripción General</label><input type="text" id="descripcion_general" v-model="formState.descripcion_general" class="form-input mt-1" placeholder="Ej: Nafta YPF, Almuerzo en..." /></div>
-              <div class="input-wrapper"><label for="provincia" class="form-label">Provincia del Gasto</label><select id="provincia" v-model="formState.provincia" class="form-input mt-1"><option disabled :value="null">-- Seleccione una provincia --</option><option v-for="prov in provincias" :key="prov" :value="prov">{{ prov }}</option></select></div>
+              <div class="input-wrapper">
+                <label for="provincia_id" class="form-label">Provincia del Gasto</label>
+                <v-select 
+                  id="provincia_id" 
+                  v-model="formState.provincia_id" 
+                  :options="opcionesSelect.provincias"
+                  :reduce="option => option.value"
+                  placeholder="Seleccione una provincia..."
+                  class="mt-1">
+                </v-select>
+              </div>
             </div>
           </fieldset>
           
           <fieldset v-if="camposObligatorios.length > 0" class="mt-8"><legend class="form-legend">Detalles Específicos del Formato</legend><div class="grid grid-cols-1 sm:grid-cols-2 gap-6"><div v-for="campo in camposObligatorios" :key="campo.id" class="input-wrapper"><label :for="campo.nombre_campo_tecnico" class="form-label">{{ campo.etiqueta_visible }} <span v-if="campo.es_obligatorio" class="text-red-500">*</span></label><input v-if="campo.tipo_input === 'texto'" type="text" :id="campo.nombre_campo_tecnico" v-model="formState[campo.nombre_campo_tecnico]" :required="campo.es_obligatorio" class="form-input mt-1" />
-                <v-select v-else-if="campo.tipo_input === 'select_cliente'"
-                  :id="campo.nombre_campo_tecnico"
-                  v-model="formState.cliente_id"
-                  :options="opcionesSelect.clientes"
-                  taggable
-                  :create-option="(newOption) => newOption"
-                  placeholder="-- Buscar o crear cliente --"
-                  class="mt-1"
-                  :class="{ 'v-select-required': campo.es_obligatorio && !formState.cliente_id }"
-                ></v-select>
-                <v-select v-else-if="campo.tipo_input === 'select_transporte'" :id="campo.nombre_campo_tecnico" v-model="formState.transporte_id" :options="opcionesSelect.transportes" placeholder="-- Buscar transporte --" class="mt-1" :class="{ 'v-select-required': campo.es_obligatorio && !formState.transporte_id }"></v-select><v-select v-else-if="campo.tipo_input === 'select_proveedor'" :id="campo.nombre_campo_tecnico" v-model="formState.proveedor_id" :options="opcionesSelect.proveedores" placeholder="-- Buscar proveedor --" class="mt-1" :class="{ 'v-select-required': campo.es_obligatorio && !formState.proveedor_id }"></v-select></div></div></fieldset>
+                <v-select v-else-if="campo.tipo_input === 'select_cliente'" :id="campo.nombre_campo_tecnico" v-model="formState.cliente_id" :options="opcionesSelect.clientes" taggable :create-option="(newOption) => newOption" placeholder="-- Buscar o crear cliente --" class="mt-1" :class="{ 'v-select-required': campo.es_obligatorio && !formState.cliente_id }"></v-select>
+                <v-select v-else-if="campo.tipo_input === 'select_transporte'" :id="campo.nombre_campo_tecnico" v-model="formState.transporte_id" :options="opcionesSelect.transportes" taggable :create-option="(newOption) => newOption" placeholder="-- Buscar o crear transporte --" class="mt-1" :class="{ 'v-select-required': campo.es_obligatorio && !formState.transporte_id }"></v-select>
+                <v-select v-else-if="campo.tipo_input === 'select_proveedor'" :id="campo.nombre_campo_tecnico" v-model="formState.proveedor_id" :options="opcionesSelect.proveedores" taggable :create-option="(newOption) => newOption" placeholder="-- Buscar o crear proveedor --" class="mt-1" :class="{ 'v-select-required': campo.es_obligatorio && !formState.proveedor_id }"></v-select>
+            </div></div></fieldset>
           
+          <transition enter-active-class="transition ease-out duration-300" enter-from-class="opacity-0 -translate-y-2" enter-to-class="opacity-100 translate-y-0" leave-active-class="transition ease-in duration-200" leave-from-class="opacity-100 translate-y-0" leave-to-class="opacity-0 -translate-y-2">
+            <fieldset v-if="showTransporteFields" class="mt-8">
+              <legend class="form-legend">Detalles del Trayecto</legend>
+              <div class="grid grid-cols-1 sm:grid-cols-2 gap-6 mt-4">
+                <div class="space-y-4">
+                  <div class="input-wrapper">
+                    <label for="provincia_origen" class="form-label">Provincia Origen</label>
+                    <v-select id="provincia_origen" v-model="formState.provincia_origen_id" :options="opcionesSelect.provincias" :loading="loadingSelects.provincias" :reduce="option => option.value" placeholder="Seleccione..." class="mt-1"></v-select>
+                  </div>
+                  <div class="input-wrapper">
+                    <label for="localidad_origen" class="form-label">Localidad Origen</label>
+                    <!-- INICIO CORRECCIÓN: Se elimina la propiedad :reduce -->
+                    <v-select id="localidad_origen" v-model="formState.localidad_origen_id" :options="opcionesSelect.localidadesOrigen" :loading="loadingSelects.localidadesOrigen" :disabled="!formState.provincia_origen_id || loadingSelects.localidadesOrigen" taggable :create-option="newOption => newOption" placeholder="Seleccione o escriba..." class="mt-1"></v-select>
+                    <!-- FIN CORRECCIÓN -->
+                  </div>
+                </div>
+                <div class="space-y-4">
+                  <div class="input-wrapper">
+                    <label for="provincia_destino" class="form-label">Provincia Destino</label>
+                    <v-select id="provincia_destino" v-model="formState.provincia_destino_id" :options="opcionesSelect.provincias" :loading="loadingSelects.provincias" :reduce="option => option.value" placeholder="Seleccione..." class="mt-1"></v-select>
+                  </div>
+                  <div class="input-wrapper">
+                    <label for="localidad_destino" class="form-label">Localidad Destino</label>
+                    <!-- INICIO CORRECCIÓN: Se elimina la propiedad :reduce -->
+                    <v-select id="localidad_destino" v-model="formState.localidad_destino_id" :options="opcionesSelect.localidadesDestino" :loading="loadingSelects.localidadesDestino" :disabled="!formState.provincia_destino_id || loadingSelects.localidadesDestino" taggable :create-option="newOption => newOption" placeholder="Seleccione o escriba..." class="mt-1"></v-select>
+                    <!-- FIN CORRECCIÓN -->
+                  </div>
+                </div>
+              </div>
+            </fieldset>
+          </transition>
+
           <div class="border-t border-gray-200 pt-6 mt-8">
             <h3 class="text-base font-semibold leading-7 text-gray-900">¿Necesitas más detalles?</h3>
             <p class="mt-1 text-sm leading-6 text-gray-600">Añade solo los campos que necesites para este gasto.</p>
@@ -565,31 +623,20 @@ async function handleSubmit() {
                   <div v-if="camposOpcionalesVisibles.has(campo.nombre_campo_tecnico)" class="relative group input-wrapper">
                     <label :for="`opcional-${campo.nombre_campo_tecnico}`" class="form-label">{{ campo.etiqueta_visible }}</label>
                     <input v-if="campo.tipo_input === 'texto'" type="text" :id="`opcional-${campo.nombre_campo_tecnico}`" v-model="formState[campo.nombre_campo_tecnico]" class="form-input mt-1" />
-                    <v-select v-else-if="campo.tipo_input === 'select_cliente'"
-                      :id="`opcional-${campo.nombre_campo_tecnico}`"
-                      v-model="formState.cliente_id"
-                      :options="opcionesSelect.clientes"
-                      taggable
-                      :create-option="(newOption) => newOption"
-                      placeholder="-- Buscar o crear cliente --"
-                      class="mt-1"
-                    ></v-select>
-                    <v-select v-else-if="campo.tipo_input === 'select_transporte'" :id="`opcional-${campo.nombre_campo_tecnico}`" v-model="formState.transporte_id" :options="opcionesSelect.transportes" placeholder="-- Buscar transporte --" class="mt-1"></v-select>
-                    <v-select v-else-if="campo.tipo_input === 'select_proveedor'" :id="`opcional-${campo.nombre_campo_tecnico}`" v-model="formState.proveedor_id" :options="opcionesSelect.proveedores" placeholder="-- Buscar proveedor --" class="mt-1"></v-select>
+                    <v-select v-else-if="campo.tipo_input === 'select_cliente'" :id="`opcional-${campo.nombre_campo_tecnico}`" v-model="formState.cliente_id" :options="opcionesSelect.clientes" taggable :create-option="(newOption) => newOption" placeholder="-- Buscar o crear cliente --" class="mt-1"></v-select>
+                    <v-select v-else-if="campo.tipo_input === 'select_transporte'" :id="`opcional-${campo.nombre_campo_tecnico}`" v-model="formState.transporte_id" :options="opcionesSelect.transportes" taggable :create-option="(newOption) => newOption" placeholder="-- Buscar o crear transporte --" class="mt-1"></v-select>
+                    <v-select v-else-if="campo.tipo_input === 'select_proveedor'" :id="`opcional-${campo.nombre_campo_tecnico}`" v-model="formState.proveedor_id" :options="opcionesSelect.proveedores" taggable :create-option="(newOption) => newOption" placeholder="-- Buscar o crear proveedor --" class="mt-1"></v-select>
                     <button type="button" @click="quitarCampoOpcional(campo)" class="btn-remove-optional" aria-label="Quitar campo"><svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z" clip-rule="evenodd" /></svg></button>
                   </div>
                 </template>
                 
-                <!-- --- INICIO DE LA CORRECCIÓN VISUAL --- -->
                 <div v-if="camposOpcionalesVisibles.has('vehiculo_id')" class="relative group input-wrapper sm:col-span-2 p-4 border border-gray-200 rounded-lg bg-gray-50">
                    <button type="button" @click="quitarCampoOpcional({nombre_campo_tecnico: 'vehiculo_id'})" class="btn-remove-optional" aria-label="Quitar sección de vehículo"><svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z" clip-rule="evenodd" /></svg></button>
                    <div class="grid grid-cols-1 sm:grid-cols-3 gap-4">
-                      <!-- 1. Contenedor del v-select con z-index -->
                       <div class="relative z-20">
                         <label for="vehiculo_id" class="form-label">Unidad</label>
                         <v-select id="vehiculo_id" v-model="formState.vehiculo_id" :options="opcionesSelect.vehiculos" :loading="loadingSelects.vehiculos" placeholder="-- Seleccionar --" class="mt-1 bg-white"></v-select>
                       </div>
-                      <!-- 2. Contenedores de los otros inputs con z-index menor -->
                       <div class="relative z-10">
                         <label for="kilometraje_actual" class="form-label">KM Actual</label>
                         <input type="number" id="kilometraje_actual" v-model="formState.kilometraje_actual" class="form-input mt-1" placeholder="Ej: 150000" />
@@ -600,7 +647,6 @@ async function handleSubmit() {
                       </div>
                    </div>
                 </div>
-                <!-- --- FIN DE LA CORRECCIÓN VISUAL --- -->
               </div>
             </fieldset>
           </div>

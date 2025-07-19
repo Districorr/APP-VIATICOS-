@@ -167,13 +167,17 @@ const volverAFormatos = () => {
               <td class="px-4 py-3 text-sm font-medium text-gray-900">{{ campo.etiqueta_visible }}</td>
               <td class="px-4 py-3 text-sm text-gray-500 font-mono">{{ campo.nombre_campo_tecnico }}</td>
               <td class="px-4 py-3 text-sm text-gray-500">
+                <!-- --- INICIO DE LA MODIFICACIÓN --- -->
                 <span class="px-2 py-1 text-xs font-semibold rounded-full"
                       :class="{
-                        'bg-blue-100 text-blue-800': ['texto', 'numero'].includes(campo.tipo_input),
-                        'bg-purple-100 text-purple-800': ['select_cliente', 'select_transporte'].includes(campo.tipo_input)
+                        'bg-blue-100 text-blue-800': ['texto', 'numero', 'selector_simple'].includes(campo.tipo_input),
+                        'bg-purple-100 text-purple-800': campo.tipo_input === 'select_cliente',
+                        'bg-amber-100 text-amber-800': campo.tipo_input === 'select_transporte',
+                        'bg-pink-100 text-pink-800': campo.tipo_input === 'select_proveedor'
                       }">
-                  {{ campo.tipo_input }}
+                  {{ campo.tipo_input.replace('_', ' ') }}
                 </span>
+                <!-- --- FIN DE LA MODIFICACIÓN --- -->
               </td>
               <td class="px-4 py-3 text-center">
                 <span :class="campo.es_obligatorio ? 'text-green-600' : 'text-red-500'" class="font-bold text-lg">

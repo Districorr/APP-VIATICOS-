@@ -42,16 +42,18 @@ const filters = ref({
   fechaHasta: today,
 });
 
+// --- REFACTORIZACIÓN DEL FORMULARIO ---
 const newChargeForm = ref({
   fecha_carga: today,
   litros: null,
   monto_total: null,
   odometro_actual: null,
-  proveedor_id: null,
-  conductor_id: null,
   numero_comprobante: '',
   descripcion: '',
 });
+const selectedProveedor = ref(null);
+const selectedConductor = ref(null);
+// --- FIN DE REFACTORIZACIÓN ---
 
 const formOptions = ref({
   proveedores: [],
@@ -154,9 +156,10 @@ function openFormModal() {
     fecha_carga: new Date().toISOString().split('T')[0],
     litros: null, monto_total: null,
     odometro_actual: vehiculoInfo.value.ultimo_odometro > 0 ? vehiculoInfo.value.ultimo_odometro : null,
-    proveedor_id: null, conductor_id: null,
     numero_comprobante: '', descripcion: '',
   };
+  selectedProveedor.value = null;
+  selectedConductor.value = null;
   showFormModal.value = true;
 }
 
@@ -171,8 +174,8 @@ async function handleRegisterCharge() {
       p_litros: newChargeForm.value.litros,
       p_monto_total: newChargeForm.value.monto_total,
       p_odometro_actual: newChargeForm.value.odometro_actual,
-      p_proveedor_id: newChargeForm.value.proveedor_id,
-      p_conductor_id: newChargeForm.value.conductor_id,
+      p_proveedor_id: selectedProveedor.value?.code || null,
+      p_conductor_id: selectedConductor.value?.code || null,
       p_numero_comprobante: newChargeForm.value.numero_comprobante,
       p_descripcion: newChargeForm.value.descripcion,
       p_viaje_id: null,
@@ -207,7 +210,6 @@ function exportToXLS() {
     'Distancia Recorrida (km)': h.distancia_recorrida,
     'Litros': h.litros, 
     'Monto Total': h.monto_total,
-    // --- NUEVA COLUMNA CALCULADA PARA EXPORTAR ---
     'Costo por Litro': (h.monto_total && h.litros) ? (h.monto_total / h.litros).toFixed(2) : 0,
   }));
   const filename = `historial_combustible_${vehiculoInfo.value.patente}_${new Date().toISOString().split('T')[0]}`;

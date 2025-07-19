@@ -15,14 +15,14 @@ const form = ref({
   descripcion: '',
   activo: true,
   icono_svg: '',
-  color_accent: '#4f46e5'
+  color_accent: '#4f46e5',
+  es_tipo_transporte: false, // <-- NUEVA PROPIEDAD
 });
 
 const loading = ref(false);
 const errorMessage = ref('');
 const successMessage = ref('');
 
-// --- INICIO: Galería de Iconos Predefinidos ---
 const iconGallery = [
   { name: 'Comida', svg: `<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M21.75 12.75a9.75 9.75 0 11-19.5 0 9.75 9.75 0 0119.5 0z" /><path stroke-linecap="round" stroke-linejoin="round" d="M15.75 6a3.75 3.75 0 11-7.5 0 3.75 3.75 0 017.5 0zM4.501 20.118a7.5 7.5 0 0114.998 0A17.933 17.933 0 0112 21.75c-2.676 0-5.216-.584-7.499-1.632z" /></svg>` },
   { name: 'Transporte', svg: `<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M8.25 18.75a1.5 1.5 0 01-3 0m3 0a1.5 1.5 0 00-3 0m3 0h6m-9 0H3.375a1.125 1.125 0 01-1.125-1.125V14.25m17.25 4.5a1.5 1.5 0 01-3 0m3 0a1.5 1.5 0 00-3 0m3 0h1.125c.621 0 1.125-.504 1.125-1.125V14.25m-17.25 4.5v-1.875a3.375 3.375 0 013.375-3.375h1.5a1.125 1.125 0 011.125 1.125v-1.5a3.375 3.375 0 00-3.375-3.375H5.25m5.25 9v-4.5m0 4.5h.75M12 14.25h.75m-4.5 4.5H12m-4.5-4.5H12" /></svg>` },
@@ -41,7 +41,6 @@ const selectSuggestedIcon = (svg) => {
 const previewIconColor = computed(() => {
   return form.value.color_accent || '#cccccc';
 });
-// --- FIN: Galería de Iconos ---
 
 watch(() => props.tipoGastoAEditar, (newVal) => {
   if (newVal && props.isEditMode) {
@@ -51,13 +50,17 @@ watch(() => props.tipoGastoAEditar, (newVal) => {
     form.value.activo = newVal.activo === undefined ? true : newVal.activo;
     form.value.icono_svg = newVal.icono_svg || '';
     form.value.color_accent = newVal.color_accent || '#4f46e5';
+    form.value.es_tipo_transporte = newVal.es_tipo_transporte || false; // <-- NUEVA PROPIEDAD
   } else {
-    form.value.id = null;
-    form.value.nombre_tipo_gasto = '';
-    form.value.descripcion = '';
-    form.value.activo = true;
-    form.value.icono_svg = '';
-    form.value.color_accent = '#4f46e5';
+    form.value = {
+      id: null,
+      nombre_tipo_gasto: '',
+      descripcion: '',
+      activo: true,
+      icono_svg: '',
+      color_accent: '#4f46e5',
+      es_tipo_transporte: false, // <-- NUEVA PROPIEDAD
+    };
   }
 }, { immediate: true, deep: true });
 
@@ -79,7 +82,8 @@ const handleSubmit = async () => {
       descripcion: form.value.descripcion.trim() || null,
       activo: form.value.activo,
       icono_svg: form.value.icono_svg.trim() || null,
-      color_accent: form.value.color_accent
+      color_accent: form.value.color_accent,
+      es_tipo_transporte: form.value.es_tipo_transporte, // <-- NUEVA PROPIEDAD
     };
 
     let responseError;
@@ -101,11 +105,13 @@ const handleSubmit = async () => {
     emit('guardado', responseData);
 
     if (!props.isEditMode) {
+      // Resetear solo en modo creación
       form.value.nombre_tipo_gasto = '';
       form.value.descripcion = '';
       form.value.activo = true;
       form.value.icono_svg = '';
       form.value.color_accent = '#4f46e5';
+      form.value.es_tipo_transporte = false;
     }
     setTimeout(() => { successMessage.value = ''; }, 3000);
 
@@ -116,7 +122,6 @@ const handleSubmit = async () => {
   }
 };
 </script>
-
 <template>
   <form @submit.prevent="handleSubmit" class="space-y-6 p-4 sm:p-6 border rounded-lg bg-white shadow-md">
     <h3 class="text-lg font-medium leading-6 text-gray-900">
@@ -138,6 +143,15 @@ const handleSubmit = async () => {
           <input id="activo_tipo_gasto_global" type="checkbox" v-model="form.activo" class="h-4 w-4 text-indigo-600 border-gray-300 rounded focus:ring-indigo-500">
           <label for="activo_tipo_gasto_global" class="ml-2 block text-sm text-gray-900">Activo</label>
         </div>
+        
+        <!-- --- INICIO DE LA MODIFICACIÓN --- -->
+        <div class="flex items-center pt-2">
+          <input id="es_tipo_transporte" type="checkbox" v-model="form.es_tipo_transporte" class="h-4 w-4 text-indigo-600 border-gray-300 rounded focus:ring-indigo-500">
+          <label for="es_tipo_transporte" class="ml-2 block text-sm text-gray-900">Es un tipo de transporte</label>
+        </div>
+        <p class="text-xs text-gray-500 -mt-2 ml-6">Marcar esto mostrará los campos de Origen/Destino en el formulario de gastos.</p>
+        <!-- --- FIN DE LA MODIFICACIÓN --- -->
+
       </div>
 
       <!-- Columna Derecha: Icono y Color -->

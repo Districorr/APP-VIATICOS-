@@ -14,21 +14,21 @@ const loading = ref(false);
 const errorMessage = ref('');
 const successMessage = ref('');
 
-// Lista definitiva de tipos de input que el sistema soporta
+// --- INICIO DE LA MODIFICACIÓN ---
+// Añadimos la nueva opción para el selector de transportes.
 const tiposDeInputDisponibles = ref([
   { value: 'texto', label: 'Texto Corto' },
   { value: 'numero', label: 'Número' },
   { value: 'select_cliente', label: 'Selector de Clientes' },
-  { value: 'select_transporte', label: 'Selector de Transportes' },
+  { value: 'select_transporte', label: 'Selector de Transportes' }, // <-- NUEVA OPCIÓN
+  { value: 'select_proveedor', label: 'Selector de Proveedores' }, // <-- Añadido para consistencia
   { value: 'selector_simple', label: 'Selector con Opciones Manuales' },
-  // Futuros tipos: 'fecha', 'texto_largo', 'booleano'
 ]);
+// --- FIN DE LA MODIFICACIÓN ---
 
-// Watcher para inicializar el formulario
 watch(() => props.campoAEditar, (newVal) => {
   if (newVal && props.isEditMode) {
     form.value = { ...newVal };
-    // Si las opciones son un array, las convertimos a string para el input
     if (Array.isArray(newVal.opciones_selector)) {
       form.value.opciones_selector_str = newVal.opciones_selector.join(', ');
     }
@@ -39,14 +39,13 @@ watch(() => props.campoAEditar, (newVal) => {
       tipo_input: 'texto',
       es_obligatorio: false,
       orden_visualizacion: 10,
-      opciones_selector_str: '', // Campo para el input de texto
+      opciones_selector_str: '',
     };
   }
   errorMessage.value = '';
   successMessage.value = '';
 }, { immediate: true, deep: true });
 
-// Autocompleta el nombre técnico a partir de la etiqueta visible
 function autocompletarNombreTecnico() {
   if (!props.isEditMode && form.value.etiqueta_visible) {
     form.value.nombre_campo_tecnico = form.value.etiqueta_visible
@@ -79,7 +78,6 @@ const handleSubmit = async () => {
       tipo_input: form.value.tipo_input,
       es_obligatorio: form.value.es_obligatorio,
       orden_visualizacion: form.value.orden_visualizacion,
-      // Procesamos las opciones del selector solo si el tipo es el correcto
       opciones_selector: form.value.tipo_input === 'selector_simple'
         ? form.value.opciones_selector_str.split(',').map(opt => opt.trim()).filter(Boolean)
         : null,
