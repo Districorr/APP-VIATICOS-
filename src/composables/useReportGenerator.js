@@ -33,10 +33,9 @@ export function useReportGenerator() {
 
 const generateCanvaStylePDF = async (viajeId) => {
   try {
-    // 1. Obtener los datos usando la nueva función reutilizable
+    // 1. Obtener los datos usando la función RPC enriquecida
     const reporte = await getReportData(viajeId);
 
-    // 2. Construir el PDF con jsPDF (el resto de tu lógica se mantiene)
     const doc = new jsPDF({ orientation: 'landscape', unit: 'mm', format: 'a4' });
     const pageWidth = doc.internal.pageSize.getWidth();
     const pageHeight = doc.internal.pageSize.getHeight();
@@ -76,6 +75,21 @@ const generateCanvaStylePDF = async (viajeId) => {
     
     // --- BUCLE PRINCIPAL: UNA TABLA POR GRUPO ---
     if (reporte.grupos && Array.isArray(reporte.grupos)) {
+      // --- INICIO CORRECCIÓN: MAPA DE ETIQUETAS ACTUALIZADO ---
+      const labelMap = {
+        provincia: 'Lugar del Gasto',
+        numero_factura: 'Nº Factura',
+        cliente: 'Cliente',
+        proveedor: 'Proveedor',
+        transporte: 'Transporte',
+        paciente: 'Paciente',
+        chofer: 'Chofer',
+        vehiculo: 'Vehículo',
+        origen: 'Origen',
+        destino: 'Destino'
+      };
+      // --- FIN CORRECCIÓN ---
+
       for (const grupo of reporte.grupos) {
         const groupTitleHeight = 7;
         const tableHeadHeight = 7;
@@ -93,35 +107,35 @@ const generateCanvaStylePDF = async (viajeId) => {
         
         const bodyData = [];
         
-        // --- INICIO DE LA CORRECCIÓN ---
-        // Se añade una guarda para asegurar que 'grupo.gastos' es un array antes de iterar
         if (grupo.gastos && Array.isArray(grupo.gastos)) {
           grupo.gastos.forEach(gasto => {
-              const detalles = [];
-              const add = (key, val) => { if (val) detalles.push(`${key}: ${val}`) };
-              
-              if (gasto.delegado_por_nombre) {
-                  add('Delegado por', gasto.delegado_por_nombre);
-              }
-
-              add('Provincia', gasto.detalles_adicionales?.provincia);
-              add('Nº Factura', gasto.detalles_adicionales?.numero_factura);
-              
-              const detallesString = detalles.join(' | ');
-
               bodyData.push([
                   { content: gasto.tipo_gasto || 'Gasto General', styles: { fontStyle: 'bold', fontSize: 8, valign: 'middle' } },
                   { content: gasto.descripcion || 'Sin descripción', styles: { fontStyle: 'bold', fontSize: 8, valign: 'middle' } },
                   { content: formatCurrency(gasto.monto), styles: { fontStyle: 'bold', fontSize: 9, halign: 'right', valign: 'middle' } }
               ]);
 
+              const detalles = [];
+              if (gasto.delegado_por_nombre) {
+                  detalles.push(`Delegado por: ${gasto.delegado_por_nombre}`);
+              }
+
+              for (const key in gasto.detalles_adicionales) {
+                  const value = gasto.detalles_adicionales[key];
+                  if (value) {
+                      const label = labelMap[key] || key;
+                      detalles.push(`${label}: ${value}`);
+                  }
+              }
+              
+              const detallesString = detalles.join(' | ');
               const fullDetailsString = `Fecha: ${gasto.fecha || '--/--/----'}${detallesString ? ' | ' + detallesString : ''}`;
+              
               bodyData.push([
                   { content: fullDetailsString, colSpan: 3, styles: { fontSize: 7, textColor: [100, 100, 100], fillColor: [248, 249, 250] } }
               ]);
           });
         }
-        // --- FIN DE LA CORRECCIÓN ---
 
         doc.autoTable({
             startY: lastY,

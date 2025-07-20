@@ -1,4 +1,3 @@
-// src/views/admin/AdminAnalyticsView.vue
 <script setup>
 import { ref, onMounted, computed, watch, nextTick } from 'vue';
 import { supabase } from '../../supabaseClient';
@@ -19,7 +18,7 @@ const router = useRouter();
 const { exportToExcel } = useExcelExporter();
 
 // --- ESTADO GENERAL ---
-const activeTab = ref('gastos'); // gastos, rendiciones, exploracion
+const activeTab = ref('gastos');
 const loading = ref({
   dashboardGastos: true,
   exploration: false,
@@ -179,22 +178,25 @@ async function applyExplorationFilters() {
     loading.value.exploration = true;
     error.value.exploration = '';
     try {
-        // --- CAMBIO CLAVE ---
-        // Se utilizan los valores de los filtros directamente, ya que :reduce los convierte en IDs.
-        const params = {
-            p_cliente_id: explorationFilters.value.clienteId || null,
-            p_transporte_id: explorationFilters.value.transporteId || null,
-            p_tipo_gasto_id: explorationFilters.value.tipoGastoId || null,
-            p_provincia: explorationFilters.value.provincia || null,
-            p_paciente: explorationFilters.value.paciente || null,
-            p_fecha_desde: explorationFilters.value.fechaDesde || null,
-            p_fecha_hasta: explorationFilters.value.fechaHasta || null,
-        };
-        const { data, error: rpcError } = await supabase.rpc('filtrar_gastos_admin', params);
-        if (rpcError) throw rpcError;
+        let query = supabase
+            .from('admin_gastos_completos')
+            .select(`gasto_id, fecha_gasto, responsable_gasto_nombre, nombre_tipo_gasto, gasto_descripcion, nombre_viaje, gasto_monto_total`)
+            .order('fecha_gasto', { ascending: false });
+
+        if (explorationFilters.value.clienteId) query = query.eq('cliente_id', explorationFilters.value.clienteId);
+        if (explorationFilters.value.transporteId) query = query.eq('transporte_id', explorationFilters.value.transporteId);
+        if (explorationFilters.value.tipoGastoId) query = query.eq('tipo_gasto_id', explorationFilters.value.tipoGastoId);
+        if (explorationFilters.value.provincia) query = query.eq('provincia_nombre', explorationFilters.value.provincia);
+        if (explorationFilters.value.paciente) query = query.ilike('paciente_referido', `%${explorationFilters.value.paciente}%`);
+        if (explorationFilters.value.fechaDesde) query = query.gte('fecha_gasto', explorationFilters.value.fechaDesde);
+        if (explorationFilters.value.fechaHasta) query = query.lte('fecha_gasto', explorationFilters.value.fechaHasta);
+
+        const { data, error: queryError } = await query;
+        if (queryError) throw queryError;
         explorationGastosFiltrados.value = data || [];
     } catch (e) {
         error.value.exploration = `Error al buscar datos: ${e.message}`;
+        explorationGastosFiltrados.value = [];
     } finally {
         loading.value.exploration = false;
     }
@@ -259,7 +261,7 @@ async function drillDown(filterType, value) {
   if (filterType === 'tipoGasto') {
     const option = gastosTipoGastoOptions.value.find(o => o.code === value);
     if (option) {
-      explorationFilters.value.tipoGastoId = option.code; // Asignar el ID directamente
+      explorationFilters.value.tipoGastoId = option.code;
     }
   }
   document.getElementById('exploration-content')?.scrollIntoView({ behavior: 'smooth' });
@@ -322,21 +324,39 @@ const rendicionesDesgloseData = computed(() => {
     };
 });
 
-// --- LÓGICA DE EXPORTACIÓN ---
+// --- LÓGICA DE EXPORTACIÓN (CORREGIDA) ---
 const handleExport = (exportFn, successMsg) => {
   showNotification('Exportando', 'Preparando tu reporte...', 'info');
-  try { exportFn(); setTimeout(() => { showNotification('Éxito', successMsg, 'success'); }, 500); }
-  catch (e) { showNotification('Error', 'No se pudo generar el reporte.', 'error'); console.error("Error al exportar:", e); }
+  try {
+    exportFn();
+    setTimeout(() => {
+      showNotification('Éxito', successMsg, 'success');
+    }, 500);
+  } catch (e) {
+    showNotification('Error', 'No se pudo generar el reporte.', 'error');
+    console.error("Error al exportar:", e);
+  }
 };
+
+// CAMBIO: Se envuelve la data en la estructura correcta [{ name: '...', data: [...] }]
 const handleExportGastosEvolution = () => handleExport(() => {
   const dataToExport = gastosDashboardData.value?.charts?.evolucion_origen.map(d => ({ Mes: formatDate(d.mes, { month: 'long', year: 'numeric'}), Gastos_Viaje_Rendicion: d.total_viaje, Gastos_Caja_Chica: d.total_caja })) || [];
-  exportToExcel(dataToExport, 'evolucion_por_origen');
+  const sheets = [{ name: 'Evolucion por Origen', data: dataToExport }];
+  exportToExcel(sheets, 'evolucion_por_origen');
 }, 'Reporte de evolución de gastos generado.');
+
+// CAMBIO: Se envuelve la data en la estructura correcta [{ name: '...', data: [...] }]
 const handleExportRendicionesEficiencia = () => handleExport(() => {
-    exportToExcel(rendicionesDashboardData.value?.tabla_eficiencia || [], 'eficiencia_por_responsable');
+    const dataToExport = rendicionesDashboardData.value?.tabla_eficiencia || [];
+    const sheets = [{ name: 'Eficiencia por Responsable', data: dataToExport }];
+    exportToExcel(sheets, 'eficiencia_por_responsable');
 }, 'Reporte de eficiencia generado.');
+
+// CAMBIO: Se envuelve la data en la estructura correcta [{ name: '...', data: [...] }]
 const handleExportExploration = () => handleExport(() => {
-  exportToExcel(explorationGastosFiltrados.value, 'exploracion_avanzada');
+  const dataToExport = explorationGastosFiltrados.value;
+  const sheets = [{ name: 'Resultados Exploracion', data: dataToExport }];
+  exportToExcel(sheets, 'exploracion_avanzada');
 }, 'Reporte de exploración generado.');
 
 // --- WATCHERS Y CICLO DE VIDA ---
