@@ -1,0 +1,27 @@
+
+DECLARE
+    v_caja record;
+    v_saldo_anterior numeric;
+    v_nuevo_saldo numeric;
+BEGIN
+    -- 1. Bloquear la fila de la caja para evitar condiciones de carrera
+    SELECT * INTO v_caja FROM public.cajas_chicas WHERE id = p_caja_id FOR UPDATE;
+
+    IF NOT FOUND THEN
+        RETURN json_build_object('success', false, 'message', 'Caja no encontrada.');
+    END IF;
+
+    v_saldo_anterior := v_caja.saldo_actual;
+    v_nuevo_saldo := v_saldo_anterior + p_monto_ajuste;
+
+    -- 2. Actualizar el saldo de la caja
+    UPDATE public.cajas_chicas
+    SET saldo_actual = v_nuevo_saldo
+    WHERE id = p_caja_id;
+
+    -- 3. Crear el registro del movimiento
+    INSERT INTO public.movimientos_caja(caja_id, gasto_id, tipo_movimiento, monto, saldo_anterior, saldo_posterior, descripcion, realizado_por_id)
+    VALUES (p_caja_id, null, CASE WHEN p_monto_ajuste >= 0 THEN 'reposicion' ELSE 'ajuste_manual' END, abs(p_monto_ajuste), v_saldo_anterior, v_nuevo_saldo, p_descripcion, p_realizado_por_id);
+
+    RETURN json_build_object('success', true, 'message', 'Saldo ajustado con éxito.', 'new_saldo', v_nuevo_saldo);
+END;

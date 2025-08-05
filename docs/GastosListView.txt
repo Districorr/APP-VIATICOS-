@@ -35,6 +35,7 @@ const isGrouping = ref(false);
 const groupError = ref('');
 const isGroupingByType = ref(false);
 
+// --- ESTADO PARA AGRUPACIÓN MEJORADO ---
 const showGroupModal = ref(false);
 const groupAction = ref('create');
 const newGroupName = ref('');
@@ -42,11 +43,12 @@ const selectedGroupId = ref(null);
 const existingGroups = computed(() => {
   if (!gastos.value) return [];
   const groups = gastos.value
-    .filter(g => g.grupos_gastos && g.grupos_gastos.id)
+    .filter(g => g.grupos_gastos)
     .map(g => g.grupos_gastos);
   return [...new Map(groups.map(item => [item['id'], item])).values()];
 });
 
+// --- MODO CONCILIACIÓN ---
 const isConciliacionMode = ref(false);
 const filtroRevisado = ref('todos');
 const totalFacturasManual = ref(0);
@@ -127,7 +129,7 @@ const gastosRenderList = computed(() => {
   const dateGroups = {};
 
   sortedGastos.forEach(gasto => {
-    if (gasto.grupos_gastos && gasto.grupos_gastos.id) {
+    if (gasto.grupos_gastos) {
       const grupoKey = `group-${gasto.grupos_gastos.id}`;
       if (!userGroups[grupoKey]) {
         userGroups[grupoKey] = { isGroup: true, id: gasto.grupos_gastos.id, name: gasto.grupos_gastos.nombre_grupo, gastos: [] };
@@ -211,18 +213,24 @@ async function handleGroupingAction() {
   }
 }
 
+// --- NUEVO: FUNCIONES PARA GESTIONAR GRUPOS ---
 async function handleRenameGroup(groupId) {
   const grupo = existingGroups.value.find(g => g.id === groupId);
   if (!grupo) return;
 
   const nuevoNombre = prompt("Ingresa el nuevo nombre para el grupo:", grupo.nombre_grupo);
-  if (nuevoNombre === null || nuevoNombre.trim() === "") return;
+  if (nuevoNombre === null || nuevoNombre.trim() === "") {
+    return; // El usuario canceló o dejó el nombre vacío
+  }
 
   try {
-    const { error } = await supabase.rpc('rename_grupo_gasto', { p_grupo_id: groupId, p_nuevo_nombre: nuevoNombre.trim() });
+    const { error } = await supabase.rpc('rename_grupo_gasto', {
+      p_grupo_id: groupId,
+      p_nuevo_nombre: nuevoNombre.trim()
+    });
     if (error) throw error;
     feedbackMessage.value = "Grupo renombrado con éxito.";
-    await fetchGastos();
+    await fetchGastos(); // Recargar para ver el cambio
   } catch (e) {
     errorMessage.value = `Error al renombrar: ${e.message}`;
   } finally {
@@ -231,19 +239,22 @@ async function handleRenameGroup(groupId) {
 }
 
 async function handleDeleteGroup(groupId, groupName) {
-  if (!confirm(`¿Estás seguro de que quieres eliminar el grupo "${groupName}"?`)) return;
+  if (!confirm(`¿Estás seguro de que quieres eliminar el grupo "${groupName}"?\n\nEsta acción solo es posible si el grupo no tiene gastos asociados.`)) {
+    return;
+  }
 
   try {
     const { error } = await supabase.rpc('delete_grupo_gasto', { p_grupo_id: groupId });
     if (error) throw error;
     feedbackMessage.value = "Grupo eliminado con éxito.";
-    await fetchGastos();
+    await fetchGastos(); // Recargar para que el grupo desaparezca
   } catch (e) {
     errorMessage.value = `Error al eliminar: ${e.message}`;
   } finally {
     setTimeout(() => { feedbackMessage.value = ''; errorMessage.value = ''; }, 4000);
   }
 }
+
 
 async function handleGroupByType() {
   if (!viajeSeleccionadoInfo.value?.id) {
@@ -265,16 +276,9 @@ async function handleGroupByType() {
   }
 }
 
-// CORRECCIÓN BUG EXPANSIÓN: Se añade un log para depurar
 const toggleRowExpansion = (gastoId) => {
-  console.log(`Toggling expansion for gasto ID: ${gastoId}`);
-  const newSet = new Set(expandedRows.value);
-  if (newSet.has(gastoId)) {
-    newSet.delete(gastoId);
-  } else {
-    newSet.add(gastoId);
-  }
-  expandedRows.value = newSet;
+  if (expandedRows.value.has(gastoId)) expandedRows.value.delete(gastoId);
+  else expandedRows.value.add(gastoId);
 };
 
 const totalGastado = computed(() => gastos.value.reduce((sum, g) => sum + (g.monto_total || 0), 0));
@@ -326,25 +330,21 @@ const fetchGastos = async () => {
     viajeSeleccionadoInfo.value = listaViajesParaFiltro.value.find(v => v.id == filtroViajeId.value) || null;
     
     let query = supabase
-      .from('vista_gastos_detallados')
-      .select(`*`)
-      .eq('dueno_id', user.id)
+      .from('gastos')
+      .select(`*, tipos_gasto_config(*), grupos_gastos(*), provincia_gasto:provincias!provincia_id(nombre), provincia_origen:provincias!provincia_origen_id(nombre), provincia_destino:provincias!provincia_destino_id(nombre), localidad_origen:localidades!localidad_origen_id(nombre), localidad_destino:localidades!localidad_destino_id(nombre), clientes(nombre_cliente), proveedores(nombre), transportes(nombre), vehiculos(*)`)
+      .eq('user_id', user.id)
       .eq('viaje_id', filtroViajeId.value);
     
     if (filtroTipoGastoIds.value.length > 0) {
-      // Este filtro necesita ajustarse si la columna tipo_gasto_id no está en la vista
+      const ids = filtroTipoGastoIds.value.map(t => t.code);
+      query = query.in('tipo_gasto_id', ids);
     }
     if (filtroDescripcion.value) {
       query = query.ilike('descripcion_general', `%${filtroDescripcion.value}%`);
     }
-
     const { data, error } = await query.order('fecha_gasto', { ascending: false });
-    
     if (error) throw error;
-    
-    // La vista devuelve 'id', no 'gasto_id', así que el mapeo ya no es necesario
     gastos.value = data || [];
-
   } catch (error) {
     errorMessage.value = 'No se pudieron cargar los gastos: ' + error.message;
     gastos.value = [];
@@ -466,12 +466,11 @@ const generarRendicionPDFWrapper = () => {
 </script>
 <template>
   <div class="bg-gray-50 min-h-screen font-sans">
-    <!-- Mensaje de Feedback -->
+    <!-- Mensajes de Feedback y Error -->
     <div v-if="feedbackMessage" class="fixed top-24 right-6 bg-green-500 text-white px-6 py-3 rounded-lg shadow-lg z-50 transition-opacity duration-300" role="alert">
       {{ feedbackMessage }}
     </div>
-    <!-- Mensaje de Error -->
-     <div v-if="errorMessage && !feedbackMessage" class="fixed top-24 right-6 bg-red-500 text-white px-6 py-3 rounded-lg shadow-lg z-50 transition-opacity duration-300" role="alert">
+    <div v-if="errorMessage && !feedbackMessage" class="fixed top-24 right-6 bg-red-500 text-white px-6 py-3 rounded-lg shadow-lg z-50 transition-opacity duration-300" role="alert">
       {{ errorMessage }}
     </div>
 
@@ -599,13 +598,19 @@ const generarRendicionPDFWrapper = () => {
       <div v-else>
         <div class="hidden lg:block space-y-6">
           <div v-for="grupo in gastosRenderList.userGroups.concat(gastosRenderList.dateGroups)" :key="grupo.id">
+            <!-- INICIO: TÍTULO DE GRUPO CON ACCIONES -->
             <div class="flex items-center justify-between mb-2 px-1">
               <h2 class="text-base font-bold text-gray-600">{{ grupo.name }}</h2>
               <div v-if="grupo.isGroup && !isViajeActualCerrado" class="flex items-center gap-2">
-                <button @click="handleRenameGroup(grupo.id)" class="btn-icon-action btn-icon-edit" title="Renombrar Grupo"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" fill="currentColor" class="w-4 h-4"><path d="M11.013 2.513a1.75 1.75 0 0 1 2.475 2.474L6.523 11.952l-2.756.87a.75.75 0 0 1-.917-.917l.87-2.756L11.013 2.513Z" /></svg></button>
-                <button @click="handleDeleteGroup(grupo.id, grupo.name)" class="btn-icon-action btn-icon-delete" title="Eliminar Grupo (solo si está vacío)"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" fill="currentColor" class="w-4 h-4"><path fill-rule="evenodd" d="M5 3.25V4H2.75a.75.75 0 0 0 0 1.5h.3l.815 8.15A1.5 1.5 0 0 0 5.357 15h5.285a1.5 1.5 0 0 0 1.493-1.35l.815-8.15h.3a.75.75 0 0 0 0-1.5H11v-.75A2.25 2.25 0 0 0 8.75 1h-1.5A2.25 2.25 0 0 0 5 3.25Zm2.25-.75a.75.75 0 0 0-.75.75V4h3v-.75a.75.75 0 0 0-.75-.75h-1.5Z" clip-rule="evenodd" /></svg></button>
+                <button @click="handleRenameGroup(grupo.id)" class="btn-icon-action btn-icon-edit" title="Renombrar Grupo">
+                  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" fill="currentColor" class="w-4 h-4"><path d="M11.013 2.513a1.75 1.75 0 0 1 2.475 2.474L6.523 11.952l-2.756.87a.75.75 0 0 1-.917-.917l.87-2.756L11.013 2.513Z" /></svg>
+                </button>
+                <button @click="handleDeleteGroup(grupo.id, grupo.name)" class="btn-icon-action btn-icon-delete" title="Eliminar Grupo (solo si está vacío)">
+                  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" fill="currentColor" class="w-4 h-4"><path fill-rule="evenodd" d="M5 3.25V4H2.75a.75.75 0 0 0 0 1.5h.3l.815 8.15A1.5 1.5 0 0 0 5.357 15h5.285a1.5 1.5 0 0 0 1.493-1.35l.815-8.15h.3a.75.75 0 0 0 0-1.5H11v-.75A2.25 2.25 0 0 0 8.75 1h-1.5A2.25 2.25 0 0 0 5 3.25Zm2.25-.75a.75.75 0 0 0-.75.75V4h3v-.75a.75.75 0 0 0-.75-.75h-1.5Z" clip-rule="evenodd" /></svg>
+                </button>
               </div>
             </div>
+            <!-- FIN: TÍTULO DE GRUPO CON ACCIONES -->
             <div class="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
               <table class="min-w-full text-sm">
                 <thead class="bg-gray-100">
@@ -613,25 +618,27 @@ const generarRendicionPDFWrapper = () => {
                     <th class="table-header w-12"></th>
                     <th v-if="isConciliacionMode" class="table-header w-12">✔</th>
                     <th class="table-header w-12"></th>
-                    <th class="table-header sortable" @click="sortBy('fecha_gasto')">Fecha</th>
+                    <th class="table-header sortable" @click="sortBy('fecha_gasto')">Fecha <span v-if="sortKey === 'fecha_gasto'">{{ sortOrder === 'asc' ? '▲' : '▼' }}</span></th>
                     <th class="table-header">Tipo de Gasto</th>
                     <th class="table-header">Descripción</th>
                     <th class="table-header">Provincia</th>
                     <th class="table-header">N° Factura</th>
-                    <th class="table-header text-right sortable" @click="sortBy('monto_total')">Monto</th>
+                    <th class="table-header text-right sortable" @click="sortBy('monto_total')">Monto <span v-if="sortKey === 'monto_total'">{{ sortOrder === 'asc' ? '▲' : '▼' }}</span></th>
                     <th class="table-header text-center">Acciones</th>
                   </tr>
                 </thead>
                 <tbody class="divide-y divide-gray-200">
                   <template v-for="gasto in grupo.gastos" :key="gasto.id">
-                    <tr class="transition-colors cursor-pointer" :class="{'bg-indigo-50': selectedGastos.has(gasto.id), 'bg-blue-50': gasto.es_delegado, 'hover:bg-blue-100': gasto.es_delegado, 'hover:bg-gray-50': !gasto.es_delegado}" @click="toggleRowExpansion(gasto.id)">
+                    <tr class="hover:bg-blue-50/50 transition-colors cursor-pointer" :class="{'bg-indigo-50': selectedGastos.has(gasto.id), 'border-l-4 border-yellow-400': isConciliacionMode && !gasto.factura_url && !gasto.numero_factura}" @click="toggleRowExpansion(gasto.id)">
                       <td class="table-cell text-center" @click.stop><input type="checkbox" :checked="selectedGastos.has(gasto.id)" @change="toggleGastoSelection(gasto.id)" class="checkbox-sm" :disabled="isViajeActualCerrado"></td>
-                      <td v-if="isConciliacionMode" class="table-cell text-center" @click.stop><input type="checkbox" :checked="gasto.es_revisado" @change="toggleRevisado(gasto)" class="checkbox-sm" :disabled="isViajeActualCerrado"></td>
+                      <td v-if="isConciliacionMode" class="table-cell text-center" @click.stop>
+                         <input type="checkbox" :checked="gasto.es_revisado" @change="toggleRevisado(gasto)" class="checkbox-sm" :disabled="isViajeActualCerrado">
+                      </td>
                       <td class="table-cell text-center"><IconRenderer :icon-data="gasto.tipos_gasto_config?.icono_svg" :color="gasto.tipos_gasto_config?.color_accent" /></td>
                       <td class="table-cell font-semibold text-gray-700 w-28">{{ formatDate(gasto.fecha_gasto) }}</td>
                       <td class="table-cell w-40">{{ gasto.tipos_gasto_config?.nombre_tipo_gasto }}</td>
                       <td class="table-cell font-medium text-gray-900 max-w-sm truncate">{{ gasto.descripcion_general }}</td>
-                      <td class="table-cell w-36">{{ gasto.provincia_gasto?.nombre || '-' }}</td>
+                      <td class="table-cell w-36">{{ gasto.provincia_gasto?.nombre || gasto.provincia || '-' }}</td>
                       <td class="table-cell w-28">{{ gasto.numero_factura || '-' }}</td>
                       <td class="table-cell text-right font-bold text-gray-800 w-36">{{ formatCurrency(gasto.monto_total) }}</td>
                       <td class="table-cell text-center w-28" @click.stop>
@@ -646,15 +653,7 @@ const generarRendicionPDFWrapper = () => {
                       <td :colspan="isConciliacionMode ? 10 : 9" class="p-0">
                         <div class="bg-gray-50 px-6 py-4">
                           <h4 class="text-xs font-bold uppercase text-gray-500 mb-3">Detalles del Gasto</h4>
-                          <div class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-x-6 gap-y-4 text-sm">
-                            <div v-if="gasto.es_delegado">
-                              <p class="font-semibold text-gray-800">Responsable Original</p>
-                              <p class="text-gray-600">{{ gasto.responsable_principal_nombre }}</p>
-                            </div>
-                            <div v-if="gasto.es_delegado">
-                              <p class="font-semibold text-gray-800">Rendido por</p>
-                              <p class="text-gray-600">{{ gasto.dueno_nombre }}</p>
-                            </div>
+                          <div class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-x-6 gap-y-4 text-sm">
                             <div v-if="gasto.clientes?.nombre_cliente"><p class="font-semibold text-gray-800">Cliente</p><p class="text-gray-600">{{ gasto.clientes.nombre_cliente }}</p></div>
                             <div v-if="gasto.proveedores?.nombre"><p class="font-semibold text-gray-800">Proveedor</p><p class="text-gray-600">{{ gasto.proveedores.nombre }}</p></div>
                             <div v-if="gasto.transportes?.nombre"><p class="font-semibold text-gray-800">Transporte</p><p class="text-gray-600">{{ gasto.transportes.nombre }}</p></div>
@@ -692,7 +691,7 @@ const generarRendicionPDFWrapper = () => {
               </div>
             </div>
             <div class="bg-white rounded-lg shadow-sm border border-gray-200 divide-y divide-gray-200">
-              <div v-for="gasto in grupo.gastos" :key="gasto.id" class="p-4" :class="{'bg-blue-50': gasto.es_delegado}" @click="toggleRowExpansion(gasto.id)">
+              <div v-for="gasto in grupo.gastos" :key="gasto.id" class="p-4" :class="{'border-l-4 border-yellow-400': isConciliacionMode && !gasto.factura_url && !gasto.numero_factura}" @click="toggleRowExpansion(gasto.id)">
                 <div v-if="isConciliacionMode" class="flex items-center justify-end mb-2" @click.stop>
                     <label :for="`revisado-${gasto.id}`" class="text-sm font-medium text-gray-700 mr-2">Revisado</label>
                     <input :id="`revisado-${gasto.id}`" type="checkbox" :checked="gasto.es_revisado" @change="toggleRevisado(gasto)" class="checkbox-sm" :disabled="isViajeActualCerrado">
@@ -705,13 +704,16 @@ const generarRendicionPDFWrapper = () => {
                   <div class="flex-grow min-w-0">
                     <p class="font-semibold text-gray-800">{{ gasto.tipos_gasto_config?.nombre_tipo_gasto || 'Gasto' }}</p>
                     <p class="text-sm text-gray-600 truncate">{{ gasto.descripcion_general }}</p>
+                    <p class="text-xs text-gray-500 mt-1">
+                        <span v-if="gasto.provincia_gasto?.nombre || gasto.provincia">Prov: {{ gasto.provincia_gasto?.nombre || gasto.provincia }}</span>
+                        <span v-if="(gasto.provincia_gasto?.nombre || gasto.provincia) && gasto.numero_factura"> • </span>
+                        <span v-if="gasto.numero_factura">Fact: #{{ gasto.numero_factura }}</span>
+                    </p>
                   </div>
                   <p class="font-bold text-lg text-gray-800 flex-shrink-0 ml-2">{{ formatCurrency(gasto.monto_total) }}</p>
                 </div>
                 <div v-if="expandedRows.has(gasto.id)" class="mt-3 pt-3 border-t border-gray-100">
                   <div class="space-y-2 text-sm">
-                    <div v-if="gasto.es_delegado" class="flex justify-between"><span class="font-semibold text-gray-800">Responsable Original:</span><span class="text-gray-600 text-right">{{ gasto.responsable_principal_nombre }}</span></div>
-                    <div v-if="gasto.es_delegado" class="flex justify-between"><span class="font-semibold text-gray-800">Rendido por:</span><span class="text-gray-600 text-right">{{ gasto.dueno_nombre }}</span></div>
                     <div v-if="gasto.clientes?.nombre_cliente" class="flex justify-between"><span class="font-semibold text-gray-800">Cliente:</span><span class="text-gray-600 text-right">{{ gasto.clientes.nombre_cliente }}</span></div>
                     <div v-if="gasto.proveedores?.nombre" class="flex justify-between"><span class="font-semibold text-gray-800">Proveedor:</span><span class="text-gray-600 text-right">{{ gasto.proveedores.nombre }}</span></div>
                     <div v-if="gasto.transportes?.nombre" class="flex justify-between"><span class="font-semibold text-gray-800">Transporte:</span><span class="text-gray-600 text-right">{{ gasto.transportes.nombre }}</span></div>

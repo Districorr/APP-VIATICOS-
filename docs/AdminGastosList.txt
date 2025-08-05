@@ -17,6 +17,7 @@ import {
 
 const router = useRouter();
 const route = useRoute();
+// --- CAMBIO 1: Importamos la nueva función genérica ---
 const { exportJsonToExcel } = useReportGenerator();
 
 // --- ESTADOS PRINCIPALES ---
@@ -37,16 +38,6 @@ const sortBy = ref({ key: 'fecha_gasto', order: 'desc' });
 const tiposDeGastoDisponibles = ref([]);
 const actionLoading = ref(null);
 const commentModal = ref({ show: false, gasto: null, comentario: '' });
-const expandedRows = ref(new Set());
-
-// --- ESTADOS DE PAGINACIÓN ---
-const currentPage = ref(1);
-const resultsPerPage = ref(15);
-const totalResults = ref(0);
-
-const pageCount = computed(() => Math.ceil(totalResults.value / resultsPerPage.value));
-const rangeFrom = computed(() => (currentPage.value - 1) * resultsPerPage.value + 1);
-const rangeTo = computed(() => Math.min(currentPage.value * resultsPerPage.value, totalResults.value));
 
 // --- LÓGICA DE CARGA DE DATOS ---
 async function fetchData() {
@@ -60,18 +51,12 @@ async function fetchData() {
   loading.value = true;
   errorMessage.value = '';
   try {
-    const { data, error } = await supabase.rpc('get_detalle_rendicion_con_gastos', { 
-      p_viaje_id: viajeId,
-      p_page: currentPage.value,
-      p_page_size: resultsPerPage.value
-    });
-
+    const { data, error } = await supabase.rpc('get_detalle_rendicion_con_gastos', { p_viaje_id: viajeId });
     if (error) throw error;
     if (!data.viaje) throw new Error(`No se encontró la rendición con ID ${viajeId}.`);
 
     rendicion.value = data.viaje;
     gastos.value = data.gastos;
-    totalResults.value = data.total_count;
 
     if (tiposDeGastoDisponibles.value.length === 0) {
       const { data: tiposRes, error: tiposError } = await supabase.from('tipos_gasto_config').select('id, nombre_tipo_gasto').eq('activo', true).order('nombre_tipo_gasto');
@@ -90,6 +75,7 @@ async function fetchData() {
 onMounted(fetchData);
 
 // --- DATOS COMPUTADOS ---
+// (Sin cambios en esta sección)
 const tituloVista = computed(() => {
   if (!rendicion.value) return 'Detalle de Rendición';
   return `Gastos del Viaje: "${rendicion.value.nombre_viaje}" (#${rendicion.value.codigo_rendicion})`;
@@ -109,7 +95,7 @@ const filteredAndSortedGastos = computed(() => {
     items = items.filter(g => new Date(g.fecha_gasto) <= toDate);
   }
   if (filters.value.tipoGastoId) {
-    items = items.filter(g => String(g.tipos_gasto_config?.id) === String(filters.value.tipoGastoId));
+    items = items.filter(g => String(g.tipo_gasto_id) === String(filters.value.tipoGastoId));
   }
   if (filters.value.estadoRevision) {
     items = items.filter(g => g.estado_revision === filters.value.estadoRevision);
@@ -119,7 +105,7 @@ const filteredAndSortedGastos = computed(() => {
   items.sort((a, b) => {
     let valA = a[key];
     let valB = b[key];
-    if (key === 'monto_total') {
+    if (key === 'gasto_monto_total') {
         valA = Number(valA);
         valB = Number(valB);
     } else if (typeof valA === 'string') {
@@ -135,26 +121,29 @@ const filteredAndSortedGastos = computed(() => {
 });
 
 const kpis = computed(() => {
-    const totalGastado = gastos.value.reduce((sum, g) => sum + Number(g.monto_total || 0), 0);
+    const gastosVisibles = filteredAndSortedGastos.value;
+    const totalGastado = gastosVisibles.reduce((sum, g) => sum + Number(g.gasto_monto_total || 0), 0);
     const adelanto = Number(rendicion.value?.monto_adelanto || 0);
     const saldo = adelanto - totalGastado;
-    return { adelanto, gastado: totalGastado, saldo, numGastos: totalResults.value };
+    return { adelanto, gastado: totalGastado, saldo, numGastos: gastosVisibles.length };
 });
 
 const totalesPorCategoria = computed(() => {
     const result = {};
-    gastos.value.forEach(gasto => {
-        const categoria = gasto.tipos_gasto_config?.nombre_tipo_gasto || 'Sin Categoría';
+    filteredAndSortedGastos.value.forEach(gasto => {
+        const categoria = gasto.nombre_tipo_gasto || 'Sin Categoría';
         if (!result[categoria]) {
             result[categoria] = { total: 0, count: 0 };
         }
-        result[categoria].total += Number(gasto.monto_total || 0);
+        result[categoria].total += Number(gasto.gasto_monto_total || 0);
         result[categoria].count++;
     });
     return Object.entries(result).sort((a,b) => b[1].total - a[1].total);
 });
 
+
 // --- LÓGICA DE ACCIONES ---
+// (La mayoría de las funciones aquí no cambian)
 const setSortBy = (key) => {
   if (sortBy.value.key === key) {
     sortBy.value.order = sortBy.value.order === 'asc' ? 'desc' : 'asc';
@@ -177,7 +166,7 @@ const handleEstadoRevisionChange = async (gastoId, nuevoEstado) => {
             p_comentario: null
         });
         if (error) throw error;
-        const gastoIndex = gastos.value.findIndex(g => g.id === gastoId);
+        const gastoIndex = gastos.value.findIndex(g => g.gasto_id === gastoId);
         if (gastoIndex !== -1) gastos.value[gastoIndex].estado_revision = nuevoEstado;
     } catch (e) {
         alert(`Error al actualizar estado: ${e.message}`);
@@ -193,15 +182,15 @@ const openCommentModal = (gasto) => {
 const saveComment = async () => {
     const { gasto, comentario } = commentModal.value;
     if (!gasto) return;
-    actionLoading.value = `comment_${gasto.id}`;
+    actionLoading.value = `comment_${gasto.gasto_id}`;
     try {
         const { error } = await supabase.rpc('actualizar_estado_gasto', {
-            p_gasto_id: gasto.id,
+            p_gasto_id: gasto.gasto_id,
             p_nuevo_estado: 'observado',
             p_comentario: comentario,
         });
         if (error) throw error;
-        const gastoIndex = gastos.value.findIndex(g => g.id === gasto.id);
+        const gastoIndex = gastos.value.findIndex(g => g.gasto_id === gasto.gasto_id);
         if (gastoIndex !== -1) {
             gastos.value[gastoIndex].comentario_revision = comentario;
             gastos.value[gastoIndex].estado_revision = 'observado';
@@ -215,13 +204,13 @@ const saveComment = async () => {
 };
 
 const editarGasto = (gastoId) => {
-    router.push({ name: 'GastoFormEdit', params: { id: gastoId }, query: { adminEdit: 'true' } });
+    router.push({ name: 'GastoFormEdit', params: { id: gastoId } });
 };
 
 const duplicarGasto = (gasto) => {
     const gastoData = { ...gasto };
-    delete gastoData.id;
-    delete gastoData.created_at;
+    delete gastoData.gasto_id;
+    delete gastoData.gasto_created_at;
     delete gastoData.estado_revision;
     delete gastoData.comentario_revision;
     
@@ -250,55 +239,37 @@ const eliminarGasto = async (gastoId) => {
 };
 
 const handleExport = () => {
-  if (!gastos.value || gastos.value.length === 0) {
-    alert('No hay gastos para exportar.');
+  if (!filteredAndSortedGastos.value || filteredAndSortedGastos.value.length === 0) {
+    alert('No hay gastos para exportar con los filtros actuales.');
     return;
   }
-  const dataToExport = gastos.value.map(g => ({
-    'ID Gasto': g.id,
+  const dataToExport = filteredAndSortedGastos.value.map(g => ({
+    'ID Gasto': g.gasto_id,
     'Fecha': formatDate(g.fecha_gasto),
-    'Responsable': g.responsable_principal_nombre,
-    'Rendido Por': g.es_delegado ? g.dueno_nombre : '',
-    'Tipo Gasto': g.tipos_gasto_config?.nombre_tipo_gasto,
-    'Descripción': g.descripcion_general,
-    'Monto': g.monto_total,
-    'Moneda': g.moneda,
-    'Factura N°': g.numero_factura,
+    'Responsable': g.responsable_gasto_nombre,
+    'Tipo Gasto': g.nombre_tipo_gasto,
+    'Descripción': g.gasto_descripcion,
+    'Monto': g.gasto_monto_total,
+    'Moneda': g.gasto_moneda,
+    'Factura N°': g.gasto_n_factura,
     'Estado Revisión': g.estado_revision,
     'Comentario Admin': g.comentario_revision,
-    'Rendición (#)': `${rendicion.value.nombre_viaje} (#${rendicion.value.codigo_rendicion})`,
+    'Rendición (#)': `${g.nombre_viaje} (#${g.viaje_codigo_rendicion})`,
   }));
 
+  // --- CAMBIO 2: Llamamos a la nueva función correcta ---
   exportJsonToExcel(dataToExport, `Detalle_${rendicion.value.codigo_rendicion || 'gastos'}`);
 };
 
-const toggleRowExpansion = (gastoId) => {
-  const newSet = new Set(expandedRows.value);
-  if (newSet.has(gastoId)) {
-    newSet.delete(gastoId);
-  } else {
-    newSet.add(gastoId);
-  }
-  expandedRows.value = newSet;
-};
-
-function goToPage(page) {
-  if (page > 0 && page <= pageCount.value) {
-    currentPage.value = page;
-    fetchData();
-  }
-}
-
 watch(() => route.query.viajeId, (newId, oldId) => {
-  if (newId && newId !== oldId) {
-    currentPage.value = 1;
+  if (newId !== oldId) {
     fetchData();
   }
 }, { immediate: true });
 </script>
 <template>
   <div class="container mx-auto px-2 sm:px-4 lg:px-6 py-8">
-    <div v-if="loading && !rendicion" class="text-center py-20">
+    <div v-if="loading" class="text-center py-20">
       <svg class="animate-spin h-10 w-10 text-blue-600 mx-auto" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg>
       <p class="text-lg text-gray-600 mt-3">Cargando detalle de la rendición...</p>
     </div>
@@ -349,73 +320,41 @@ watch(() => route.query.viajeId, (newId, oldId) => {
             <thead class="bg-gray-100">
               <tr>
                 <th class="table-th w-32">Revisión</th>
-                <th class="table-th"><button @click="setSortBy('fecha_gasto')" class="sort-button">Fecha</button></th>
-                <th class="table-th">Responsable</th>
+                <th class="table-th"><button @click="setSortBy('fecha_gasto')" class="sort-button">Fecha <ArrowDownIcon v-if="sortBy.key === 'fecha_gasto' && sortBy.order === 'desc'" class="h-4 w-4" /><ArrowUpIcon v-if="sortBy.key === 'fecha_gasto' && sortBy.order === 'asc'" class="h-4 w-4" /></button></th>
                 <th class="table-th">Tipo Gasto</th>
                 <th class="table-th">Descripción</th>
-                <th class="table-th text-right"><button @click="setSortBy('monto_total')" class="sort-button justify-end w-full">Monto</button></th>
+                <th class="table-th w-56">Detalles</th>
+                <th class="table-th text-right"><button @click="setSortBy('gasto_monto_total')" class="sort-button justify-end w-full">Monto <ArrowDownIcon v-if="sortBy.key === 'gasto_monto_total' && sortBy.order === 'desc'" class="h-4 w-4" /><ArrowUpIcon v-if="sortBy.key === 'gasto_monto_total' && sortBy.order === 'asc'" class="h-4 w-4" /></button></th>
                 <th class="table-th text-center w-28">Docs</th>
                 <th class="table-th text-right w-20">Acciones</th>
               </tr>
             </thead>
             <tbody class="bg-white divide-y divide-gray-200">
               <tr v-if="filteredAndSortedGastos.length === 0"><td colspan="8" class="text-center py-10 text-gray-500">No hay gastos que coincidan con los filtros.</td></tr>
-              <template v-for="gasto in filteredAndSortedGastos" :key="gasto.id">
-                <tr class="hover:bg-gray-50/75 transition-colors cursor-pointer" :class="{'bg-blue-50': gasto.es_delegado}" @click="toggleRowExpansion(gasto.id)">
-                  <td class="table-cell px-4 py-3">
-                    <Menu as="div" class="relative inline-block text-left">
-                      <MenuButton class="w-full text-xs font-semibold rounded-md px-2 py-1.5 inline-flex items-center justify-center gap-1.5 transition-colors" :class="{'bg-green-100 text-green-800 hover:bg-green-200': gasto.estado_revision === 'aprobado', 'bg-yellow-100 text-yellow-800 hover:bg-yellow-200': gasto.estado_revision === 'observado', 'bg-gray-100 text-gray-700 hover:bg-gray-200': gasto.estado_revision === 'en_revision'}">
-                        <span v-if="actionLoading === `revision_${gasto.id}`" class="h-4 w-4 border-2 border-gray-400 border-t-transparent rounded-full animate-spin"></span>
-                        <template v-else>{{ gasto.estado_revision && gasto.estado_revision.replace('_',' ') }}</template>
-                        <ChevronDownIcon class="h-4 w-4"/>
-                      </MenuButton>
-                      <MenuItems class="absolute left-0 mt-2 w-40 origin-top-left rounded-md bg-white shadow-lg ring-1 ring-black ring-opacity-5 focus:outline-none z-10">
-                        <div class="px-1 py-1">
-                          <MenuItem><button @click="() => handleEstadoRevisionChange(gasto.id, 'aprobado')" class="menu-item text-green-600">Aprobado</button></MenuItem>
-                          <MenuItem><button @click="() => handleEstadoRevisionChange(gasto.id, 'en_revision')" class="menu-item text-gray-700">En Revisión</button></MenuItem>
-                          <MenuItem><button @click="() => handleEstadoRevisionChange(gasto.id, 'observado')" class="menu-item text-yellow-600">Observado</button></MenuItem>
-                        </div>
-                      </MenuItems>
-                    </Menu>
-                  </td>
-                  <td class="table-cell">{{ formatDate(gasto.fecha_gasto) }}</td>
-                  <td class="table-cell">
-                    <div class="font-medium text-gray-900">{{ gasto.responsable_principal_nombre }}</div>
-                    <div v-if="gasto.es_delegado" class="text-xs text-gray-500">(Rendido por: {{ gasto.dueno_nombre }})</div>
-                  </td>
-                  <td class="table-cell"><span class="px-2 py-1 text-xs font-semibold rounded-md bg-slate-100 text-slate-700">{{ gasto.tipos_gasto_config?.nombre_tipo_gasto }}</span></td>
-                  <td class="table-cell max-w-xs"><div class="truncate" :title="gasto.descripcion_general">{{ gasto.descripcion_general || '-' }}</div></td>
-                  <td class="table-cell text-right font-semibold">{{ formatCurrency(gasto.monto_total, gasto.moneda) }}</td>
-                  <td class="table-cell text-center">
-                    <div class="flex justify-center items-center gap-3">
-                      <a v-if="gasto.factura_url" :href="gasto.factura_url" target="_blank" class="text-blue-600 hover:text-blue-800" title="Ver factura"><PaperClipIcon class="h-5 w-5"/></a>
-                      <button @click="() => openCommentModal(gasto)" class="text-gray-500 hover:text-gray-800" title="Comentarios"><ChatBubbleLeftEllipsisIcon class="h-5 w-5" :class="{'text-yellow-500': gasto.comentario_revision}"/></button>
-                    </div>
-                  </td>
-                  <td class="table-cell text-right pr-2">
-                    <GastoActionsMenu :gasto="gasto" @edit="editarGasto" @duplicate="duplicarGasto" @delete="eliminarGasto" />
-                  </td>
-                </tr>
-                <tr v-if="expandedRows.has(gasto.id)">
-                  <td colspan="8" class="p-0"><DetallesJson :datos="gasto.datos_adicionales" /></td>
-                </tr>
-              </template>
+              <tr v-for="gasto in filteredAndSortedGastos" :key="gasto.gasto_id" class="hover:bg-gray-50/75 transition-colors">
+                <td class="table-cell px-4 py-3"><Menu as="div" class="relative inline-block text-left"><MenuButton class="w-full text-xs font-semibold rounded-md px-2 py-1.5 inline-flex items-center justify-center gap-1.5 transition-colors" :class="{'bg-green-100 text-green-800 hover:bg-green-200': gasto.estado_revision === 'aprobado', 'bg-yellow-100 text-yellow-800 hover:bg-yellow-200': gasto.estado_revision === 'observado', 'bg-gray-100 text-gray-700 hover:bg-gray-200': gasto.estado_revision === 'en_revision'}"><span v-if="actionLoading === `revision_${gasto.gasto_id}`" class="h-4 w-4 border-2 border-gray-400 border-t-transparent rounded-full animate-spin"></span><template v-else>{{ gasto.estado_revision.replace('_',' ') }}</template><ChevronDownIcon class="h-4 w-4"/></MenuButton><MenuItems class="absolute left-0 mt-2 w-40 origin-top-left rounded-md bg-white shadow-lg ring-1 ring-black ring-opacity-5 focus:outline-none z-10"><div class="px-1 py-1"><MenuItem><button @click="() => handleEstadoRevisionChange(gasto.gasto_id, 'aprobado')" class="menu-item text-green-600">Aprobado</button></MenuItem><MenuItem><button @click="() => handleEstadoRevisionChange(gasto.gasto_id, 'en_revision')" class="menu-item text-gray-700">En Revisión</button></MenuItem><MenuItem><button @click="() => handleEstadoRevisionChange(gasto.gasto_id, 'observado')" class="menu-item text-yellow-600">Observado</button></MenuItem></div></MenuItems></Menu></td>
+                <td class="table-cell">{{ formatDate(gasto.fecha_gasto) }}</td>
+                <td class="table-cell"><span class="px-2 py-1 text-xs font-semibold rounded-md bg-slate-100 text-slate-700">{{ gasto.nombre_tipo_gasto }}</span></td>
+                <td class="table-cell max-w-xs"><div class="truncate" :title="gasto.gasto_descripcion">{{ gasto.gasto_descripcion || '-' }}</div></td>
+                <td class="table-cell"><DetallesJson :datos="gasto.gasto_datos_adicionales" /></td>
+                <td class="table-cell text-right font-semibold" :class="{ 'text-red-500 font-bold': gasto.gasto_monto_total > 100000 }">{{ formatCurrency(gasto.gasto_monto_total, gasto.gasto_moneda) }}</td>
+                <td class="table-cell text-center"><div class="flex justify-center items-center gap-3"><a v-if="gasto.gasto_factura_url" :href="gasto.gasto_factura_url" target="_blank" class="text-blue-600 hover:text-blue-800" title="Ver factura"><PaperClipIcon class="h-5 w-5"/></a><button @click="() => openCommentModal(gasto)" class="text-gray-500 hover:text-gray-800" title="Comentarios"><ChatBubbleLeftEllipsisIcon class="h-5 w-5" :class="{'text-yellow-500': gasto.comentario_revision}"/></button></div></td>
+                <td class="table-cell text-right pr-2">
+                  <GastoActionsMenu 
+                    :gasto="gasto" 
+                    @edit="editarGasto" 
+                    @duplicate="duplicarGasto" 
+                    @delete="eliminarGasto" 
+                  />
+                </td>
+              </tr>
             </tbody>
           </table>
-        </div>
-        <div class="pagination-controls mt-4 flex justify-between items-center px-4 py-2">
-          <span class="text-sm text-gray-600">
-            Mostrando {{ rangeFrom }} - {{ rangeTo }} de {{ totalResults }} resultados
-          </span>
-          <div class="flex gap-2">
-            <button @click="goToPage(currentPage - 1)" :disabled="currentPage === 1" class="btn-secondary-outline">Anterior</button>
-            <button @click="goToPage(currentPage + 1)" :disabled="currentPage === pageCount" class="btn-secondary-outline">Siguiente</button>
-          </div>
         </div>
       </div>
       
       <section class="mt-8">
-        <h3 class="text-xl font-semibold text-gray-800 mb-4">Totales por Categoría (Página Actual)</h3>
+        <h3 class="text-xl font-semibold text-gray-800 mb-4">Totales por Categoría (Filtro Actual)</h3>
         <div class="p-6 bg-white rounded-lg border shadow-sm">
           <dl class="divide-y divide-gray-200">
             <div v-if="totalesPorCategoria.length === 0" class="py-3 text-center text-gray-500">No hay datos para mostrar.</div>
@@ -432,12 +371,12 @@ watch(() => route.query.viajeId, (newId, oldId) => {
       <div v-if="commentModal.show" class="modal-backdrop" @click.self="commentModal.show = false">
         <div class="modal-container">
           <h3 class="modal-title">Comentario de Revisión</h3>
-          <p class="text-sm text-gray-600 mt-1">Para el gasto: <span class="font-semibold">{{ commentModal.gasto?.descripcion_general }}</span></p>
+          <p class="text-sm text-gray-600 mt-1">Para el gasto: <span class="font-semibold">{{ commentModal.gasto?.gasto_descripcion }}</span></p>
           <div class="mt-4"><textarea v-model="commentModal.comentario" rows="4" class="form-input" placeholder="Añadir observación o comentario..."></textarea></div>
           <div class="modal-actions">
             <button @click="commentModal.show = false" class="btn-secondary">Cancelar</button>
-            <button @click="saveComment" :disabled="actionLoading === `comment_${commentModal.gasto?.id}`" class="btn-primary flex justify-center w-24">
-              <span v-if="actionLoading === `comment_${commentModal.gasto?.id}`" class="h-5 w-5 border-2 border-white border-t-transparent rounded-full animate-spin"></span>
+            <button @click="saveComment" :disabled="actionLoading === `comment_${commentModal.gasto?.gasto_id}`" class="btn-primary flex justify-center w-24">
+              <span v-if="actionLoading === `comment_${commentModal.gasto?.gasto_id}`" class="h-5 w-5 border-2 border-white border-t-transparent rounded-full animate-spin"></span>
               <span v-else>Guardar</span>
             </button>
           </div>
@@ -450,18 +389,24 @@ watch(() => route.query.viajeId, (newId, oldId) => {
 <style>
 .form-label { @apply block text-sm font-medium text-gray-700 mb-1; }
 .form-input { @apply block w-full rounded-md border-gray-300 shadow-sm focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm transition-colors; }
+.section-title { @apply text-xl font-semibold text-gray-700 mb-4; }
+.section-container { @apply bg-white p-6 rounded-xl shadow-lg border; }
+.kpi-card { @apply bg-white p-6 rounded-xl shadow-lg border text-center transition-shadow hover:shadow-md; }
+.no-data-placeholder { @apply flex justify-center items-center h-full text-center text-gray-500; }
 .error-banner { @apply p-4 bg-red-50 text-red-700 border border-red-200 rounded-md; }
 .table-th { @apply px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider; }
 .table-cell { @apply px-4 py-4 whitespace-nowrap text-sm text-gray-600; }
 .btn-primary { @apply bg-blue-600 text-white font-semibold py-2 px-4 rounded-lg shadow-md hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 transition-colors; }
 .btn-secondary { @apply bg-gray-200 text-gray-800 font-semibold py-2 px-4 rounded-lg hover:bg-gray-300 focus:outline-none focus:ring-2 focus:ring-gray-400 focus:ring-offset-2 transition-colors; }
-.btn-secondary-outline { @apply bg-white text-gray-700 font-semibold py-2 px-4 rounded-lg border border-gray-300 hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2 transition-colors disabled:bg-gray-100 disabled:text-gray-400 disabled:cursor-not-allowed; }
+.btn-secondary-outline { @apply bg-white text-gray-700 font-semibold py-2 px-4 rounded-lg border border-gray-300 hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2 transition-colors; }
+.btn-icon { @apply p-2 rounded-full text-gray-500 hover:bg-gray-100 hover:text-gray-800 transition-colors; }
 .sort-button { @apply flex items-center gap-1 font-medium text-gray-500 hover:text-gray-800; }
 .menu-item { @apply flex w-full items-center rounded-md px-2 py-2 text-sm transition-colors; }
 .modal-backdrop { @apply fixed inset-0 bg-black bg-opacity-60 flex justify-center items-center z-40; }
 .modal-container { @apply bg-white rounded-xl shadow-2xl p-6 w-full max-w-md m-4 transform transition-all; }
 .modal-title { @apply text-xl font-bold text-gray-900; }
 .modal-actions { @apply mt-6 flex justify-end gap-3; }
+.modal-error { @apply mt-3 text-sm text-red-600 font-medium; }
 .list-enter-active, .list-leave-active { transition: all 0.3s ease-out; }
 .list-enter-from, .list-leave-to { opacity: 0; transform: translateY(-10px); }
 .modal-fade-enter-active, .modal-fade-leave-active { transition: opacity 0.3s ease; }

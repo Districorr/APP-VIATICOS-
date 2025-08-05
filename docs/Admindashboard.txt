@@ -1,3 +1,4 @@
+// src/views/admin/AdminDashboardView.vue
 <script setup>
 import { reactive, onMounted, computed } from 'vue';
 import { RouterLink } from 'vue-router';
@@ -5,8 +6,7 @@ import { supabase } from '../../supabaseClient.js';
 import { formatCurrency } from '../../utils/formatters.js';
 import {
   ChartBarIcon, PresentationChartLineIcon, UsersIcon, Cog6ToothIcon, WrenchScrewdriverIcon, BuildingLibraryIcon, TruckIcon, KeyIcon, InboxStackIcon, DocumentCheckIcon, BanknotesIcon,
-  ShoppingBagIcon,
-  CreditCardIcon // <-- AÑADIDO: Nuevo icono para Pagos Directos
+  ShoppingBagIcon // <-- 1. IMPORTAR NUEVO ICONO
 } from '@heroicons/vue/24/outline';
 
 // --- ESTADO PARA ACCIONES PENDIENTES ---
@@ -25,13 +25,11 @@ const dineroEnCurso = reactive({
   loading: true,
 });
 
-// --- ESTRUCTURA DE LOS MÓDulos DEL DASHBOARD (MODIFICADO) ---
+// --- ESTRUCTURA DE LOS MÓDULOS DEL DASHBOARD (MODIFICADO) ---
 const dashboardSections = reactive([
   {
     title: 'Módulos de Análisis e Inteligencia',
     modules: [
-      // AÑADIDO: Nueva tarjeta para Pagos Directos
-      { name: 'Pagos Directos', description: 'Registrar transferencias y otros pagos de gerencia.', to: { name: 'AdminPagosDirectos' }, icon: CreditCardIcon, color: 'bg-green-100 text-green-600' },
       { name: 'Análisis Estratégico', description: 'Análisis visual de todos los datos.', to: { name: 'AdminAnalytics' }, icon: ChartBarIcon, color: 'bg-teal-100 text-teal-600' },
       { name: 'Análisis por Cliente', description: 'Desglose de gastos por cliente.', to: { name: 'AdminAnalisisClientes' }, icon: PresentationChartLineIcon, color: 'bg-sky-100 text-sky-600' },
     ]
@@ -41,6 +39,7 @@ const dashboardSections = reactive([
     modules: [
       { name: 'Gestión de Usuarios', description: 'Administrar roles y perfiles.', to: { name: 'AdminUsuarios' }, icon: UsersIcon, color: 'bg-pink-100 text-pink-600' },
       { name: 'Clientes', description: 'Administrar la base de clientes.', to: { name: 'AdminClientes' }, icon: BuildingLibraryIcon, color: 'bg-orange-100 text-orange-600' },
+      // --- 2. AÑADIR NUEVO MÓDULO AQUÍ ---
       { name: 'Proveedores', description: 'Gestionar estaciones de servicio y otros.', to: { name: 'AdminProveedores' }, icon: ShoppingBagIcon, color: 'bg-red-100 text-red-600' },
       { name: 'Transportes', description: 'Gestionar medios de transporte.', to: { name: 'AdminTransportes' }, icon: TruckIcon, color: 'bg-amber-100 text-amber-600' },
       { name: 'Vehículos', description: 'Gestionar la flota de la empresa.', to: { name: 'AdminVehiculos' }, icon: KeyIcon, color: 'bg-gray-100 text-gray-600' },
@@ -99,14 +98,13 @@ const insightDineroEnCurso = computed(() => {
   }
   if (dineroEnCurso.responsablePrincipal) {
     const porcentaje = (dineroEnCurso.responsablePrincipal.total_adelantado / dineroEnCurso.totalGeneral) * 100;
-    const nombreResponsable = dineroEnCurso.responsablePrincipal.nombre_responsable;
-    if (!nombreResponsable) {
-        return `Distribuido en ${dineroEnCurso.cantidadResponsables} responsables.`;
-    }
+    // CORRECCIÓN: Usar el nombre correcto de la columna devuelta por la RPC.
+    const nombreResponsable = dineroEnCurso.responsablePrincipal.responsable_nombre;
     return `Distribuido en ${dineroEnCurso.cantidadResponsables} responsables. ${nombreResponsable} concentra el ${porcentaje.toFixed(0)}%.`;
   }
   return '';
 });
+
 </script>
 <template>
   <div class="p-4 sm:p-6 lg:p-8">

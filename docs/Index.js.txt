@@ -120,13 +120,6 @@ const routes = [
     meta: { requiresAuth: true, requiresAdmin: true },
     children: [
       { path: '', name: 'AdminDashboard', component: () => import('../views/admin/AdminDashboardView.vue'), meta: { title: 'Admin: Dashboard' } },
-      // AÑADIDO: Nueva ruta para Pagos Directos
-      { 
-        path: 'pagos-directos', 
-        name: 'AdminPagosDirectos', 
-        component: () => import('../views/admin/PagosDirectosView.vue'), 
-        meta: { title: 'Admin: Pagos Directos' } 
-      },
       { path: 'analiticas', name: 'AdminAnalytics', component: () => import('../views/admin/AdminAnalyticsView.vue'), meta: { title: 'Admin: Análisis' } },
       { path: 'analisis-clientes', name: 'AdminAnalisisClientes', component: () => import('../views/admin/AdminAnalisisClientesView.vue'), meta: { title: 'Admin: Análisis por Cliente' } },
       { path: 'todos-los-viajes', name: 'AdminViajesList', component: () => import('../views/admin/AdminViajesListView.vue'), meta: { title: 'Admin: Rendiciones' } },
@@ -152,7 +145,7 @@ const routes = [
         path: 'vehiculos/:id',
         name: 'AdminVehiculoDetalle',
         component: () => import('../views/admin/VehiculoDetalleView.vue'),
-        props: true,
+        props: true, // Esto pasa el :id como prop al componente
         meta: { title: 'Admin: Detalle de Vehículo' }
       },
 

@@ -1,3 +1,4 @@
+// src/components/admin/StatCard.vue
 <script setup>
 import { computed } from 'vue';
 import { formatCurrency } from '../../utils/formatters.js';
@@ -5,38 +6,25 @@ import { ArrowUpIcon, ArrowDownIcon } from '@heroicons/vue/24/solid';
 
 const props = defineProps({
   title: { type: String, required: true },
-  // MODIFICADO: Acepta Number para cálculos y String para valores pre-formateados como fechas.
-  value: { type: [Number, String], default: null },
+  value: { type: Number, default: null },
   change: { type: Number, default: null },
-  // MODIFICADO: Renombro 'format' a 'formatAs' para evitar conflictos y añado 'date'
-  formatAs: { type: String, default: 'number' }, // 'number', 'currency', 'percentage'
+  format: { type: String, default: 'number' }, // 'number', 'currency', 'percentage'
   loading: { type: Boolean, default: false },
   suffix: { type: String, default: '' },
   icon: { type: Function, default: null },
-  // AÑADIDO: Prop para identificar si el valor es una fecha y no debe ser formateado.
-  isDate: { type: Boolean, default: false }
 });
 
 const formattedValue = computed(() => {
   if (props.loading) return '...';
-  if (props.value === null || props.value === undefined || props.value === 'N/A') return '--';
+  if (props.value === null || props.value === undefined) return '--';
 
-  // AÑADIDO: Si es una fecha, simplemente devuelve el valor como está.
-  if (props.isDate) {
-    return props.value;
+  if (props.format === 'currency') {
+    return formatCurrency(props.value);
   }
-  
-  // Se asegura de que el valor sea numérico para las siguientes operaciones
-  const numericValue = Number(props.value);
-  if (isNaN(numericValue)) return props.value; // Si no es un número válido, lo muestra tal cual
-
-  if (props.formatAs === 'currency') {
-    return formatCurrency(numericValue);
+  if (props.format === 'percentage') {
+    return `${props.value.toFixed(1)}%`;
   }
-  if (props.formatAs === 'percentage') {
-    return `${numericValue.toFixed(1)}%`;
-  }
-  return numericValue.toLocaleString('es-AR');
+  return props.value.toLocaleString('es-AR');
 });
 
 const changeClasses = computed(() => {
@@ -44,12 +32,13 @@ const changeClasses = computed(() => {
   return props.change >= 0 ? 'text-green-600' : 'text-red-600';
 });
 </script>
-
+<!-- src/components/admin/StatCard.vue -->
 <template>
-  <div class="bg-white p-5 rounded-xl shadow-sm border border-gray-200">
+  <div class="bg-white p-5 rounded-xl shadow-lg border">
     <div class="flex justify-between items-start">
       <p class="text-sm font-medium text-gray-500 truncate">{{ title }}</p>
       
+      <!-- Muestra icono si se provee, o el indicador de cambio en su defecto. No muestra nada durante la carga. -->
       <div v-if="!loading">
         <component v-if="icon" :is="icon" class="h-6 w-6 text-gray-400" />
         <div v-else-if="change !== null" :class="changeClasses" class="flex items-center text-xs font-semibold">

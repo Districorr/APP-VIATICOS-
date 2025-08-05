@@ -1,0 +1,16 @@
+create table public.perfiles (
+  id uuid not null default auth.uid (),
+  created_at timestamp with time zone not null default now(),
+  rol text not null default 'usuario_comun'::text,
+  nombre_completo text null,
+  formato_predeterminado_id bigint null default '1'::bigint,
+  puesto text null,
+  email text null,
+  constraint Perfiles_pkey primary key (id),
+  constraint Perfiles_formato_predeterminado_id_fkey foreign KEY (formato_predeterminado_id) references formatos_gasto_config (id) on delete set null,
+  constraint perfiles_user_id_link foreign KEY (id) references auth.users (id) on update CASCADE on delete RESTRICT
+) TABLESPACE pg_default;
+
+create trigger trg_before_profile_update_restrictions BEFORE
+update on perfiles for EACH row
+execute FUNCTION trigger_check_profile_update_restrictions ();

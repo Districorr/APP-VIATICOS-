@@ -1,0 +1,106 @@
+
+DECLARE
+    -- Periodos de tiempo dinámicos
+    -- CORRECCIÓN: Se calcula el número de días como entero y LUEGO se convierte a intervalo.
+    duration interval := ((p_end_date - p_start_date) + 1) * interval '1 day';
+    previous_period_start date := p_start_date - duration;
+    previous_period_end date := p_start_date - interval '1 day';
+
+    -- Variables para KPIs
+    kpi_gasto_total_current numeric;
+    kpi_gasto_total_previous numeric;
+    kpi_rendiciones_pendientes_current integer;
+    kpi_adelantos_current numeric;
+    kpi_adelantos_previous numeric;
+    
+    -- Variables para las listas y gráficos
+    list_ultimas_rendiciones jsonb;
+    list_top_gastadores jsonb;
+    chart_evolucion_mensual jsonb;
+    chart_desglose_tipo jsonb;
+BEGIN
+    -- 1. CALCULO DE KPIs
+    -- Gasto total en el período actual (solo gastos aprobados o directos)
+    SELECT COALESCE(SUM(g.monto_total), 0) INTO kpi_gasto_total_current
+    FROM gastos g
+    WHERE g.fecha_gasto BETWEEN p_start_date AND p_end_date
+      AND (g.estado_delegacion = 'aceptado' OR g.estado_delegacion = 'directo');
+
+    -- Gasto total en el período anterior
+    SELECT COALESCE(SUM(g.monto_total), 0) INTO kpi_gasto_total_previous
+    FROM gastos g
+    WHERE g.fecha_gasto BETWEEN previous_period_start AND previous_period_end
+      AND (g.estado_delegacion = 'aceptado' OR g.estado_delegacion = 'directo');
+
+    -- Rendiciones pendientes de aprobación (esto no depende del rango de fechas)
+    SELECT COUNT(*) INTO kpi_rendiciones_pendientes_current FROM viajes WHERE estado_aprobacion = 'en_curso';
+
+    -- Adelantos otorgados en el período actual
+    SELECT COALESCE(SUM(v.monto_adelanto), 0) INTO kpi_adelantos_current
+    FROM viajes v WHERE v.created_at::date BETWEEN p_start_date AND p_end_date;
+
+    -- Adelantos otorgados en el período anterior
+    SELECT COALESCE(SUM(v.monto_adelanto), 0) INTO kpi_adelantos_previous
+    FROM viajes v WHERE v.created_at::date BETWEEN previous_period_start AND previous_period_end;
+    
+    -- 2. LISTAS DE ACCIÓN
+    -- Últimas 5 rendiciones pendientes (no depende del rango de fechas)
+    SELECT jsonb_agg(r) INTO list_ultimas_rendiciones FROM (
+        SELECT v.id, v.nombre_viaje, v.codigo_rendicion, p.nombre_completo as responsable_nombre, v.created_at
+        FROM viajes v
+        JOIN perfiles p ON v.user_id = p.id
+        WHERE v.estado_aprobacion = 'en_curso'
+        ORDER BY v.created_at DESC
+        LIMIT 5
+    ) r;
+
+    -- Top 5 responsables con más gastos (depende del rango de fechas)
+    SELECT jsonb_agg(t) INTO list_top_gastadores FROM (
+        SELECT p.id as responsable_id, p.nombre_completo as responsable_nombre, SUM(g.monto_total) as total_gastado
+        FROM gastos g
+        JOIN perfiles p ON g.user_id = p.id
+        WHERE g.fecha_gasto BETWEEN p_start_date AND p_end_date AND (g.estado_delegacion = 'aceptado' OR g.estado_delegacion = 'directo')
+        GROUP BY p.id, p.nombre_completo
+        ORDER BY total_gastado DESC
+        LIMIT 5
+    ) t;
+
+    -- 3. DATOS PARA GRÁFICOS
+    -- Evolución de gastos en los últimos 12 meses (no depende del rango de fechas)
+    SELECT jsonb_agg(e) INTO chart_evolucion_mensual FROM (
+        SELECT 
+            date_trunc('month', m.month)::date as mes, 
+            COALESCE(SUM(g.monto_total), 0) as total
+        FROM generate_series(date_trunc('month', now() - interval '11 months'), date_trunc('month', now()), '1 month') as m(month)
+        LEFT JOIN gastos g ON date_trunc('month', g.fecha_gasto) = m.month AND (g.estado_delegacion = 'aceptado' OR g.estado_delegacion = 'directo')
+        GROUP BY m.month
+        ORDER BY m.month
+    ) e;
+
+    -- Desglose de gastos por tipo (depende del rango de fechas)
+    SELECT jsonb_agg(d) INTO chart_desglose_tipo FROM (
+        SELECT t.id as tipo_gasto_id, t.nombre_tipo_gasto as tipo, SUM(g.monto_total) as total
+        FROM gastos g
+        JOIN tipos_gasto_config t ON g.tipo_gasto_id = t.id
+        WHERE g.fecha_gasto BETWEEN p_start_date AND p_end_date AND (g.estado_delegacion = 'aceptado' OR g.estado_delegacion = 'directo')
+        GROUP BY t.id, t.nombre_tipo_gasto
+        ORDER BY total DESC
+    ) d;
+    
+    -- 4. CONSTRUIR EL JSON DE RESPUESTA
+    RETURN jsonb_build_object(
+        'kpis', jsonb_build_object(
+            'gasto_total', jsonb_build_object('current', kpi_gasto_total_current, 'previous', kpi_gasto_total_previous),
+            'rendiciones_pendientes', jsonb_build_object('current', kpi_rendiciones_pendientes_current),
+            'adelantos_otorgados', jsonb_build_object('current', kpi_adelantos_current, 'previous', kpi_adelantos_previous)
+        ),
+        'listas', jsonb_build_object(
+            'ultimas_rendiciones', COALESCE(list_ultimas_rendiciones, '[]'::jsonb),
+            'top_gastadores', COALESCE(list_top_gastadores, '[]'::jsonb)
+        ),
+        'charts', jsonb_build_object(
+            'evolucion_mensual', COALESCE(chart_evolucion_mensual, '[]'::jsonb),
+            'desglose_tipo', COALESCE(chart_desglose_tipo, '[]'::jsonb)
+        )
+    );
+END;

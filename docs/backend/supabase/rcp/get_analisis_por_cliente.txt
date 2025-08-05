@@ -1,0 +1,60 @@
+
+DECLARE
+  resultado jsonb;
+  v_rol text;
+BEGIN
+  -- 1. Verificación de seguridad: solo los administradores pueden ejecutar esto.
+  SELECT rol INTO v_rol FROM public.perfiles WHERE id = auth.uid();
+  IF v_rol <> 'admin' THEN
+    RAISE EXCEPTION 'Acceso no autorizado. Se requiere rol de administrador.';
+  END IF;
+
+  -- 2. Usamos CTEs (Common Table Expressions) para organizar la consulta y hacerla más legible.
+  WITH
+    cliente_info AS (
+      SELECT id, nombre_cliente FROM public.clientes WHERE id = p_cliente_id
+    ),
+    gastos_cliente AS (
+      SELECT * FROM public.gastos WHERE cliente_id = p_cliente_id
+    ),
+    kpis_calculados AS (
+      SELECT
+        SUM(monto_total) AS total_gastado,
+        COUNT(*) AS cantidad_gastos,
+        MIN(fecha_gasto) AS fecha_primer_gasto,
+        MAX(fecha_gasto) AS fecha_ultimo_gasto
+      FROM gastos_cliente
+    ),
+    evolucion_mensual AS (
+      SELECT
+        to_char(DATE_TRUNC('month', fecha_gasto), 'YYYY-MM-01') AS mes,
+        SUM(monto_total) AS total_mes
+      FROM gastos_cliente
+      GROUP BY DATE_TRUNC('month', fecha_gasto)
+      ORDER BY DATE_TRUNC('month', fecha_gasto) ASC
+    ),
+    gastos_detallados AS (
+      SELECT
+        g.id,
+        g.fecha_gasto,
+        g.descripcion_general,
+        g.monto_total,
+        v.nombre_viaje,
+        p.nombre_completo as responsable_nombre
+      FROM gastos_cliente g
+      LEFT JOIN public.viajes v ON g.viaje_id = v.id
+      LEFT JOIN public.perfiles p ON g.user_id = p.id
+      ORDER BY g.fecha_gasto DESC
+    )
+  -- 3. Construimos el objeto JSONB final que será devuelto.
+  SELECT
+    jsonb_build_object(
+      'metadata', (SELECT to_jsonb(ci) FROM cliente_info ci),
+      'kpis', (SELECT to_jsonb(kc) FROM kpis_calculados kc),
+      'evolucion_mensual', (SELECT jsonb_agg(em) FROM evolucion_mensual em),
+      'gastos_detallados', (SELECT jsonb_agg(gd) FROM gastos_detallados gd)
+    )
+  INTO resultado;
+
+  RETURN resultado;
+END;

@@ -1,0 +1,197 @@
+<script setup>
+import { ref, onMounted, computed, watch } from 'vue';
+import { supabase } from '../supabaseClient.js';
+import { formatCurrency, formatDate } from '../utils/formatters.js';
+import CajaReportExporter from './CajaReportExporter.vue';
+
+const props = defineProps({
+  caja: {
+    type: Object,
+    required: true
+  },
+  isAdminReport: {
+    type: Boolean,
+    default: false
+  }
+});
+
+// --- ESTADO INTERNO DEL COMPONENTE ---
+const movimientos = ref([]);
+const movimientosLoading = ref(true);
+const movimientosError = ref('');
+
+// --- ESTADO DE FILTRADO Y PAGINACIÓN ---
+const filterDateDesde = ref('');
+const filterDateHasta = ref('');
+const filterTipoMovimiento = ref('');
+const searchTerm = ref('');
+const currentPage = ref(1);
+const itemsPerPage = ref(10);
+const totalItems = ref(0); // Este ya no será seteado por la RPC, pero lo mantenemos por si se añade en el futuro.
+
+// --- LÓGICA DE CARGA DE DATOS (REFACTORIZADA) ---
+async function cargarMovimientos() {
+  if (!props.caja?.id) return;
+  
+  movimientosLoading.value = true;
+  movimientosError.value = '';
+  try {
+    // Llamamos a la nueva RPC con todos los parámetros
+    const { data, error } = await supabase.rpc('get_movimientos_caja_detallados', {
+      p_caja_id: props.caja.id,
+      p_start_date: filterDateDesde.value || null,
+      p_end_date: filterDateHasta.value || null,
+      p_tipo_movimiento: filterTipoMovimiento.value || null,
+      p_search_term: searchTerm.value || null
+    });
+    // NOTA: La paginación se hará en el lado del cliente por ahora para simplificar.
+    // Para paginación en el backend, la RPC necesitaría parámetros de página.
+
+    if (error) throw error;
+    
+    movimientos.value = data;
+    totalItems.value = data.length; // Actualizamos el total basado en los resultados filtrados
+  } catch (e) {
+    console.error('Error al cargar movimientos de caja:', e);
+    movimientosError.value = `No se pudieron cargar los movimientos: ${e.message}`;
+    movimientos.value = [];
+    totalItems.value = 0;
+  } finally {
+    movimientosLoading.value = false;
+  }
+}
+
+// --- COMPUTED PARA PAGINACIÓN (CLIENT-SIDE) ---
+const paginatedMovimientos = computed(() => {
+  const start = (currentPage.value - 1) * itemsPerPage.value;
+  const end = start + itemsPerPage.value;
+  return movimientos.value.slice(start, end);
+});
+
+const totalPages = computed(() => Math.ceil(totalItems.value / itemsPerPage.value));
+
+// --- LÓGICA DE FILTROS Y PAGINACIÓN ---
+function applyFiltersAndPagination() {
+  currentPage.value = 1;
+  cargarMovimientos();
+}
+
+function resetFilters() {
+  filterDateDesde.value = '';
+  filterDateHasta.value = '';
+  filterTipoMovimiento.value = '';
+  searchTerm.value = '';
+  applyFiltersAndPagination();
+}
+
+function goToPage(page) {
+  if (page >= 1 && page <= totalPages.value) {
+    currentPage.value = page;
+  }
+}
+function nextPage() {
+  if (currentPage.value < totalPages.value) goToPage(currentPage.value + 1);
+}
+function prevPage() {
+  if (currentPage.value > 1) goToPage(currentPage.value - 1);
+}
+
+// --- Carga inicial y watchers ---
+onMounted(cargarMovimientos);
+watch(() => props.caja.id, (newId, oldId) => {
+  if (newId !== oldId) {
+    resetFilters();
+  }
+});
+</script>
+<template>
+  <div class="bg-white shadow-xl rounded-lg overflow-hidden border border-gray-200">
+    <div class="p-6 bg-gray-50 border-b border-gray-200">
+      <div class="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 mb-4">
+        <h2 class="text-xl font-bold text-gray-800">Historial de Movimientos</h2>
+        <CajaReportExporter 
+          :movimientos="movimientos" 
+          :caja="caja"
+          :is-admin-report="isAdminReport"
+        />
+      </div>
+      
+      <!-- Controles de Filtro -->
+      <div class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4">
+        <div>
+          <label for="filterDateDesde" class="form-label">Desde:</label>
+          <input type="date" id="filterDateDesde" v-model="filterDateDesde" class="form-input mt-1">
+        </div>
+        <div>
+          <label for="filterDateHasta" class="form-label">Hasta:</label>
+          <input type="date" id="filterDateHasta" v-model="filterDateHasta" class="form-input mt-1">
+        </div>
+        <div>
+          <label for="filterTipoMovimiento" class="form-label">Tipo:</label>
+          <select id="filterTipoMovimiento" v-model="filterTipoMovimiento" class="form-input mt-1">
+            <option value="">Todos</option>
+            <option value="gasto">Gasto</option>
+            <option value="reposicion">Reposición</option>
+            <option value="ajuste_manual">Ajuste Manual</option>
+          </select>
+        </div>
+        <div class="sm:col-span-2 md:col-span-2">
+          <label for="searchTerm" class="form-label">Buscar descripción:</label>
+          <input type="text" id="searchTerm" v-model="searchTerm" @keydown.enter.prevent="applyFiltersAndPagination" placeholder="Ej: Nafta, Almuerzo..." class="form-input mt-1">
+        </div>
+         <div class="flex flex-col sm:flex-row items-end justify-end gap-3 mt-4 sm:mt-0">
+             <button @click="applyFiltersAndPagination" type="button" class="btn-primary min-h-[44px]">Aplicar Filtros</button>
+             <button @click="resetFilters" type="button" class="btn-secondary min-h-[44px]">Limpiar</button>
+         </div>
+      </div>
+    </div>
+
+    <div v-if="movimientosLoading" class="text-center py-8">
+      <svg class="animate-spin h-8 w-8 text-blue-500 mx-auto" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg>
+      <p class="mt-2 text-gray-500">Cargando movimientos...</p>
+    </div>
+    <div v-else-if="movimientosError" class="bg-red-50 p-4 text-red-700">{{ movimientosError }}</div>
+    <div v-else-if="movimientos.length === 0" class="p-8 text-center text-gray-500">No hay movimientos que coincidan.</div>
+    
+    <div v-else class="overflow-x-auto">
+      <table class="min-w-full divide-y divide-gray-200">
+        <thead class="bg-gray-50">
+          <tr>
+            <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Fecha</th>
+            <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Tipo</th>
+            <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Descripción</th>
+            <th class="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase">Monto</th>
+            <th class="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase">Realizado Por</th>
+          </tr>
+        </thead>
+        <tbody class="bg-white divide-y divide-gray-200">
+          <tr v-for="movimiento in paginatedMovimientos" :key="movimiento.id" :class="{'bg-blue-50': movimiento.es_delegado}">
+            <td class="px-6 py-4 text-sm">{{ formatDate(movimiento.created_at) }}</td>
+            <td class="px-6 py-4 text-sm font-medium" :class="movimiento.tipo_movimiento === 'gasto' ? 'text-red-600' : 'text-green-600'">
+              {{ movimiento.tipo_movimiento.charAt(0).toUpperCase() + movimiento.tipo_movimiento.slice(1).replace('_', ' ') }}
+            </td>
+            <td class="px-6 py-4 text-sm">
+              <div>{{ movimiento.descripcion || 'N/A' }}</div>
+              <div v-if="movimiento.es_delegado" class="text-xs text-gray-500 mt-1">
+                (Delegado por: <span class="font-semibold">{{ movimiento.responsable_original_nombre }}</span>)
+              </div>
+            </td>
+            <td class="px-6 py-4 text-sm text-right font-semibold" :class="movimiento.tipo_movimiento === 'gasto' ? 'text-red-600' : 'text-green-600'">
+              {{ (movimiento.tipo_movimiento === 'gasto' ? '-' : '+') + formatCurrency(movimiento.monto) }}
+            </td>
+            <td class="px-6 py-4 text-sm text-right">{{ movimiento.realizado_por_nombre || 'Sistema' }}</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div v-if="totalPages > 1" class="px-6 py-4 bg-gray-50 flex justify-between items-center">
+        <div class="text-sm text-gray-700">Mostrando {{ paginatedMovimientos.length }} de {{ totalItems }}</div>
+        <div class="flex items-center gap-2">
+             <button @click="prevPage" :disabled="currentPage === 1" class="btn-secondary text-sm">Anterior</button>
+             <span>Página {{ currentPage }} de {{ totalPages }}</span>
+             <button @click="nextPage" :disabled="currentPage === totalPages" class="btn-secondary text-sm">Siguiente</button>
+        </div>
+    </div>
+  </div>
+</template>
