@@ -14,11 +14,17 @@ export const formatDate = (dateString, options = {}) => {
   let date;
   const dateStr = String(dateString);
 
+  // --- INICIO CORRECCIÓN DEFINITIVA DE FECHA ---
+  // Si es un string de solo fecha (ej: '2025-07-18'), le añadimos la hora
+  // para forzar al navegador a interpretarlo en la zona horaria local y no en UTC.
   if (/^\d{4}-\d{2}-\d{2}$/.test(dateStr)) {
     date = new Date(`${dateStr}T00:00:00`);
   } else {
+    // Para timestamps completos (que ya incluyen info de zona horaria),
+    // el constructor estándar funciona bien.
     date = new Date(dateStr);
   }
+  // --- FIN CORRECCIÓN DEFINITIVA DE FECHA ---
 
   if (isNaN(date.getTime())) {
     console.warn("formatDate recibió una fecha inválida:", dateString);
@@ -47,27 +53,10 @@ export const formatDate = (dateString, options = {}) => {
  * @param {string} currency - El código de la moneda.
  * @returns {string} - El monto formateado como moneda.
  */
-// --- INICIO DE LA CORRECCIÓN ---
 export const formatCurrency = (amount, currency = 'ARS') => {
   if (amount === null || amount === undefined || isNaN(parseFloat(amount))) return 'N/A';
-  
-  // Limpia el código de moneda de cualquier comilla simple.
-  const cleanedCurrency = String(currency).replace(/'/g, '');
-  
-  try {
-    return new Intl.NumberFormat('es-AR', { 
-      style: 'currency', 
-      currency: cleanedCurrency, 
-      minimumFractionDigits: 2, 
-      maximumFractionDigits: 2 
-    }).format(amount);
-  } catch (e) {
-    // Si el código de moneda sigue siendo inválido, usa un formato por defecto sin símbolo.
-    console.error(`Error al formatear moneda con el código '${cleanedCurrency}':`, e);
-    return `$ ${parseFloat(amount).toLocaleString('es-AR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
-  }
+  return new Intl.NumberFormat('es-AR', { style: 'currency', currency: currency, minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(amount);
 };
-// --- FIN DE LA CORRECCIÓN ---
 
 /**
  * Formatea un número como un decimal para inputs, SIN el símbolo de la moneda.
