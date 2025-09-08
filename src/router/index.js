@@ -120,7 +120,6 @@ const routes = [
     meta: { requiresAuth: true, requiresAdmin: true },
     children: [
       { path: '', name: 'AdminDashboard', component: () => import('../views/admin/AdminDashboardView.vue'), meta: { title: 'Admin: Dashboard' } },
-      // AÑADIDO: Nueva ruta para Pagos Directos
       { 
         path: 'pagos-directos', 
         name: 'AdminPagosDirectos', 
@@ -135,13 +134,23 @@ const routes = [
       { path: 'cajas-diarias', name: 'AdminGestionCajas', component: () => import('../views/admin/AdminGestionCajasView.vue'), meta: { title: 'Admin: Cajas' } },
       { path: 'solicitudes-caja', name: 'AdminGestionSolicitudes', component: () => import('../views/admin/AdminGestionSolicitudesView.vue'), meta: { title: 'Admin: Solicitudes' } },
       { path: 'tipos-gasto', name: 'AdminTiposGastoGlobales', component: () => import('../views/admin/AdminTiposGastoGlobalesView.vue'), meta: { title: 'Admin: Tipos de Gasto' } },
+      
+      // --- INICIO DE LA CORRECCIÓN ---
+      // La nueva ruta va aquí, dentro de los children de /admin
+      { 
+        path: 'permisos-tipos-gasto', 
+        name: 'AdminPermisosTiposGasto', 
+        component: () => import('../views/admin/AdminTiposGastoGlobalesView.vue'), // Apunta a la nueva vista
+        meta: { title: 'Admin: Permisos de Gastos' } 
+      },
+      // --- FIN DE LA CORRECCIÓN ---
+
       { path: 'formatos-gasto', name: 'AdminFormatosGasto', component: () => import('../views/admin/AdminGestionFormatos.vue'), meta: { title: 'Admin: Formatos' } },
       { path: 'formatos-gasto/:formatoId/campos', name: 'AdminCamposFormato', component: () => import('../views/admin/AdminCamposFormatoView.vue'), props: true, meta: { title: 'Admin: Campos' } },
       { path: 'formatos-gasto/:formatoId/asignar-usuarios', name: 'AdminAsignarUsuariosFormato', component: () => import('../views/admin/AdminAsignarUsuariosFormatoView.vue'), props: true, meta: { title: 'Admin: Asignar Formatos' } },
       { path: 'clientes', name: 'AdminClientes', component: () => import('../views/admin/AdminClientesView.vue'), meta: { title: 'Admin: Clientes' } },
       { path: 'transportes', name: 'AdminTransportes', component: () => import('../views/admin/AdminTransportesView.vue'), meta: { title: 'Admin: Transportes' } },
       
-      // --- SECCIÓN DE VEHÍCULOS ---
       { 
         path: 'vehiculos', 
         name: 'AdminVehiculos', 
@@ -155,8 +164,6 @@ const routes = [
         props: true,
         meta: { title: 'Admin: Detalle de Vehículo' }
       },
-
-      // --- RUTA AÑADIDA PARA PROVEEDORES ---
       { 
         path: 'proveedores', 
         name: 'AdminProveedores', 

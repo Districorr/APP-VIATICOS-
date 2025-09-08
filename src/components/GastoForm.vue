@@ -24,9 +24,7 @@ const errorMessage = ref('');
 const successMessage = ref('');
 const isEditMode = computed(() => !!props.gastoId);
 
-// --- INICIO CORRECCIÓN: AÑADIR FLAG DE CARGA ---
 const isInitialLoad = ref(true);
-// --- FIN CORRECCIÓN ---
 
 const loadingSelects = reactive({
   viajes: true,
@@ -101,10 +99,15 @@ async function cargarDatosCriticos() {
   try {
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) throw new Error("Usuario no autenticado.");
+
+    // --- INICIO DE LA MODIFICACIÓN ---
+    // Cambiamos la consulta directa por la llamada a la RPC de permisos
     const [camposResult, tiposResult] = await Promise.all([
       supabase.from('campos_formato_config').select('*').eq('formato_id', props.formatoId).order('orden_visualizacion'),
-      supabase.from('tipos_gasto_config').select('id, nombre_tipo_gasto, icono_svg, color_accent, es_tipo_transporte').eq('activo', true)
+      supabase.rpc('get_tipos_gasto_permitidos') // <-- AQUÍ ESTÁ EL CAMBIO
     ]);
+    // --- FIN DE LA MODIFICACIÓN ---
+
     if (camposResult.error) throw camposResult.error;
     const todosLosCampos = camposResult.data || [];
     camposObligatorios.value = todosLosCampos.filter(c => c.es_obligatorio);
@@ -166,10 +169,8 @@ onMounted(async () => {
   loading.value = false;
   cargarDatosSecundarios();
   
-  // --- INICIO CORRECCIÓN: BAJAR LA BANDERA DESPUÉS DE LA CARGA ---
   await nextTick();
   isInitialLoad.value = false;
-  // --- FIN CORRECCIÓN ---
 });
 
 function inicializarFormState() {
@@ -253,9 +254,8 @@ watch(() => [formState.numero_factura, formState.proveedor_id], ([numFactura, pr
   }, 800);
 });
 
-// --- INICIO REFACTORIZACIÓN WATCHERS ---
 watch(() => formState.provincia_origen_id, async (provinciaId) => {
-  if (isInitialLoad.value) return; // No hacer nada durante la carga inicial
+  if (isInitialLoad.value) return;
   formState.localidad_origen_id = null;
   opcionesSelect.value.localidadesOrigen = [];
   
@@ -269,7 +269,7 @@ watch(() => formState.provincia_origen_id, async (provinciaId) => {
   loadingSelects.localidadesOrigen = false;
 });
 watch(() => formState.provincia_destino_id, async (provinciaId) => {
-  if (isInitialLoad.value) return; // No hacer nada durante la carga inicial
+  if (isInitialLoad.value) return;
   formState.localidad_destino_id = null;
   opcionesSelect.value.localidadesDestino = [];
   
@@ -282,7 +282,6 @@ watch(() => formState.provincia_destino_id, async (provinciaId) => {
   opcionesSelect.value.localidadesDestino = (data || []).map(l => ({ label: l.nombre, value: l.id }));
   loadingSelects.localidadesDestino = false;
 });
-// --- FIN REFACTORIZACIÓN WATCHERS ---
 
 const handleFacturaChange = (event) => {
   const file = event.target.files[0];
@@ -345,7 +344,8 @@ async function handleSubmit() {
       showTransporteFields.value ? resolverEntidadId(formState.localidad_destino_id, 'localidades', provinciaDestinoIdFinal) : Promise.resolve(null)
     ]);
     
-    const provinciaSeleccionada = formState.provincia_id ? opcionesSelect.value.provincias.find(p => p.value === formState.provincia_id) : null;
+    const provinciaIdFinalGasto = formState.provincia_id?.value || formState.provincia_id;
+    const provinciaSeleccionada = provinciaIdFinalGasto ? opcionesSelect.value.provincias.find(p => p.value === provinciaIdFinalGasto) : null;
     const nombreProvincia = provinciaSeleccionada ? provinciaSeleccionada.label : null;
     
     let finalFacturaUrl = formState.factura_url;
@@ -387,7 +387,7 @@ async function handleSubmit() {
       transporte_id: finalTransporteId,
       proveedor_id: finalProveedorId,
       
-      provincia_id: formState.provincia_id,
+      provincia_id: provinciaIdFinalGasto,
       provincia: nombreProvincia,
       
       provincia_origen_id: showTransporteFields.value ? provinciaOrigenIdFinal : null,
