@@ -637,155 +637,111 @@ const generateCanvaStylePDF = async (viajeId) => {
     doc.autoTable({ head, body, startY: currentY, theme: 'striped', headStyles: { fillColor: [13, 47, 91] }, styles: { cellPadding: 4 }, columnStyles: { 1: { halign: 'right' } } });
     doc.save(`Reporte_Gastos_${new Date().toISOString().split('T')[0]}.pdf`);
   };
-// --- FUNCIÓN DE GENERACIÓN DE PDF DEL REPORTE DE MOVIMIENTOS DE CAJA ---
   const generateCajaReportePDF = async (cajaId, fechaDesde, fechaHasta) => {
     try {
-      // 1. Llamar a la RPC actualizada que ahora incluye el resumen por provincia
-      const { data: reporte, error } = await supabase.rpc('get_reporte_caja_completo', {
-        p_caja_id: cajaId,
-        p_fecha_desde: fechaDesde,
-        p_fecha_hasta: fechaHasta
-      });
+      // 1. Obtener detalles de la caja y su responsable
+      const { data: cajaData, error: cajaError } = await supabase
+        .from('cajas_chicas')
+        .select('nombre, responsable:responsable_id(nombre_completo)')
+        .eq('id', cajaId)
+        .single();
+      if (cajaError) throw new Error(`No se encontró la caja: ${cajaError.message}`);
 
-      if (error) throw new Error(`Error al obtener datos del reporte: ${error.message}`);
-      if (!reporte || !reporte.movimientos || reporte.movimientos.length === 0) {
-        throw new Error("No se encontraron movimientos en el período seleccionado para generar el reporte.");
+      // 2. Obtener los movimientos del período
+      const { data: movimientos, error: movError } = await supabase
+        .from('movimientos_caja')
+        .select('*, gasto:gasto_id(descripcion_general)')
+        .eq('caja_id', cajaId)
+        .gte('created_at', fechaDesde)
+        .lte('created_at', new Date(fechaHasta).toISOString().replace('T00:00:00.000Z', 'T23:59:59.999Z')) // Asegurar que incluya todo el día
+        .order('created_at', { ascending: true });
+      if (movError) throw new Error(`Error al obtener movimientos: ${movError.message}`);
+
+      if (!movimientos || movimientos.length === 0) {
+        throw new Error("No se encontraron movimientos en el período seleccionado.");
       }
 
-      // 2. Construir el PDF
-      const doc = new jsPDF({ orientation: 'p', unit: 'mm', format: 'a4' });
-      const pageWidth = doc.internal.pageSize.getWidth();
-      const pageHeight = doc.internal.pageSize.getHeight();
-      const margin = 10;
-      let lastY = margin;
-      const primaryColor = [40, 56, 104];
-
-      const addPageHeaderAndFooter = (doc, pageNum, totalPages) => {
-        doc.setFontSize(7).setTextColor(150, 150, 150);
-        doc.text(`CUIT: 30-71598290-7 | 9 DE JULIO 1251 | Reporte generado automáticamente desde InfoGastos`, margin, pageHeight - 7);
-        doc.text(`Página ${pageNum} de ${totalPages}`, pageWidth - margin, pageHeight - 7, { align: 'right' });
-      };
-
-      // --- ENCABEZADO Y METADATA ---
-      if (logoImg) doc.addImage(logoImg, 'PNG', margin, margin - 6, 16, 16);
-      doc.setFontSize(20).setFont(undefined, 'bold').setTextColor(...primaryColor);
-      doc.text("REPORTE DE MOVIMIENTOS DE CAJA", pageWidth / 2, margin + 2, { align: 'center' });
-      doc.setFontSize(8).setFont(undefined, 'normal').setTextColor(100, 100, 100);
-      doc.text("SISTEMA INFOGASTOS – DISTRICORR", pageWidth / 2, margin + 7, { align: 'center' });
+      // 3. Calcular totales y saldos
+      const saldoInicial = movimientos[0].saldo_anterior;
+      const saldoFinal = movimientos[movimientos.length - 1].saldo_posterior;
+      let totalIngresos = 0;
+      let totalEgresos = 0;
       
-      const metadataBody = [
-        ['Caja:', reporte.metadata.caja_nombre, 'Fecha Emisión:', formatDate(new Date())],
-        ['Responsable:', reporte.metadata.responsable, '', ''],
-        ['Período:', `${reporte.metadata.periodo_desde} al ${reporte.metadata.periodo_hasta}`, '', ''],
-      ];
-      
-      doc.autoTable({
-        startY: margin + 12,
-        body: metadataBody,
-        theme: 'plain',
-        styles: { fontSize: 8, cellPadding: {top: 0.2, bottom: 0.2} },
-        columnStyles: { 0: { fontStyle: 'bold' }, 2: { fontStyle: 'bold' } }
-      });
-      lastY = doc.lastAutoTable.finalY + 4;
-
-      // --- ENCABEZADO TIPO "PANEL DE CONTROL" ---
-      const summaryData = [
-        [
-          { content: `Saldo Inicial\n${formatCurrency(reporte.resumen_financiero.saldo_inicial)}`, styles: { halign: 'center', fontStyle: 'bold', fontSize: 9 } },
-          { content: `Total Ingresos\n${formatCurrency(reporte.resumen_financiero.total_ingresos)}`, styles: { halign: 'center', fontStyle: 'bold', fontSize: 9, textColor: [0, 100, 0] } },
-          { content: `Total Egresos\n${formatCurrency(reporte.resumen_financiero.total_egresos)}`, styles: { halign: 'center', fontStyle: 'bold', fontSize: 9, textColor: [192, 0, 0] } },
-          { content: `Saldo Final\n${formatCurrency(reporte.resumen_financiero.saldo_final)}`, styles: { halign: 'center', fontStyle: 'bold', fontSize: 10, fillColor: [224, 224, 224] } },
-        ]
-      ];
-      doc.autoTable({
-        startY: lastY,
-        body: summaryData,
-        theme: 'grid',
-        styles: { cellPadding: 3 }
-      });
-      lastY = doc.lastAutoTable.finalY + 8;
-
-      // --- TABLA DE MOVIMIENTOS ---
-      doc.setFillColor(...primaryColor);
-      doc.rect(margin, lastY, pageWidth - margin * 2, 7, 'F');
-      doc.setFontSize(9).setFont(undefined, 'bold').setTextColor(255, 255, 255);
-      doc.text("Detalle de Movimientos", margin + 2, lastY + 5);
-      lastY += 7;
-
-      const tableBody = reporte.movimientos.map(mov => {
-        let descripcion = mov.descripcion || '-';
-        if (mov.localidad) {
-          descripcion += ` (${mov.localidad})`;
+      const tableBody = movimientos.map(mov => {
+        let ingreso = '';
+        let egreso = '';
+        if (mov.tipo_movimiento === 'gasto') {
+            totalEgresos += mov.monto;
+            egreso = formatCurrency(mov.monto);
+        } else { // 'reposicion' o 'ajuste_manual'
+            totalIngresos += mov.monto;
+            ingreso = formatCurrency(mov.monto);
         }
+        
+        let descripcion = mov.descripcion || mov.gasto?.descripcion_general || `Movimiento de ${mov.tipo_movimiento}`;
+
         return [
           formatDate(mov.created_at),
           mov.tipo_movimiento.charAt(0).toUpperCase() + mov.tipo_movimiento.slice(1),
-          mov.categoria || '-',
           descripcion,
-          { content: mov.tipo_movimiento !== 'gasto' ? formatCurrency(mov.monto) : '', styles: { textColor: [0, 100, 0] } },
-          { content: mov.tipo_movimiento === 'gasto' ? formatCurrency(mov.monto) : '', styles: { textColor: [192, 0, 0] } },
-          { content: formatCurrency(mov.saldo_posterior), styles: { fontStyle: 'bold' } }
+          ingreso,
+          egreso,
+          formatCurrency(mov.saldo_posterior)
         ];
       });
 
+      // 4. Construir el PDF
+      const doc = new jsPDF({ orientation: 'p', unit: 'mm', format: 'a4' });
+      const pageWidth = doc.internal.pageSize.getWidth();
+      const margin = 10;
+      let lastY = margin;
+
+      doc.setFontSize(16).setFont(undefined, 'bold').text("Reporte de Movimientos de Caja", pageWidth / 2, lastY, { align: 'center' });
+      lastY += 10;
+      doc.setFontSize(10).setFont(undefined, 'normal');
+      doc.text(`Caja: ${cajaData.nombre}`, margin, lastY);
+      doc.text(`Responsable: ${cajaData.responsable.nombre_completo}`, pageWidth - margin, lastY, { align: 'right' });
+      lastY += 5;
+      doc.text(`Período: ${formatDate(fechaDesde)} al ${formatDate(fechaHasta)}`, margin, lastY);
+      lastY += 10;
+
+      // Resumen financiero
+      const resumenData = [
+          ['Saldo Inicial:', formatCurrency(saldoInicial)],
+          ['Total Ingresos:', formatCurrency(totalIngresos)],
+          ['Total Egresos:', formatCurrency(totalEgresos)],
+          ['Saldo Final:', formatCurrency(saldoFinal)],
+      ];
       doc.autoTable({
         startY: lastY,
-        head: [['Fecha', 'Tipo', 'Categoría', 'Descripción', 'Ingreso', 'Egreso', 'Saldo']],
+        body: resumenData,
+        theme: 'plain',
+        styles: { fontSize: 9, cellPadding: {top: 0.5, bottom: 0.5} },
+        columnStyles: { 0: { fontStyle: 'bold' }, 1: { halign: 'right' } }
+      });
+      lastY = doc.lastAutoTable.finalY + 10;
+
+      // Tabla de movimientos
+      doc.autoTable({
+        startY: lastY,
+        head: [['Fecha', 'Tipo', 'Descripción', 'Ingreso', 'Egreso', 'Saldo']],
         body: tableBody,
-        theme: 'grid',
-        headStyles: { fillColor: [224, 224, 224], textColor: [40, 40, 40], fontStyle: 'bold', fontSize: 8, cellPadding: 1.5 },
-        bodyStyles: { textColor: [0, 0, 0], fontSize: 8, cellPadding: 1.5, valign: 'middle' },
+        theme: 'striped',
+        headStyles: { fillColor: [40, 56, 104] },
+        styles: { fontSize: 8 },
         columnStyles: {
-          3: { cellWidth: 'auto' },
-          4: { halign: 'right', fontStyle: 'bold' },
-          5: { halign: 'right', fontStyle: 'bold' },
-          6: { halign: 'right' },
+            2: { cellWidth: 'auto' },
+            3: { halign: 'right', fontStyle: 'bold', textColor: [0, 100, 0] },
+            4: { halign: 'right', fontStyle: 'bold', textColor: [192, 0, 0] },
+            5: { halign: 'right', fontStyle: 'bold' },
         }
       });
-      lastY = doc.lastAutoTable.finalY;
 
-      // --- RESÚMENES ADICIONALES ---
-      const summaryTableConfig = { startY: lastY + 8, theme: 'grid', headStyles: { fillColor: primaryColor, fontSize: 8 }, styles: { fontSize: 7, cellPadding: 1.2 } };
-      const columnWidth = (pageWidth - margin * 2) / 2 - 2;
-      let finalY = lastY;
-
-      if (reporte.resumen_por_categoria?.length > 0) {
-        const resumenCategoriaBody = reporte.resumen_por_categoria.map(item => [item.categoria, formatCurrency(item.monto), `${item.porcentaje || 0}%`]);
-        doc.autoTable({ ...summaryTableConfig, tableWidth: columnWidth, head: [['Gastos por Categoría', 'Monto', '%']], body: resumenCategoriaBody, margin: { left: margin }, columnStyles: { 1: { halign: 'right' }, 2: { halign: 'right' } } });
-        finalY = Math.max(finalY, doc.lastAutoTable.finalY);
-      }
-
-      // --- INICIO DE LA CORRECCIÓN ---
-      if (reporte.resumen_por_provincia?.length > 0) {
-        const resumenProvinciaBody = reporte.resumen_por_provincia.map(item => [item.provincia, formatCurrency(item.monto), `${item.porcentaje || 0}%`]);
-        // Usamos la misma posición vertical (startY) pero un margen izquierdo diferente para colocarla al lado
-        doc.autoTable({ ...summaryTableConfig, startY: lastY + 8, tableWidth: columnWidth, head: [['Gastos por Provincia', 'Monto', '%']], body: resumenProvinciaBody, margin: { left: margin + columnWidth + 4 }, columnStyles: { 1: { halign: 'right' }, 2: { halign: 'right' } } });
-        finalY = Math.max(finalY, doc.lastAutoTable.finalY);
-      }
-      // --- FIN DE LA CORRECCIÓN ---
-      lastY = finalY;
-
-      // --- FIRMAS ---
-      lastY += 15;
-      if (lastY > pageHeight - 25) { doc.addPage(); lastY = margin + 10; }
-      doc.setFontSize(8).setTextColor(0,0,0);
-      doc.text("Firma Responsable", margin + 35, lastY, {align: 'center'});
-      doc.line(margin, lastY - 2, margin + 70, lastY - 2);
-      doc.text("Firma Gerencia", pageWidth - margin - 35, lastY, {align: 'center'});
-      doc.line(pageWidth - margin - 70, lastY - 2, pageWidth - margin, lastY - 2);
-      
-      // --- PAGINACIÓN FINAL ---
-      const totalPages = doc.internal.getNumberOfPages();
-      for (let i = 1; i <= totalPages; i++) {
-        doc.setPage(i);
-        addPageHeaderAndFooter(doc, i, totalPages);
-      }
-
-      doc.save(`Reporte_Caja_${reporte.metadata.caja_nombre.replace(/\s/g, '_')}_${fechaDesde}_${fechaHasta}.pdf`);
+      doc.save(`Reporte_Caja_${cajaData.nombre.replace(/\s/g, '_')}_${fechaDesde}_${fechaHasta}.pdf`);
 
     } catch (e) {
       console.error("Error en generateCajaReportePDF:", e);
-      throw e;
+      throw e; // Re-lanzar para que el componente lo atrape
     }
   };
 

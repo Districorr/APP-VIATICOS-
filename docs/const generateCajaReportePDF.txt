@@ -1,0 +1,107 @@
+  const generateCajaReportePDF = async (cajaId, fechaDesde, fechaHasta) = {
+    try {
+       1. Obtener detalles de la caja y su responsable
+      const { data cajaData, error cajaError } = await supabase
+        .from('cajas_chicas')
+        .select('nombre, responsableresponsable_id(nombre_completo)')
+        .eq('id', cajaId)
+        .single();
+      if (cajaError) throw new Error(`No se encontró la caja ${cajaError.message}`);
+
+       2. Obtener los movimientos del período
+      const { data movimientos, error movError } = await supabase
+        .from('movimientos_caja')
+        .select(', gastogasto_id(descripcion_general)')
+        .eq('caja_id', cajaId)
+        .gte('created_at', fechaDesde)
+        .lte('created_at', new Date(fechaHasta).toISOString().replace('T000000.000Z', 'T235959.999Z'))  Asegurar que incluya todo el día
+        .order('created_at', { ascending true });
+      if (movError) throw new Error(`Error al obtener movimientos ${movError.message}`);
+
+      if (!movimientos  movimientos.length === 0) {
+        throw new Error(No se encontraron movimientos en el período seleccionado.);
+      }
+
+       3. Calcular totales y saldos
+      const saldoInicial = movimientos[0].saldo_anterior;
+      const saldoFinal = movimientos[movimientos.length - 1].saldo_posterior;
+      let totalIngresos = 0;
+      let totalEgresos = 0;
+      
+      const tableBody = movimientos.map(mov = {
+        let ingreso = '';
+        let egreso = '';
+        if (mov.tipo_movimiento === 'gasto') {
+            totalEgresos += mov.monto;
+            egreso = formatCurrency(mov.monto);
+        } else {  'reposicion' o 'ajuste_manual'
+            totalIngresos += mov.monto;
+            ingreso = formatCurrency(mov.monto);
+        }
+        
+        let descripcion = mov.descripcion  mov.gasto.descripcion_general  `Movimiento de ${mov.tipo_movimiento}`;
+
+        return [
+          formatDate(mov.created_at),
+          mov.tipo_movimiento.charAt(0).toUpperCase() + mov.tipo_movimiento.slice(1),
+          descripcion,
+          ingreso,
+          egreso,
+          formatCurrency(mov.saldo_posterior)
+        ];
+      });
+
+       4. Construir el PDF
+      const doc = new jsPDF({ orientation 'p', unit 'mm', format 'a4' });
+      const pageWidth = doc.internal.pageSize.getWidth();
+      const margin = 10;
+      let lastY = margin;
+
+      doc.setFontSize(16).setFont(undefined, 'bold').text(Reporte de Movimientos de Caja, pageWidth  2, lastY, { align 'center' });
+      lastY += 10;
+      doc.setFontSize(10).setFont(undefined, 'normal');
+      doc.text(`Caja ${cajaData.nombre}`, margin, lastY);
+      doc.text(`Responsable ${cajaData.responsable.nombre_completo}`, pageWidth - margin, lastY, { align 'right' });
+      lastY += 5;
+      doc.text(`Período ${formatDate(fechaDesde)} al ${formatDate(fechaHasta)}`, margin, lastY);
+      lastY += 10;
+
+       Resumen financiero
+      const resumenData = [
+          ['Saldo Inicial', formatCurrency(saldoInicial)],
+          ['Total Ingresos', formatCurrency(totalIngresos)],
+          ['Total Egresos', formatCurrency(totalEgresos)],
+          ['Saldo Final', formatCurrency(saldoFinal)],
+      ];
+      doc.autoTable({
+        startY lastY,
+        body resumenData,
+        theme 'plain',
+        styles { fontSize 9, cellPadding {top 0.5, bottom 0.5} },
+        columnStyles { 0 { fontStyle 'bold' }, 1 { halign 'right' } }
+      });
+      lastY = doc.lastAutoTable.finalY + 10;
+
+       Tabla de movimientos
+      doc.autoTable({
+        startY lastY,
+        head [['Fecha', 'Tipo', 'Descripción', 'Ingreso', 'Egreso', 'Saldo']],
+        body tableBody,
+        theme 'striped',
+        headStyles { fillColor [40, 56, 104] },
+        styles { fontSize 8 },
+        columnStyles {
+            2 { cellWidth 'auto' },
+            3 { halign 'right', fontStyle 'bold', textColor [0, 100, 0] },
+            4 { halign 'right', fontStyle 'bold', textColor [192, 0, 0] },
+            5 { halign 'right', fontStyle 'bold' },
+        }
+      });
+
+      doc.save(`Reporte_Caja_${cajaData.nombre.replace(sg, '_')}_${fechaDesde}_${fechaHasta}.pdf`);
+
+    } catch (e) {
+      console.error(Error en generateCajaReportePDF, e);
+      throw e;  Re-lanzar para que el componente lo atrape
+    }
+  }
