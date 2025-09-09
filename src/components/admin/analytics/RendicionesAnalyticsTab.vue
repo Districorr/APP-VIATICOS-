@@ -1,191 +1,170 @@
 <script setup>
-import { ref, onMounted, computed, watch } from 'vue';
+import { ref, onMounted, computed } from 'vue';
 import { supabase } from '../../../supabaseClient';
-import { formatCurrency } from '../../../utils/formatters.js';
-import { Bar, Bubble } from 'vue-chartjs';
-import { Chart as ChartJS, Title, Tooltip, Legend, BarElement, CategoryScale, LinearScale, PointElement, LineElement } from 'chart.js';
-
-import StatCard from '../StatCard.vue';
+import { formatCurrency, formatDate } from '../../../utils/formatters.js';
 import vSelect from 'vue-select';
 import 'vue-select/dist/vue-select.css';
-import { ArrowDownTrayIcon } from '@heroicons/vue/24/outline';
+import { ArrowDownTrayIcon, MagnifyingGlassIcon } from '@heroicons/vue/24/outline';
 import { useExcelExporter } from '../../../composables/useExcelExporter';
+import { useRouter } from 'vue-router';
 
-// Registro de Chart.js
-ChartJS.register(Title, Tooltip, Legend, BarElement, CategoryScale, LinearScale, PointElement, LineElement);
-
-// --- PROPS Y EMITS ---
 const props = defineProps({
-  perfilesOptions: { type: Array, required: true },
+  tipoGastoOptions: { type: Array, required: true },
   loadingOptions: { type: Boolean, required: true },
 });
 
 const emit = defineEmits(['show-notification']);
 
 const { exportToExcel } = useExcelExporter();
+const router = useRouter();
 
-// --- ESTADO LOCAL DE LA PESTAÑA ---
-const dashboardData = ref(null);
-const loading = ref(true);
+const loading = ref(false);
 const error = ref('');
 const filters = ref({
-  fechaDesde: new Date(new Date().setFullYear(new Date().getFullYear() - 1)).toISOString().split('T')[0],
+  clienteId: null,
+  transporteId: null,
+  tipoGastoId: null,
+  provinciaId: null,
+  paciente: '',
+  fechaDesde: new Date(new Date().setDate(new Date().getDate() - 30)).toISOString().split('T')[0],
   fechaHasta: new Date().toISOString().split('T')[0],
-  selectedResponsable: null,
 });
-
-const insightsData = ref(null);
-const loadingInsights = ref(false);
-
-// --- LÓGICA DE CARGA DE DATOS ---
-async function fetchData() {
-  loading.value = true;
-  error.value = '';
-  try {
-    const params = {
-      p_start_date: filters.value.fechaDesde,
-      p_end_date: filters.value.fechaHasta,
-      p_user_id: filters.value.selectedResponsable?.code || null 
-    };
-    const { data, error: rpcError } = await supabase.rpc('get_dashboard_analisis_rendiciones', params);
-    if (rpcError) throw rpcError;
-    dashboardData.value = data;
-  } catch(e) {
-    console.error("Error al cargar análisis de rendiciones:", e);
-    error.value = `Error al cargar análisis de rendiciones: ${e.message}`;
-  } finally {
-    loading.value = false;
-  }
-}
-
-async function fetchInsights(responsable) {
-  if (!responsable) {
-    insightsData.value = null;
-    return;
-  }
-  loadingInsights.value = true;
-  try {
-    const { data, error: rpcError } = await supabase.rpc('get_responsable_rendicion_insights', {
-      p_user_id: responsable.code,
-      p_start_date: filters.value.fechaDesde,
-      p_end_date: filters.value.fechaHasta
-    });
-    if (rpcError) throw rpcError;
-    insightsData.value = data;
-  } catch (e) {
-    console.error("Error al cargar insights del responsable:", e);
-    emit('show-notification', 'Error', 'No se pudieron cargar los insights de comportamiento.', 'error');
-    insightsData.value = null;
-  } finally {
-    loadingInsights.value = false;
-  }
-}
-
-// --- COMPUTED PROPERTIES ---
-const chartColors = ['#3b82f6', '#10b981', '#ef4444', '#f97316', '#8b5cf6', '#ec4899', '#64748b'];
-const kpis = computed(() => dashboardData.value?.kpis);
-const eficienciaData = computed(() => dashboardData.value?.tabla_eficiencia || []);
-
-const efficiencyBarChartData = computed(() => {
-  if (!eficienciaData.value.length) return null;
-  const labels = eficienciaData.value.map(item => item.responsable_nombre);
-  const costoPromedioData = eficienciaData.value.map(item => item.costo_promedio);
-  const promedioGeneral = dashboardData.value?.costo_promedio_general || 0;
-
-  return {
-    labels,
-    datasets: [
-      {
-        label: 'Costo Promedio por Rendición',
-        data: costoPromedioData,
-        backgroundColor: '#3b82f6',
-        borderRadius: 4,
-      },
-      {
-        label: 'Promedio General',
-        data: Array(labels.length).fill(promedioGeneral),
-        type: 'line',
-        borderColor: '#ef4444',
-        borderWidth: 2,
-        pointRadius: 0,
-        borderDash: [5, 5],
-      }
-    ]
-  };
+const gastosFiltrados = ref([]);
+const options = ref({
+  clientes: [],
+  transportes: [],
+  provincias: [],
 });
+const loadingExtraOptions = ref(true);
 
-const efficiencyBubbleChartData = computed(() => {
-  if (!eficienciaData.value.length) return null;
-  const maxTotal = Math.max(...eficienciaData.value.map(item => item.costo_total), 0);
-  
-  return {
-    datasets: eficienciaData.value.map((item, index) => ({
-      label: item.responsable_nombre,
-      data: [{
-        x: item.duracion_promedio,
-        y: item.costo_promedio,
-        r: 5 + (item.costo_total / maxTotal) * 25
-      }],
-      backgroundColor: `${chartColors[index % chartColors.length]}B3`,
-    }))
-  };
-});
+// --- INICIO DE LA CORRECCIÓN: AÑADIR ESTADO DE PAGINACIÓN ---
+const resultsPerPage = ref(20);
+const currentPage = ref(1);
+const totalResults = ref(0);
 
-const efficiencyBubbleChartOptions = computed(() => ({
-  responsive: true, maintainAspectRatio: false,
-  plugins: {
-    legend: { display: false },
-    tooltip: {
-      callbacks: {
-        label: function(context) {
-          const item = eficienciaData.value[context.datasetIndex];
-          return [
-            `Responsable: ${item.responsable_nombre}`,
-            `Costo Promedio: ${formatCurrency(item.costo_promedio)}`,
-            `Duración Promedio: ${item.duracion_promedio} días`,
-            `Total Gastado: ${formatCurrency(item.costo_total)}`
-          ];
-        }
-      }
+const pageCount = computed(() => Math.ceil(totalResults.value / resultsPerPage.value));
+const rangeFrom = computed(() => (currentPage.value - 1) * resultsPerPage.value);
+const rangeTo = computed(() => rangeFrom.value + resultsPerPage.value - 1);
+// --- FIN DE LA CORRECCIÓN ---
+
+async function applyFilters() {
+    loading.value = true;
+    error.value = '';
+    try {
+        // La RPC no soporta paginación, así que la haremos en el cliente por ahora.
+        // Para una solución a gran escala, la RPC debería aceptar `limit` y `offset`.
+        const { data, error: rpcError } = await supabase.rpc('filtrar_gastos_admin', {
+            p_cliente_id: filters.value.clienteId,
+            p_transporte_id: filters.value.transporteId,
+            p_tipo_gasto_id: filters.value.tipoGastoId,
+            p_provincia_id: filters.value.provinciaId,
+            p_paciente: filters.value.paciente || null,
+            p_fecha_desde: filters.value.fechaDesde || null,
+            p_fecha_hasta: filters.value.fechaHasta || null
+        });
+
+        if (rpcError) throw rpcError;
+        
+        // Guardamos todos los resultados y luego paginamos
+        totalResults.value = data?.length || 0;
+        const start = rangeFrom.value;
+        const end = start + resultsPerPage.value;
+        gastosFiltrados.value = (data || []).slice(start, end);
+
+    } catch (e) {
+        error.value = `Error al buscar datos: ${e.message}`;
+        gastosFiltrados.value = [];
+        totalResults.value = 0;
+    } finally {
+        loading.value = false;
     }
-  },
-  scales: {
-    x: { title: { display: true, text: 'Duración Promedio (días)' } },
-    y: { title: { display: true, text: 'Costo Promedio por Rendición' }, ticks: { callback: (val) => formatCurrency(val) } }
-  }
-}));
+}
 
-// --- LÓGICA DE EXPORTACIÓN ---
-const handleExport = () => {
-  emit('show-notification', 'Exportando', 'Preparando tu reporte...', 'info');
+async function fetchExtraOptions() {
+    loadingExtraOptions.value = true;
+    try {
+      const [clientesRes, transportesRes, provinciasRes] = await Promise.all([
+          supabase.from('clientes').select('id, nombre_cliente').order('nombre_cliente'),
+          supabase.from('transportes').select('id, nombre').order('nombre'),
+          supabase.from('provincias').select('id, nombre').order('nombre')
+      ]);
+      if (clientesRes.error) throw clientesRes.error;
+      options.value.clientes = clientesRes.data.map(c => ({ label: c.nombre_cliente, code: c.id }));
+      if (transportesRes.error) throw transportesRes.error;
+      options.value.transportes = transportesRes.data.map(t => ({ label: t.nombre, code: t.id }));
+      if (provinciasRes.error) throw provinciasRes.error;
+      options.value.provincias = provinciasRes.data.map(p => ({ label: p.nombre, code: p.id }));
+    } catch(e) {
+      console.error("Error cargando opciones de exploración:", e);
+      error.value = "No se pudieron cargar las opciones de filtro.";
+    } finally {
+      loadingExtraOptions.value = false;
+    }
+}
+
+// --- INICIO DE LA CORRECCIÓN: AÑADIR FUNCIONES DE PAGINACIÓN ---
+function goToPage(page) {
+  if (page > 0 && page <= pageCount.value) {
+    currentPage.value = page;
+    applyFilters(); // Recargamos los datos para la nueva página
+  }
+}
+
+function changeResultsPerPage() {
+  currentPage.value = 1;
+  applyFilters();
+}
+// --- FIN DE LA CORRECCIÓN ---
+
+function goToRendicion(viajeId) {
+  if (!viajeId) return;
+  // router.push({ name: 'AdminGastosDeRendicion', params: { id: viajeId } });
+}
+
+const handleExport = async () => {
+  emit('show-notification', 'Exportando', 'Preparando tu reporte completo...', 'info');
   try {
-    const dataToExport = eficienciaData.value;
-    const sheets = [{ name: 'Eficiencia por Responsable', data: dataToExport }];
-    exportToExcel(sheets, 'eficiencia_por_responsable');
-    setTimeout(() => { emit('show-notification', 'Éxito', 'Reporte de eficiencia generado.', 'success'); }, 500);
+    // Para exportar, traemos TODOS los resultados, sin paginación
+    const { data: allData, error: exportError } = await supabase.rpc('filtrar_gastos_admin', {
+        p_cliente_id: filters.value.clienteId,
+        p_transporte_id: filters.value.transporteId,
+        p_tipo_gasto_id: filters.value.tipoGastoId,
+        p_provincia_id: filters.value.provinciaId,
+        p_paciente: filters.value.paciente || null,
+        p_fecha_desde: filters.value.fechaDesde || null,
+        p_fecha_hasta: filters.value.fechaHasta || null
+    });
+    if (exportError) throw exportError;
+
+    if (!allData || allData.length === 0) {
+      emit('show-notification', 'Aviso', 'No hay resultados para exportar.', 'warning');
+      return;
+    }
+
+    const dataToExport = allData.map(item => ({
+      'Fecha': formatDate(item.fecha_gasto),
+      'Responsable': item.responsable_gasto_nombre,
+      'Tipo Gasto': item.nombre_tipo_gasto,
+      'Descripción': item.gasto_descripcion,
+      'Rendición': item.nombre_viaje,
+      'Monto': item.gasto_monto_total,
+      'Cod. Rendición': item.viaje_codigo_rendicion,
+      'Proveedor': item.nombre_proveedor,
+      'Cliente': item.nombre_cliente,
+    }));
+
+    const sheets = [{ name: 'ExploracionAvanzada', data: dataToExport }];
+    exportToExcel(sheets, 'exploracion_avanzada');
+    setTimeout(() => { emit('show-notification', 'Éxito', 'Reporte generado.', 'success'); }, 500);
   } catch (e) {
-    emit('show-notification', 'Error', 'No se pudo generar el reporte.', 'error');
+    emit('show-notification', 'Error', `No se pudo generar el reporte: ${e.message}`, 'error');
     console.error("Error al exportar:", e);
   }
 };
 
-// --- WATCHERS Y CICLO DE VIDA ---
-onMounted(fetchData);
-
-// CORRECCIÓN DEFINITIVA: Se usan watchers específicos para cada filtro.
-// Watcher para las fechas
-watch(() => [filters.value.fechaDesde, filters.value.fechaHasta], () => {
-  fetchData();
-  // Si hay un responsable seleccionado, también actualizamos sus insights con las nuevas fechas
-  if (filters.value.selectedResponsable) {
-    fetchInsights(filters.value.selectedResponsable);
-  }
-});
-
-// Watcher para el responsable
-watch(() => filters.value.selectedResponsable, (newResponsable) => {
-  fetchData(); // Recargamos los datos principales (KPIs, gráficos, tabla)
-  fetchInsights(newResponsable); // Recargamos los insights para el nuevo responsable
+onMounted(() => {
+  fetchExtraOptions();
+  applyFilters();
 });
 </script>
 <template>
