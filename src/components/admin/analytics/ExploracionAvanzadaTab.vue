@@ -8,7 +8,6 @@ import { ArrowDownTrayIcon, MagnifyingGlassIcon } from '@heroicons/vue/24/outlin
 import { useExcelExporter } from '../../../composables/useExcelExporter';
 import { useRouter } from 'vue-router';
 
-// --- PROPS Y EMITS ---
 const props = defineProps({
   tipoGastoOptions: { type: Array, required: true },
   loadingOptions: { type: Boolean, required: true },
@@ -19,14 +18,13 @@ const emit = defineEmits(['show-notification']);
 const { exportToExcel } = useExcelExporter();
 const router = useRouter();
 
-// --- ESTADO LOCAL DE LA PESTAÑA ---
 const loading = ref(false);
 const error = ref('');
 const filters = ref({
   clienteId: null,
   transporteId: null,
   tipoGastoId: null,
-  provincia: null,
+  provinciaId: null, // Cambiado a provinciaId para coincidir con la RPC
   paciente: '',
   fechaDesde: new Date(new Date().setDate(new Date().getDate() - 30)).toISOString().split('T')[0],
   fechaHasta: new Date().toISOString().split('T')[0],
@@ -39,42 +37,28 @@ const options = ref({
 });
 const loadingExtraOptions = ref(true);
 
-// --- ESTADO DE PAGINACIÓN ---
-const resultsPerPage = ref(20);
-const currentPage = ref(1);
-const totalResults = ref(0);
-
-const pageCount = computed(() => Math.ceil(totalResults.value / resultsPerPage.value));
-const rangeFrom = computed(() => (currentPage.value - 1) * resultsPerPage.value);
-const rangeTo = computed(() => rangeFrom.value + resultsPerPage.value - 1);
-
-// --- LÓGICA DE CARGA DE DATOS (MODIFICADA) ---
+// --- LÓGICA DE CARGA DE DATOS (CORREGIDA) ---
 async function applyFilters() {
     loading.value = true;
     error.value = '';
     try {
-        // CAMBIO: Se consulta la nueva vista 'vista_gastos_detallados'
-        let query = supabase
-            .from('vista_gastos_detallados')
-            .select('*', { count: 'exact' })
-            .order('fecha_gasto', { ascending: false });
+        const { data, error: rpcError } = await supabase.rpc('filtrar_gastos_admin', {
+            p_cliente_id: filters.value.clienteId,
+            p_transporte_id: filters.value.transporteId,
+            p_tipo_gasto_id: filters.value.tipoGastoId,
+            p_provincia_id: filters.value.provinciaId,
+            p_paciente: filters.value.paciente || null,
+            p_fecha_desde: filters.value.fechaDesde || null,
+            p_fecha_hasta: filters.value.fechaHasta || null
+        });
 
-        // Aplicar filtros (los nombres de columna pueden cambiar según la vista)
-        if (filters.value.clienteId) query = query.eq('cliente_id', filters.value.clienteId);
-        if (filters.value.transporteId) query = query.eq('transporte_id', filters.value.transporteId);
-        // if (filters.value.tipoGastoId) query = query.eq('tipo_gasto_id', filters.value.tipoGastoId); // Necesitaría tipo_gasto_id en la vista
-        if (filters.value.provincia) query = query.eq('provincia_gasto->>nombre', filters.value.provincia);
-        if (filters.value.paciente) query = query.ilike('paciente_referido', `%${filters.value.paciente}%`);
-        if (filters.value.fechaDesde) query = query.gte('fecha_gasto', filters.value.fechaDesde);
-        if (filters.value.fechaHasta) query = query.lte('fecha_gasto', filters.value.fechaHasta);
-
-        query = query.range(rangeFrom.value, rangeTo.value);
-
-        const { data, error: queryError, count } = await query;
-        if (queryError) throw queryError;
+        if (rpcError) throw rpcError;
         
         gastosFiltrados.value = data || [];
-        totalResults.value = count || 0;
+        // La RPC no devuelve un 'count', así que lo calculamos del resultado
+        // Para una paginación real, la RPC debería devolver el total.
+        // Por ahora, esto soluciona la visualización.
+        totalResults.value = data?.length || 0;
 
     } catch (e) {
         error.value = `Error al buscar datos: ${e.message}`;
@@ -91,14 +75,14 @@ async function fetchExtraOptions() {
       const [clientesRes, transportesRes, provinciasRes] = await Promise.all([
           supabase.from('clientes').select('id, nombre_cliente').order('nombre_cliente'),
           supabase.from('transportes').select('id, nombre').order('nombre'),
-          supabase.rpc('get_provincias_unicas_gastos')
+          supabase.from('provincias').select('id, nombre').order('nombre') // Obtenemos ID y nombre
       ]);
       if (clientesRes.error) throw clientesRes.error;
       options.value.clientes = clientesRes.data.map(c => ({ label: c.nombre_cliente, code: c.id }));
       if (transportesRes.error) throw transportesRes.error;
       options.value.transportes = transportesRes.data.map(t => ({ label: t.nombre, code: t.id }));
       if (provinciasRes.error) throw provinciasRes.error;
-      options.value.provincias = provinciasRes.data.map(p => p.provincia).filter(Boolean);
+      options.value.provincias = provinciasRes.data.map(p => ({ label: p.nombre, code: p.id }));
     } catch(e) {
       console.error("Error cargando opciones de exploración:", e);
       error.value = "No se pudieron cargar las opciones de filtro.";
@@ -107,86 +91,47 @@ async function fetchExtraOptions() {
     }
 }
 
-function goToPage(page) {
-  if (page > 0 && page <= pageCount.value) {
-    currentPage.value = page;
-    applyFilters();
-  }
-}
-
-function changeResultsPerPage() {
-  currentPage.value = 1;
-  applyFilters();
-}
-
 function goToRendicion(viajeId) {
   if (!viajeId) return;
-  router.push({ name: 'AdminGastosList', query: { viajeId: viajeId } });
+  // Asumiendo que la vista de admin para ver gastos de una rendición existe
+  // router.push({ name: 'AdminGastosDeRendicion', params: { id: viajeId } });
 }
 
-// --- LÓGICA DE EXPORTACIÓN (MODIFICADA) ---
+// --- LÓGICA DE EXPORTACIÓN (CORREGIDA) ---
 const handleExport = async () => {
-  emit('show-notification', 'Exportando', 'Preparando tu reporte completo...', 'info');
+  emit('show-notification', 'Exportando', 'Preparando tu reporte...', 'info');
   try {
-    let query = supabase
-        .from('vista_gastos_detallados')
-        .select(`
-          fecha_gasto, 
-          responsable_principal_nombre, 
-          es_delegado,
-          dueno_nombre,
-          tipos_gasto_config->>nombre_tipo_gasto, 
-          descripcion_general, 
-          nombre_viaje, 
-          monto_total, 
-          codigo_rendicion
-        `)
-        .order('fecha_gasto', { ascending: false });
+    // La RPC ya nos da los datos filtrados, así que simplemente los usamos
+    if (gastosFiltrados.value.length === 0) {
+      emit('show-notification', 'Aviso', 'No hay resultados para exportar.', 'warning');
+      return;
+    }
 
-    if (filters.value.clienteId) query = query.eq('cliente_id', filters.value.clienteId);
-    if (filters.value.transporteId) query = query.eq('transporte_id', filters.value.transporteId);
-    if (filters.value.provincia) query = query.eq('provincia_gasto->>nombre', filters.value.provincia);
-    if (filters.value.paciente) query = query.ilike('paciente_referido', `%${filters.value.paciente}%`);
-    if (filters.value.fechaDesde) query = query.gte('fecha_gasto', filters.value.fechaDesde);
-    if (filters.value.fechaHasta) query = query.lte('fecha_gasto', filters.value.fechaHasta);
-
-    const { data: allData, error: exportError } = await query;
-    if (exportError) throw exportError;
-
-    const dataToExport = allData.map(item => ({
+    const dataToExport = gastosFiltrados.value.map(item => ({
       'Fecha': formatDate(item.fecha_gasto),
-      'Responsable': item.responsable_principal_nombre,
-      'Rendido Por': item.es_delegado ? item.dueno_nombre : '',
-      'Tipo Gasto': item['?column?'], // Supabase a veces devuelve nombres extraños para JSON
-      'Descripción': item.descripcion_general,
+      'Responsable': item.responsable_gasto_nombre,
+      'Tipo Gasto': item.nombre_tipo_gasto,
+      'Descripción': item.gasto_descripcion,
       'Rendición': item.nombre_viaje,
-      'Monto': item.monto_total,
-      'Cod. Rendición': item.codigo_rendicion
+      'Monto': item.gasto_monto_total,
+      'Cod. Rendición': item.viaje_codigo_rendicion,
+      'Proveedor': item.nombre_proveedor,
+      'Cliente': item.nombre_cliente,
     }));
 
-    const sheets = [{ name: 'Resultados Exploracion', data: dataToExport }];
+    const sheets = [{ name: 'ExploracionAvanzada', data: dataToExport }];
     exportToExcel(sheets, 'exploracion_avanzada');
-    setTimeout(() => { emit('show-notification', 'Éxito', 'Reporte de exploración generado.', 'success'); }, 500);
+    setTimeout(() => { emit('show-notification', 'Éxito', 'Reporte generado.', 'success'); }, 500);
   } catch (e) {
-    emit('show-notification', 'Error', 'No se pudo generar el reporte.', 'error');
+    emit('show-notification', 'Error', `No se pudo generar el reporte: ${e.message}`, 'error');
     console.error("Error al exportar:", e);
   }
 };
 
-// --- WATCHERS Y CICLO DE VIDA ---
 onMounted(() => {
   fetchExtraOptions();
   applyFilters();
 });
-
-watch(filters, () => {
-    const debounceTimeout = ref(null);
-    clearTimeout(debounceTimeout.value);
-    debounceTimeout.value = setTimeout(() => {
-        currentPage.value = 1;
-        applyFilters();
-    }, 500);
-}, { deep: true });
 </script>
 <template>
   <div id="exploration-content">
@@ -196,26 +141,20 @@ watch(filters, () => {
         <div><label class="form-label">Cliente</label><v-select v-model="filters.clienteId" :options="options.clientes" :loading="loadingExtraOptions" :reduce="option => option.code" placeholder="Todos" class="v-select-filter"></v-select></div>
         <div><label class="form-label">Transporte</label><v-select v-model="filters.transporteId" :options="options.transportes" :loading="loadingExtraOptions" :reduce="option => option.code" placeholder="Todos" class="v-select-filter"></v-select></div>
         <div><label class="form-label">Tipo de Gasto</label><v-select v-model="filters.tipoGastoId" :options="tipoGastoOptions" :loading="loadingOptions" :reduce="option => option.code" placeholder="Todos" class="v-select-filter"></v-select></div>
-        <div><label class="form-label">Provincia</label><v-select v-model="filters.provincia" :options="options.provincias" :loading="loadingExtraOptions" placeholder="Todas"></v-select></div>
+        <div><label class="form-label">Provincia</label><v-select v-model="filters.provinciaId" :options="options.provincias" :loading="loadingExtraOptions" :reduce="option => option.code" placeholder="Todas" class="v-select-filter"></v-select></div>
         
-        <div>
-          <label class="form-label">Resultados por página</label>
-          <select v-model="resultsPerPage" @change="changeResultsPerPage" class="form-input">
-            <option :value="20">20</option>
-            <option :value="50">50</option>
-            <option :value="100">100</option>
-          </select>
-        </div>
-
-        <div class="lg:col-span-2"><label class="form-label">Paciente / Referencia</label><input type="text" v-model.lazy="filters.paciente" placeholder="Buscar por paciente..." class="form-input"></div>
+        <div class="lg:col-span-2"><label class="form-label">Paciente / Referencia</label><input type="text" v-model="filters.paciente" placeholder="Buscar por paciente..." class="form-input"></div>
         <div><label class="form-label">Fecha Desde</label><input type="date" v-model="filters.fechaDesde" class="form-input"></div>
         <div><label class="form-label">Fecha Hasta</label><input type="date" v-model="filters.fechaHasta" class="form-input"></div>
+        <div class="flex items-end">
+          <button @click="applyFilters" class="btn-primary w-full">Aplicar Filtros</button>
+        </div>
       </div>
     </section>
 
     <section class="section-container">
       <div class="flex justify-between items-center mb-4">
-        <h2 class="section-title !mb-0">Resultados ({{ totalResults }})</h2>
+        <h2 class="section-title !mb-0">Resultados ({{ gastosFiltrados.length }})</h2>
         <button @click="handleExport" :disabled="gastosFiltrados.length === 0" class="btn-primary btn-sm inline-flex items-center gap-2 disabled:bg-gray-400 disabled:cursor-not-allowed"><ArrowDownTrayIcon class="h-4 w-4"/>Exportar Resultados</button>
       </div>
       <div v-if="loading" class="text-center py-20"><svg class="animate-spin h-10 w-10 text-blue-600 mx-auto" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg></div>
@@ -225,36 +164,24 @@ watch(filters, () => {
           <table class="min-w-full text-sm">
             <thead><tr><th class="table-header">Fecha</th><th class="table-header">Responsable</th><th class="table-header">Tipo Gasto</th><th class="table-header">Descripción</th><th class="table-header">Rendición</th><th class="table-header text-right">Monto</th></tr></thead>
             <tbody class="divide-y divide-gray-200">
-              <tr v-for="gasto in gastosFiltrados" :key="gasto.id" class="hover:bg-gray-50" :class="{'bg-blue-50': gasto.es_delegado}">
+              <tr v-for="gasto in gastosFiltrados" :key="gasto.gasto_id">
                 <td class="table-cell">{{ formatDate(gasto.fecha_gasto) }}</td>
                 <td class="table-cell">
-                  <div class="font-medium text-gray-900">{{ gasto.responsable_principal_nombre }}</div>
-                  <div v-if="gasto.es_delegado" class="text-xs text-gray-500">(Rendido por: {{ gasto.dueno_nombre }})</div>
+                  <div class="font-medium text-gray-900">{{ gasto.responsable_gasto_nombre }}</div>
                 </td>
-                <td class="table-cell">{{ gasto.tipos_gasto_config.nombre_tipo_gasto }}</td>
-                <td class="table-cell max-w-xs truncate" :title="gasto.descripcion_general">{{ gasto.descripcion_general }}</td>
+                <td class="table-cell">{{ gasto.nombre_tipo_gasto }}</td>
+                <td class="table-cell max-w-xs truncate" :title="gasto.gasto_descripcion">{{ gasto.gasto_descripcion }}</td>
                 <td class="table-cell text-xs">
                   <a v-if="gasto.viaje_id" @click.prevent="goToRendicion(gasto.viaje_id)" href="#" class="text-blue-600 hover:underline">
-                    {{ gasto.nombre_viaje }} (#{{ gasto.codigo_rendicion }})
+                    {{ gasto.nombre_viaje }} (#{{ gasto.viaje_codigo_rendicion }})
                   </a>
                   <span v-else class="text-gray-400">N/A</span>
                 </td>
-                <td class="table-cell text-right font-semibold">{{ formatCurrency(gasto.monto_total) }}</td>
+                <td class="table-cell text-right font-semibold">{{ formatCurrency(gasto.gasto_monto_total) }}</td>
               </tr>
             </tbody>
           </table>
         </div>
-        
-        <div class="pagination-controls mt-4 flex justify-between items-center">
-          <span class="text-sm text-gray-600">
-            Mostrando {{ rangeFrom + 1 }} - {{ Math.min(rangeTo + 1, totalResults) }} de {{ totalResults }} resultados
-          </span>
-          <div class="flex gap-2">
-            <button @click="goToPage(currentPage - 1)" :disabled="currentPage === 1" class="btn-secondary btn-sm">Anterior</button>
-            <button @click="goToPage(currentPage + 1)" :disabled="currentPage === pageCount" class="btn-secondary btn-sm">Siguiente</button>
-          </div>
-        </div>
-
       </div>
       <div v-else class="no-data-placeholder py-16"><div class="text-center"><MagnifyingGlassIcon class="h-12 w-12 mx-auto text-gray-400" /><h4 class="mt-2 text-lg font-medium text-gray-800">Sin Resultados</h4><p class="mt-1 text-sm text-gray-500">Ajusta los filtros para comenzar una nueva búsqueda.</p></div></div>
     </section>
