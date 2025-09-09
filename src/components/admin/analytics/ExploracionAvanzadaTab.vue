@@ -1,5 +1,5 @@
 <script setup>
-import { ref, onMounted, watch, computed } from 'vue';
+import { ref, onMounted, computed } from 'vue';
 import { supabase } from '../../../supabaseClient';
 import { formatCurrency, formatDate } from '../../../utils/formatters.js';
 import vSelect from 'vue-select';
@@ -24,7 +24,7 @@ const filters = ref({
   clienteId: null,
   transporteId: null,
   tipoGastoId: null,
-  provinciaId: null, // Cambiado a provinciaId para coincidir con la RPC
+  provinciaId: null,
   paciente: '',
   fechaDesde: new Date(new Date().setDate(new Date().getDate() - 30)).toISOString().split('T')[0],
   fechaHasta: new Date().toISOString().split('T')[0],
@@ -37,11 +37,22 @@ const options = ref({
 });
 const loadingExtraOptions = ref(true);
 
-// --- LÓGICA DE CARGA DE DATOS (CORREGIDA) ---
+// --- INICIO DE LA CORRECCIÓN: AÑADIR ESTADO DE PAGINACIÓN ---
+const resultsPerPage = ref(20);
+const currentPage = ref(1);
+const totalResults = ref(0);
+
+const pageCount = computed(() => Math.ceil(totalResults.value / resultsPerPage.value));
+const rangeFrom = computed(() => (currentPage.value - 1) * resultsPerPage.value);
+const rangeTo = computed(() => rangeFrom.value + resultsPerPage.value - 1);
+// --- FIN DE LA CORRECCIÓN ---
+
 async function applyFilters() {
     loading.value = true;
     error.value = '';
     try {
+        // La RPC no soporta paginación, así que la haremos en el cliente por ahora.
+        // Para una solución a gran escala, la RPC debería aceptar `limit` y `offset`.
         const { data, error: rpcError } = await supabase.rpc('filtrar_gastos_admin', {
             p_cliente_id: filters.value.clienteId,
             p_transporte_id: filters.value.transporteId,
@@ -54,11 +65,11 @@ async function applyFilters() {
 
         if (rpcError) throw rpcError;
         
-        gastosFiltrados.value = data || [];
-        // La RPC no devuelve un 'count', así que lo calculamos del resultado
-        // Para una paginación real, la RPC debería devolver el total.
-        // Por ahora, esto soluciona la visualización.
+        // Guardamos todos los resultados y luego paginamos
         totalResults.value = data?.length || 0;
+        const start = rangeFrom.value;
+        const end = start + resultsPerPage.value;
+        gastosFiltrados.value = (data || []).slice(start, end);
 
     } catch (e) {
         error.value = `Error al buscar datos: ${e.message}`;
@@ -75,7 +86,7 @@ async function fetchExtraOptions() {
       const [clientesRes, transportesRes, provinciasRes] = await Promise.all([
           supabase.from('clientes').select('id, nombre_cliente').order('nombre_cliente'),
           supabase.from('transportes').select('id, nombre').order('nombre'),
-          supabase.from('provincias').select('id, nombre').order('nombre') // Obtenemos ID y nombre
+          supabase.from('provincias').select('id, nombre').order('nombre')
       ]);
       if (clientesRes.error) throw clientesRes.error;
       options.value.clientes = clientesRes.data.map(c => ({ label: c.nombre_cliente, code: c.id }));
@@ -91,23 +102,46 @@ async function fetchExtraOptions() {
     }
 }
 
+// --- INICIO DE LA CORRECCIÓN: AÑADIR FUNCIONES DE PAGINACIÓN ---
+function goToPage(page) {
+  if (page > 0 && page <= pageCount.value) {
+    currentPage.value = page;
+    applyFilters(); // Recargamos los datos para la nueva página
+  }
+}
+
+function changeResultsPerPage() {
+  currentPage.value = 1;
+  applyFilters();
+}
+// --- FIN DE LA CORRECCIÓN ---
+
 function goToRendicion(viajeId) {
   if (!viajeId) return;
-  // Asumiendo que la vista de admin para ver gastos de una rendición existe
   // router.push({ name: 'AdminGastosDeRendicion', params: { id: viajeId } });
 }
 
-// --- LÓGICA DE EXPORTACIÓN (CORREGIDA) ---
 const handleExport = async () => {
-  emit('show-notification', 'Exportando', 'Preparando tu reporte...', 'info');
+  emit('show-notification', 'Exportando', 'Preparando tu reporte completo...', 'info');
   try {
-    // La RPC ya nos da los datos filtrados, así que simplemente los usamos
-    if (gastosFiltrados.value.length === 0) {
+    // Para exportar, traemos TODOS los resultados, sin paginación
+    const { data: allData, error: exportError } = await supabase.rpc('filtrar_gastos_admin', {
+        p_cliente_id: filters.value.clienteId,
+        p_transporte_id: filters.value.transporteId,
+        p_tipo_gasto_id: filters.value.tipoGastoId,
+        p_provincia_id: filters.value.provinciaId,
+        p_paciente: filters.value.paciente || null,
+        p_fecha_desde: filters.value.fechaDesde || null,
+        p_fecha_hasta: filters.value.fechaHasta || null
+    });
+    if (exportError) throw exportError;
+
+    if (!allData || allData.length === 0) {
       emit('show-notification', 'Aviso', 'No hay resultados para exportar.', 'warning');
       return;
     }
 
-    const dataToExport = gastosFiltrados.value.map(item => ({
+    const dataToExport = allData.map(item => ({
       'Fecha': formatDate(item.fecha_gasto),
       'Responsable': item.responsable_gasto_nombre,
       'Tipo Gasto': item.nombre_tipo_gasto,
