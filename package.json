@@ -1,0 +1,44 @@
+{
+  "name": "app-viaticos",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "@headlessui/vue": "^1.7.23",
+    "@heroicons/vue": "^2.2.0",
+    "@supabase/supabase-js": "^2.44.4",
+    "@vue-leaflet/vue-leaflet": "^0.10.1",
+    "apexcharts": "^4.7.0",
+    "chart.js": "^4.5.0",
+    "chartjs-adapter-date-fns": "^3.0.0",
+    "date-fns": "^4.1.0",
+    "file-saver": "^2.0.5",
+    "html2canvas": "^1.4.1",
+    "html2pdf.js": "^0.10.3",
+    "jspdf": "^2.5.2",
+    "jspdf-autotable": "^3.8.4",
+    "leaflet": "^1.9.4",
+    "pdfmake": "^0.2.20",
+    "vue": "^3.4.31",
+    "vue-chartjs": "^5.3.2",
+    "vue-multiselect": "^3.2.0",
+    "vue-router": "^4.4.0",
+    "vue-select": "^4.0.0-beta.6",
+    "vue3-apexcharts": "^1.8.0",
+    "xlsx": "^0.18.5"
+  },
+  "devDependencies": {
+    "@tailwindcss/postcss": "^4.1.7",
+    "@vitejs/plugin-vue": "^5.0.5",
+    "autoprefixer": "^10.4.19",
+    "postcss": "^8.4.39",
+    "supabase": "^2.54.11",
+    "tailwindcss": "^3.4.6",
+    "vite": "^5.3.4"
+  }
+}

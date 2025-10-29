@@ -1,0 +1,110 @@
+
+DECLARE
+  v_report_data jsonb;
+  v_viaje_responsable_id uuid;
+  v_fecha_inicio date;
+  v_fecha_fin date;
+  v_dias_duracion int;
+  v_total_gastado numeric;
+BEGIN
+  -- 1. Obtener datos básicos del viaje
+  SELECT user_id, fecha_inicio, COALESCE(fecha_fin, now()::date)
+  INTO v_viaje_responsable_id, v_fecha_inicio, v_fecha_fin
+  FROM public.viajes WHERE id = p_viaje_id;
+
+  v_dias_duracion := GREATEST(1, v_fecha_fin - v_fecha_inicio + 1);
+  SELECT COALESCE(SUM(g.monto_total), 0) INTO v_total_gastado FROM public.gastos g WHERE g.viaje_id = p_viaje_id;
+
+  -- 2. Construir la consulta de gastos enriquecida en un solo paso
+  WITH base_gastos AS (
+    SELECT 
+      g.*, -- Traemos todas las columnas de gastos
+      tgc.nombre_tipo_gasto, 
+      gg.nombre_grupo, 
+      p_creador.nombre_completo AS nombre_creador, 
+      cli.nombre_cliente,
+      prov.nombre as nombre_proveedor,
+      trans.nombre as nombre_transporte,
+      (veh.marca || ' ' || veh.modelo || ' (' || veh.patente || ')') as vehiculo_info,
+      CONCAT_WS(' - ', po.nombre, lo.nombre) AS origen_completo,
+      CONCAT_WS(' - ', pd.nombre, ld.nombre) AS destino_completo
+    FROM public.gastos g 
+    LEFT JOIN public.tipos_gasto_config tgc ON g.tipo_gasto_id = tgc.id 
+    LEFT JOIN public.grupos_gastos gg ON g.grupo_id = gg.id 
+    LEFT JOIN public.perfiles p_creador ON g.creado_por_id = p_creador.id
+    LEFT JOIN public.clientes cli ON g.cliente_id = cli.id
+    LEFT JOIN public.proveedores prov ON g.proveedor_id = prov.id
+    LEFT JOIN public.transportes trans ON g.transporte_id = trans.id
+    LEFT JOIN public.vehiculos veh ON g.vehiculo_id = veh.id
+    LEFT JOIN public.provincias po ON g.provincia_origen_id = po.id
+    LEFT JOIN public.localidades lo ON g.localidad_origen_id = lo.id
+    LEFT JOIN public.provincias pd ON g.provincia_destino_id = pd.id
+    LEFT JOIN public.localidades ld ON g.localidad_destino_id = ld.id
+    WHERE g.viaje_id = p_viaje_id
+  ),
+  -- 3. Agrupar los gastos por su nombre de grupo
+  grouped_gastos AS (
+    SELECT
+      COALESCE(bg.nombre_grupo, 'Gastos Varios') AS group_name,
+      jsonb_agg(
+        jsonb_build_object(
+          'tipo_gasto', bg.nombre_tipo_gasto, 
+          'fecha', to_char(bg.fecha_gasto, 'DD/MM/YYYY'), 
+          'descripcion', bg.descripcion_general, 
+          'monto', bg.monto_total, 
+          'detalles_adicionales', jsonb_build_object(
+              'provincia', bg.provincia, 
+              'numero_factura', bg.numero_factura,
+              'cliente', bg.nombre_cliente,
+              'proveedor', bg.nombre_proveedor,
+              'transporte', bg.nombre_transporte,
+              'paciente', bg.paciente_referido, -- AHORA SÍ ESTÁ INCLUIDO
+              'chofer', bg.nombre_chofer,
+              'vehiculo', bg.vehiculo_info,
+              'origen', bg.origen_completo,
+              'destino', bg.destino_completo
+          ),
+          'delegado_por_nombre', CASE WHEN (bg.creado_por_id IS NOT NULL AND bg.creado_por_id <> bg.user_id) THEN bg.nombre_creador ELSE NULL END
+        ) ORDER BY bg.fecha_gasto
+      ) AS gastos
+    FROM base_gastos bg
+    GROUP BY COALESCE(bg.nombre_grupo, 'Gastos Varios')
+  ),
+  -- 4. Cálculos finales
+  calculations AS (
+    SELECT
+      (SELECT to_jsonb(v.*) FROM public.viajes v WHERE v.id = p_viaje_id) AS viaje_info,
+      (SELECT to_jsonb(p.*) FROM public.perfiles p WHERE p.id = v_viaje_responsable_id) AS responsable_info,
+      (SELECT COALESCE(jsonb_agg(stats), '[]'::jsonb) FROM (SELECT nombre_tipo_gasto AS tipo, SUM(monto_total) AS monto FROM base_gastos GROUP BY nombre_tipo_gasto) stats) AS stats_por_tipo,
+      (SELECT COALESCE(jsonb_agg(stats), '[]'::jsonb) FROM (SELECT provincia, SUM(monto_total) AS monto FROM base_gastos WHERE provincia IS NOT NULL GROUP BY provincia) stats) AS stats_por_provincia,
+      (SELECT COALESCE(jsonb_agg(gg.*), '[]'::jsonb) FROM grouped_gastos gg) AS grupos_gastos
+  )
+  -- 5. Construir el objeto JSON final
+  SELECT
+    jsonb_build_object(
+      'metadata', jsonb_build_object(
+        'responsable', cal.responsable_info->>'nombre_completo',
+        'referencia', cal.viaje_info->>'nombre_viaje',
+        'periodo', to_char(v_fecha_inicio, 'DD/MM/YYYY') || ' al ' || to_char(v_fecha_fin, 'DD/MM/YYYY'),
+        'id', cal.viaje_info->>'codigo_rendicion',
+        'estado', cal.viaje_info->>'estado_aprobacion',
+        'fecha_emision', to_char(now(), 'DD/MM/YYYY'),
+        'costo_promedio_diario', CASE WHEN v_dias_duracion > 1 THEN COALESCE(v_total_gastado / v_dias_duracion, 0) ELSE NULL END
+      ),
+      'grupos', cal.grupos_gastos,
+      'estadisticas', jsonb_build_object(
+        'por_tipo', (SELECT jsonb_agg(jsonb_build_object('tipo', t.tipo, 'monto', t.monto, 'porcentaje', ROUND((t.monto / NULLIF(v_total_gastado, 0)) * 100))) FROM jsonb_to_recordset(cal.stats_por_tipo) AS t(tipo text, monto numeric)),
+        'por_provincia', cal.stats_por_provincia
+      ),
+      'resumen_financiero', jsonb_build_object(
+        'total_adelantos', (cal.viaje_info->>'monto_adelanto')::numeric,
+        'total_gastos_bruto', v_total_gastado,
+        'saldo', (cal.viaje_info->>'monto_adelanto')::numeric - v_total_gastado,
+        'etiqueta_saldo', CASE WHEN (cal.viaje_info->>'monto_adelanto')::numeric - v_total_gastado < 0 THEN 'A REPONER POR RESPONSABLE' ELSE 'SALDO A FAVOR' END
+      )
+    )
+  INTO v_report_data
+  FROM calculations cal;
+
+  RETURN v_report_data;
+END;

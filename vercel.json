@@ -1,0 +1,8 @@
+{
+  "rewrites": [
+    {
+      "source": "/((?!api/|_next/|static/|favicon.ico|logo.png|districorr-logo-circular.png|img/).*)",
+      "destination": "/index.html"
+    }
+  ]
+}

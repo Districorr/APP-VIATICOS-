@@ -1,0 +1,110 @@
+[
+  {
+    "column_name": "gasto_id",
+    "data_type": "bigint"
+  },
+  {
+    "column_name": "gasto_created_at",
+    "data_type": "timestamp with time zone"
+  },
+  {
+    "column_name": "gasto_user_id",
+    "data_type": "uuid"
+  },
+  {
+    "column_name": "formato_id",
+    "data_type": "bigint"
+  },
+  {
+    "column_name": "fecha_gasto",
+    "data_type": "date"
+  },
+  {
+    "column_name": "gasto_monto_total",
+    "data_type": "numeric"
+  },
+  {
+    "column_name": "gasto_moneda",
+    "data_type": "text"
+  },
+  {
+    "column_name": "gasto_descripcion",
+    "data_type": "text"
+  },
+  {
+    "column_name": "gasto_n_factura",
+    "data_type": "text"
+  },
+  {
+    "column_name": "gasto_factura_url",
+    "data_type": "text"
+  },
+  {
+    "column_name": "adelanto_especifico_aplicado",
+    "data_type": "numeric"
+  },
+  {
+    "column_name": "gasto_monto_iva",
+    "data_type": "numeric"
+  },
+  {
+    "column_name": "gasto_cliente_referido",
+    "data_type": "text"
+  },
+  {
+    "column_name": "gasto_datos_adicionales",
+    "data_type": "jsonb"
+  },
+  {
+    "column_name": "viaje_id",
+    "data_type": "bigint"
+  },
+  {
+    "column_name": "tipo_gasto_id",
+    "data_type": "bigint"
+  },
+  {
+    "column_name": "provincia_id",
+    "data_type": "bigint"
+  },
+  {
+    "column_name": "provincia_nombre",
+    "data_type": "text"
+  },
+  {
+    "column_name": "cliente_id",
+    "data_type": "bigint"
+  },
+  {
+    "column_name": "nombre_cliente",
+    "data_type": "text"
+  },
+  {
+    "column_name": "transporte_id",
+    "data_type": "bigint"
+  },
+  {
+    "column_name": "nombre_transporte",
+    "data_type": "text"
+  },
+  {
+    "column_name": "responsable_gasto_nombre",
+    "data_type": "text"
+  },
+  {
+    "column_name": "nombre_tipo_gasto",
+    "data_type": "text"
+  },
+  {
+    "column_name": "nombre_viaje",
+    "data_type": "text"
+  },
+  {
+    "column_name": "viaje_codigo_rendicion",
+    "data_type": "integer"
+  },
+  {
+    "column_name": "viaje_cerrado_en",
+    "data_type": "timestamp with time zone"
+  }
+]

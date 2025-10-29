@@ -1,0 +1,48 @@
+
+DECLARE
+    -- Declaración de todas las variables que necesitaremos
+    kpis jsonb;
+    chart_evolucion_origen jsonb;
+    chart_gastos_transporte jsonb;
+BEGIN
+    -- 1. KPIs
+    SELECT jsonb_build_object(
+        'gasto_total_periodo', COALESCE((SELECT SUM(g.monto_total) FROM gastos g WHERE g.fecha_gasto BETWEEN p_start_date AND p_end_date AND (g.estado_delegacion = 'aceptado' OR g.estado_delegacion = 'directo')), 0),
+        'saldo_cajas_chicas', COALESCE((SELECT SUM(c.saldo_actual) FROM cajas_chicas c WHERE c.activo = true), 0),
+        'delegados_pendientes', COALESCE((SELECT SUM(g.monto_total) FROM gastos g WHERE g.estado_delegacion = 'pendiente_aceptacion'), 0),
+        'rendiciones_pendientes_valor', COALESCE((SELECT SUM(g.monto_total) FROM gastos g JOIN viajes v ON g.viaje_id = v.id WHERE v.estado_aprobacion = 'en_curso'), 0)
+    ) INTO kpis;
+
+    -- 2. GRÁFICOS
+    -- Evolución por Origen (últimos 12 meses)
+    SELECT jsonb_agg(e) INTO chart_evolucion_origen FROM (
+        SELECT 
+            date_trunc('month', m.month)::date as mes, 
+            COALESCE(SUM(CASE WHEN g.caja_id IS NOT NULL THEN g.monto_total ELSE 0 END), 0) as total_caja, 
+            COALESCE(SUM(CASE WHEN g.viaje_id IS NOT NULL THEN g.monto_total ELSE 0 END), 0) as total_viaje
+        FROM generate_series(date_trunc('month', now() - interval '11 months'), date_trunc('month', now()), '1 month') as m(month)
+        LEFT JOIN gastos g ON date_trunc('month', g.fecha_gasto) = m.month 
+                         AND (g.estado_delegacion = 'aceptado' OR g.estado_delegacion = 'directo')
+        GROUP BY m.month ORDER BY m.month
+    ) e;
+
+    -- Gastos por Transporte (para el período seleccionado)
+    SELECT jsonb_agg(d) INTO chart_gastos_transporte FROM (
+        SELECT t.nombre AS categoria, SUM(g.monto_total) AS total
+        FROM gastos g
+        JOIN transportes t ON g.transporte_id = t.id
+        WHERE g.fecha_gasto BETWEEN p_start_date AND p_end_date
+          AND g.transporte_id IS NOT NULL
+          AND (g.estado_delegacion = 'aceptado' OR g.estado_delegacion = 'directo')
+        GROUP BY t.nombre ORDER BY total DESC LIMIT 5
+    ) d;
+
+    -- 3. CONSTRUIR RESPUESTA FINAL
+    RETURN jsonb_build_object(
+        'kpis', kpis,
+        'charts', jsonb_build_object(
+            'evolucion_origen', COALESCE(chart_evolucion_origen, '[]'::jsonb),
+            'gastos_transporte', COALESCE(chart_gastos_transporte, '[]'::jsonb)
+        )
+    );
+END;
