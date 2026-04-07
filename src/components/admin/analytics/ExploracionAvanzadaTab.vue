@@ -191,9 +191,9 @@ watch(
 
 <template>
   <div id="exploration-content">
-    <section class="section-container mb-8">
+    <section class="mb-8 section-container">
       <h2 class="section-title">Filtros de Exploración</h2>
-      <div class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-4">
+      <div class="grid grid-cols-1 gap-4 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-5">
         <div><label class="form-label">Cliente</label><v-select v-model="filters.clienteId" :options="options.clientes" :loading="loadingExtraOptions" :reduce="option => option.code" placeholder="Todos" class="v-select-filter"></v-select></div>
         <div><label class="form-label">Transporte</label><v-select v-model="filters.transporteId" :options="options.transportes" :loading="loadingExtraOptions" :reduce="option => option.code" placeholder="Todos" class="v-select-filter"></v-select></div>
         <div><label class="form-label">Tipo de Gasto</label><v-select v-model="filters.tipoGastoId" :options="tipoGastoOptions" :loading="loadingOptions" :reduce="option => option.code" placeholder="Todos" class="v-select-filter"></v-select></div>
@@ -216,7 +216,7 @@ watch(
     </section>
 
     <section class="section-container">
-      <div class="flex flex-col sm:flex-row justify-between items-start sm:items-center mb-4 gap-4">
+      <div class="flex flex-col items-start justify-between gap-4 mb-4 sm:flex-row sm:items-center">
         <h2 class="section-title !mb-0">Resultados ({{ totalResults }})</h2>
         <div class="flex items-center gap-4">
           <div>
@@ -227,15 +227,15 @@ watch(
               <option :value="100">100</option>
             </select>
           </div>
-          <button @click="handleExport" :disabled="gastosFiltrados.length === 0" class="btn-primary btn-sm inline-flex items-center gap-2 disabled:bg-gray-400 disabled:cursor-not-allowed self-end"><ArrowDownTrayIcon class="h-4 w-4"/>Exportar Resultados</button>
+          <button @click="handleExport" :disabled="gastosFiltrados.length === 0" class="inline-flex items-center self-end gap-2 btn-primary btn-sm disabled:bg-gray-400 disabled:cursor-not-allowed"><ArrowDownTrayIcon class="w-4 h-4"/>Exportar Resultados</button>
         </div>
       </div>
-      <div v-if="loading" class="text-center py-20"><svg class="animate-spin h-10 w-10 text-blue-600 mx-auto" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg></div>
+      <div v-if="loading" class="py-20 text-center"><svg class="w-10 h-10 mx-auto text-blue-600 animate-spin" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg></div>
       <div v-else-if="error" class="error-banner">{{ error }}</div>
       <div v-else-if="gastosFiltrados.length > 0">
         <div class="overflow-x-auto">
           <table class="min-w-full text-sm">
-            <thead><tr><th class="table-header">Fecha</th><th class="table-header">Responsable</th><th class="table-header">Creado Por</th><th class="table-header">Tipo Gasto</th><th class="table-header">Descripción</th><th class="table-header">Rendición / Caja</th><th class="table-header text-right">Monto</th></tr></thead>
+            <thead><tr><th class="table-header">Fecha</th><th class="table-header">Responsable</th><th class="table-header">Creado Por</th><th class="table-header">Tipo Gasto</th><th class="table-header">Descripción</th><th class="table-header">Rendición / Caja</th><th class="text-right table-header">Monto</th></tr></thead>
             <tbody class="divide-y divide-gray-200">
               <tr v-for="gasto in gastosFiltrados" :key="gasto.gasto_id" class="hover:bg-gray-50">
                 <td class="table-cell">{{ formatDate(gasto.fecha_gasto) }}</td>
@@ -259,25 +259,25 @@ watch(
                   <span v-else-if="gasto.caja_id" class="text-gray-500">{{ gasto.nombre_caja || 'Caja Chica' }}</span>
                   <span v-else class="text-gray-400">N/A</span>
                 </td>
-                <td class="table-cell text-right font-semibold">{{ formatCurrency(gasto.gasto_monto_total) }}</td>
+                <td class="table-cell font-semibold text-right">{{ formatCurrency(gasto.gasto_monto_total) }}</td>
               </tr>
             </tbody>
           </table>
         </div>
         
-        <div class="pagination-controls mt-4 flex justify-between items-center">
+        <div class="flex items-center justify-between mt-4 pagination-controls">
           <span class="text-sm text-gray-600">
             Mostrando {{ Math.min(rangeFrom + 1, totalResults) }} - {{ Math.min(rangeFrom + resultsPerPage, totalResults) }} de {{ totalResults }} resultados
           </span>
           <div class="flex gap-2">
             <button @click="goToPage(currentPage - 1)" :disabled="currentPage === 1" class="btn-secondary btn-sm">Anterior</button>
-            <span class="text-sm text-gray-700 self-center">Página {{ currentPage }} de {{ pageCount }}</span>
+            <span class="self-center text-sm text-gray-700">Página {{ currentPage }} de {{ pageCount }}</span>
             <button @click="goToPage(currentPage + 1)" :disabled="currentPage === pageCount || pageCount === 0" class="btn-secondary btn-sm">Siguiente</button>
           </div>
         </div>
 
       </div>
-      <div v-else class="no-data-placeholder py-16"><div class="text-center"><MagnifyingGlassIcon class="h-12 w-12 mx-auto text-gray-400" /><h4 class="mt-2 text-lg font-medium text-gray-800">Sin Resultados</h4><p class="mt-1 text-sm text-gray-500">Ajusta los filtros para comenzar una nueva búsqueda.</p></div></div>
+      <div v-else class="py-16 no-data-placeholder"><div class="text-center"><MagnifyingGlassIcon class="w-12 h-12 mx-auto text-gray-400" /><h4 class="mt-2 text-lg font-medium text-gray-800">Sin Resultados</h4><p class="mt-1 text-sm text-gray-500">Ajusta los filtros para comenzar una nueva búsqueda.</p></div></div>
     </section>
   </div>
 </template>
