@@ -1,0 +1,28 @@
+
+DECLARE
+  v_receptor_id uuid;
+  v_usuario_actual_id uuid := auth.uid();
+BEGIN
+  -- 1. Obtenemos el ID del usuario a quien fue delegado el gasto.
+  --    El gasto en estado 'pendiente_aceptacion' tiene el user_id del receptor.
+  SELECT user_id INTO v_receptor_id
+  FROM public.gastos
+  WHERE id = p_gasto_id AND estado_delegacion = 'pendiente_aceptacion';
+
+  -- 2. Verificamos que el usuario que llama a la función es el receptor correcto.
+  IF v_receptor_id IS NULL THEN
+    RAISE EXCEPTION 'El gasto no existe o no está pendiente de aceptación.';
+  END IF;
+
+  IF v_receptor_id <> v_usuario_actual_id THEN
+    RAISE EXCEPTION 'No tienes permiso para rechazar este gasto.';
+  END IF;
+
+  -- 3. Si todo es correcto, actualizamos el estado del gasto.
+  UPDATE public.gastos
+  SET estado_delegacion = 'rechazado'
+  WHERE id = p_gasto_id;
+
+  -- (Opcional) Aquí se podría añadir lógica para notificar al emisor del rechazo.
+
+END;

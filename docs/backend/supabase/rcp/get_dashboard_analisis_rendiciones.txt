@@ -1,0 +1,80 @@
+
+DECLARE
+    v_kpis jsonb;
+    v_tabla_eficiencia jsonb;
+    v_chart_evolucion_costo jsonb;
+    v_chart_desglose_gastos jsonb;
+BEGIN
+    -- 1. CREAR TABLA TEMPORAL CON DATOS RELEVANTES Y PRE-CÁLCULOS
+    CREATE TEMP TABLE relevant_viajes ON COMMIT DROP AS
+    SELECT 
+        v.id, 
+        v.user_id, 
+        v.cerrado_en,
+        (SELECT COALESCE(SUM(g.monto_total), 0) FROM gastos g WHERE g.viaje_id = v.id) as total_gastado,
+        -- Usamos 86400.0 para asegurar división con decimales.
+        GREATEST(EXTRACT(EPOCH FROM (v.cerrado_en - v.created_at)) / 86400.0, 1) as duracion_dias
+    FROM viajes v
+    WHERE v.estado_aprobacion = 'aprobado'
+      AND v.cerrado_en IS NOT NULL
+      AND v.cerrado_en::date BETWEEN p_start_date AND p_end_date
+      AND (p_user_id IS NULL OR v.user_id = p_user_id);
+
+    -- 2. CÁLCULO DE KPIs GLOBALES DEL PERIODO
+    SELECT jsonb_build_object(
+        'costo_promedio', COALESCE(AVG(total_gastado), 0),
+        'total_rendiciones', COUNT(*),
+        'duracion_promedio', ROUND(COALESCE(AVG(duracion_dias), 0)::numeric, 1),
+        'costo_total', COALESCE(SUM(total_gastado), 0)
+    ) INTO v_kpis
+    FROM relevant_viajes;
+    
+    -- 3. TABLA DE EFICIENCIA POR RESPONSABLE (MEJORADA)
+    SELECT COALESCE(jsonb_agg(t), '[]'::jsonb) INTO v_tabla_eficiencia FROM (
+        SELECT 
+            p.nombre_completo as responsable_nombre, 
+            COUNT(rv.id) as cantidad_rendiciones, 
+            COALESCE(SUM(rv.total_gastado), 0) as costo_total,
+            COALESCE(AVG(rv.total_gastado), 0) as costo_promedio,
+            -- CAMBIO 1: Duración promedio redondeada a 1 decimal
+            ROUND(COALESCE(AVG(rv.duracion_dias), 0)::numeric, 1) as duracion_promedio,
+            -- CAMBIO 2: Nueva métrica de negocio clave
+            COALESCE(
+                SUM(rv.total_gastado) / NULLIF(SUM(rv.duracion_dias), 0)
+            , 0) as costo_diario_promedio
+        FROM relevant_viajes rv
+        JOIN perfiles p ON rv.user_id = p.id
+        GROUP BY p.id, p.nombre_completo
+        ORDER BY costo_total DESC
+    ) t;
+
+    -- 4. GRÁFICOS (Sin cambios)
+    SELECT COALESCE(jsonb_agg(e), '[]'::jsonb) INTO v_chart_evolucion_costo FROM (
+        SELECT date_trunc('month', m.month)::date as mes, COALESCE(SUM(rv.total_gastado), 0) as total 
+        FROM generate_series(date_trunc('month', p_start_date), date_trunc('month', p_end_date), '1 month') as m(month) 
+        LEFT JOIN relevant_viajes rv ON date_trunc('month', rv.cerrado_en) = m.month 
+        GROUP BY m.month ORDER BY m.month
+    ) e;
+    
+    SELECT COALESCE(jsonb_agg(d), '[]'::jsonb) INTO v_chart_desglose_gastos FROM (
+        SELECT 
+            tg.nombre_tipo_gasto as tipo, 
+            SUM(g.monto_total) as total 
+        FROM gastos g
+        JOIN relevant_viajes rv ON g.viaje_id = rv.id
+        JOIN tipos_gasto_config tg ON g.tipo_gasto_id = tg.id 
+        GROUP BY tg.nombre_tipo_gasto 
+        ORDER BY total DESC 
+        LIMIT 7
+    ) d;
+
+    -- 5. CONSTRUIR RESPUESTA FINAL
+    RETURN jsonb_build_object(
+        'kpis', v_kpis,
+        'tabla_eficiencia', v_tabla_eficiencia,
+        'charts', jsonb_build_object(
+            'evolucion_costo', v_chart_evolucion_costo,
+            'desglose_gastos', v_chart_desglose_gastos
+        )
+    );
+END;

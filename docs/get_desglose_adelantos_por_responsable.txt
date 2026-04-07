@@ -1,0 +1,20 @@
+
+BEGIN
+  RETURN QUERY
+    SELECT
+      v.user_id,
+      p.nombre_completo as nombre_responsable,
+      SUM(v.monto_adelanto) as total_adelantado,
+      COUNT(v.id) as cantidad_rendiciones
+    FROM
+      viajes v
+    JOIN
+      perfiles p ON v.user_id = p.id
+    WHERE
+      v.estado_aprobacion IN ('en_curso', 'rechazado') AND v.estado = 'ABIERTO'
+    GROUP BY
+      v.user_id,
+      p.nombre_completo
+    ORDER BY
+      total_adelantado DESC;
+END;

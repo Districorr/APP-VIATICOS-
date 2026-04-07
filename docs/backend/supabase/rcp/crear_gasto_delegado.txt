@@ -1,0 +1,47 @@
+
+DECLARE
+  nuevo_gasto_id bigint;
+  gasto_creado json;
+  v_receptor_id uuid; -- Este será el user_id (dueño del gasto)
+  v_emisor_id uuid;   -- Este será el creado_por_id (quien lo delega)
+BEGIN
+  -- Extraemos el ID del receptor del payload (es el user_id que viene del frontend)
+  v_receptor_id := (payload->>'user_id')::uuid; 
+  -- El ID del emisor es siempre el del usuario actualmente logueado
+  v_emisor_id := auth.uid(); 
+
+  -- Insertamos el gasto en la tabla.
+  INSERT INTO public.gastos (
+    formato_id, fecha_gasto, monto_total, monto_iva, moneda, descripcion_general,
+    numero_factura, tipo_gasto_id, cliente_id, transporte_id, proveedor_id,
+    adelanto_especifico_aplicado, factura_url, provincia, datos_adicionales,
+    user_id, creado_por_id, estado_delegacion, viaje_id, caja_id
+  )
+  SELECT
+    (payload->>'formato_id')::bigint,
+    (payload->>'fecha_gasto')::date,
+    (payload->>'monto_total')::numeric,
+    (payload->>'monto_iva')::numeric,
+    payload->>'moneda',
+    payload->>'descripcion_general',
+    payload->>'numero_factura',
+    (payload->>'tipo_gasto_id')::bigint,
+    (payload->>'cliente_id')::bigint,
+    (payload->>'transporte_id')::bigint,
+    (payload->>'proveedor_id')::bigint,
+    (payload->>'adelanto_especifico_aplicado')::numeric,
+    payload->>'factura_url',
+    payload->>'provincia',
+    (payload->'datos_adicionales')::jsonb,
+    v_receptor_id,                -- COLUMNA user_id = ID del RECEPTOR
+    v_emisor_id,                  -- COLUMNA creado_por_id = ID del EMISOR
+    'pendiente_aceptacion',       -- ¡¡¡AHORA SÍ, EL ESTADO CORRECTO!!!
+    NULL,
+    NULL
+  RETURNING id INTO nuevo_gasto_id;
+
+  -- Seleccionamos el gasto recién creado para devolverlo al frontend.
+  SELECT to_json(g.*) INTO gasto_creado FROM public.gastos g WHERE g.id = nuevo_gasto_id;
+  
+  RETURN gasto_creado;
+END;

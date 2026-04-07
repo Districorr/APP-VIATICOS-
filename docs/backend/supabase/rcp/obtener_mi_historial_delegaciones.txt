@@ -1,0 +1,20 @@
+
+  SELECT 
+    h.id,
+    h.gasto_id,
+    h.decision,
+    h.motivo_rechazo,
+    h.fecha_decision,
+    g.monto_total,
+    g.descripcion_general,
+    p.nombre_completo
+  FROM 
+    public.historial_delegaciones h
+  JOIN 
+    public.gastos g ON h.gasto_id = g.id
+  JOIN
+    public.perfiles p ON h.delegador_id = p.id
+  WHERE 
+    h.receptor_id = auth.uid()
+  ORDER BY
+    h.fecha_decision DESC;
