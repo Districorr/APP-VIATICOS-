@@ -60,6 +60,7 @@ const useCajaDiaria = ref(false);
 const selectedCajaId = ref(null);
 const isDelegating = ref(false);
 const delegatedToUserId = ref(null);
+const isCuentaCorrienteEmpresa = ref(false);
 const camposObligatorios = ref([]);
 const camposOpcionales = ref([]);
 const camposOpcionalesVisibles = ref(new Set());
@@ -173,6 +174,63 @@ onMounted(async () => {
   isInitialLoad.value = false;
 });
 
+function normalizarTexto(valor) {
+  return (valor || '').toString().normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().trim();
+}
+
+function isProveedorField(campo) {
+  const nombreTecnico = normalizarTexto(campo?.nombre_campo_tecnico);
+  const etiqueta = normalizarTexto(campo?.etiqueta_visible);
+  return campo?.tipo_input === 'select_proveedor' || nombreTecnico === 'proveedor' || nombreTecnico === 'proveedor_id' || etiqueta === 'proveedor';
+}
+
+function campoAplicaAlTipoSeleccionado(campo) {
+  if (campo?.tipo_gasto_id === null || campo?.tipo_gasto_id === undefined || campo?.tipo_gasto_id === '') return true;
+  if (!formState.tipo_gasto_id) return false;
+  return String(campo.tipo_gasto_id) === String(formState.tipo_gasto_id);
+}
+
+const camposObligatoriosVisibles = computed(() => camposObligatorios.value.filter(campoAplicaAlTipoSeleccionado));
+const camposOpcionalesVisiblesPorTipo = computed(() => camposOpcionales.value.filter(campoAplicaAlTipoSeleccionado));
+const camposOpcionalesSeleccionadosVisibles = computed(() =>
+  camposOpcionalesVisiblesPorTipo.value.filter(campo => camposOpcionalesVisibles.value.has(campo.nombre_campo_tecnico))
+);
+const showVehiculoOpcional = computed(() => !isCuentaCorrienteEmpresa.value && camposOpcionalesVisibles.value.has('vehiculo_id'));
+const hasCamposOpcionalesRenderizados = computed(() => camposOpcionalesSeleccionadosVisibles.value.length > 0 || showVehiculoOpcional.value);
+
+function createEntityOption(nombre) {
+  const label = (nombre || '').trim();
+  return {
+    label: `Crear "${label}"`,
+    value: label,
+    __isNew: true
+  };
+}
+
+function getSelectorSimpleOptions(campo) {
+  const opciones = Array.isArray(campo?.opciones_selector)
+    ? campo.opciones_selector
+    : typeof campo?.opciones_selector === 'string'
+      ? campo.opciones_selector.split(',')
+      : [];
+  return opciones
+    .map(opcion => (opcion || '').toString().trim())
+    .filter(Boolean)
+    .map(opcion => ({ label: opcion, value: opcion }));
+}
+
+function isValorVacio(valor) {
+  return valor === null || valor === undefined || valor === '' || (typeof valor === 'string' && valor.trim() === '');
+}
+
+function getValorCampoDinamico(campo) {
+  if (isProveedorField(campo)) return formState.proveedor_id;
+  if (campo.tipo_input === 'select_cliente') return formState.cliente_id;
+  if (campo.tipo_input === 'select_transporte') return formState.transporte_id;
+  if (campo.tipo_input === 'select_proveedor') return formState.proveedor_id;
+  return formState[campo.nombre_campo_tecnico];
+}
+
 function inicializarFormState() {
   const hoy = new Date();
   hoy.setMinutes(hoy.getMinutes() - hoy.getTimezoneOffset());
@@ -181,7 +239,7 @@ function inicializarFormState() {
   const camposDeIdNormalizados = { cliente_id: null, transporte_id: null, proveedor_id: null };
   const otrosCamposDinamicos = {};
   [...camposObligatorios.value, ...camposOpcionales.value].forEach(campo => {
-    if (!(campo.nombre_campo_tecnico in camposDeIdNormalizados) && !(campo.nombre_campo_tecnico in camposFijos)) {
+    if (!isProveedorField(campo) && !(campo.nombre_campo_tecnico in camposDeIdNormalizados) && !(campo.nombre_campo_tecnico in camposFijos)) {
       otrosCamposDinamicos[campo.nombre_campo_tecnico] = campo.valor_por_defecto || null;
     }
   });
@@ -200,6 +258,13 @@ async function cargarGastoParaEditar() {
   Object.assign(formState, gastoData, gastoData.datos_adicionales);
   if (gastoData.fecha_gasto) formState.fecha_gasto = gastoData.fecha_gasto;
   if (gastoData.caja_id) { useCajaDiaria.value = true; selectedCajaId.value = gastoData.caja_id; }
+  if (gastoData.origen_gasto === 'cuenta_corriente_empresa') {
+    useCajaDiaria.value = false;
+    selectedCajaId.value = null;
+    isDelegating.value = false;
+    delegatedToUserId.value = null;
+    isCuentaCorrienteEmpresa.value = true;
+  }
   if (gastoData.cliente_id && gastoData.clientes) formState.cliente_id = { label: gastoData.clientes.nombre_cliente, value: gastoData.cliente_id };
   if (gastoData.transporte_id && gastoData.transportes) formState.transporte_id = { label: gastoData.transportes.nombre, value: gastoData.transporte_id };
   if (gastoData.proveedor_id && gastoData.proveedores) formState.proveedor_id = { label: gastoData.proveedores.nombre, value: gastoData.proveedor_id };
@@ -282,6 +347,13 @@ watch(() => formState.provincia_destino_id, async (provinciaId) => {
   opcionesSelect.value.localidadesDestino = (data || []).map(l => ({ label: l.nombre, value: l.id }));
   loadingSelects.localidadesDestino = false;
 });
+watch(() => formState.tipo_gasto_id, () => {
+  camposOpcionales.value.forEach((campo) => {
+    if (!campoAplicaAlTipoSeleccionado(campo)) {
+      camposOpcionalesVisibles.value.delete(campo.nombre_campo_tecnico);
+    }
+  });
+});
 
 const handleFacturaChange = (event) => {
   const file = event.target.files[0];
@@ -296,13 +368,49 @@ function validateStep1() {
   return true;
 }
 function validateStep2() {
-  if (!useCajaDiaria.value && !isDelegating.value && !formState.viaje_id) { stepError.value = 'Debes asociar este gasto a una rendición o delegarlo.'; return false; }
+  if (!useCajaDiaria.value && !isDelegating.value && !isCuentaCorrienteEmpresa.value && !formState.viaje_id) { stepError.value = 'Debes asociar este gasto a una rendición o delegarlo.'; return false; }
   if (isDelegating.value && !delegatedToUserId.value) { stepError.value = 'Debes seleccionar un responsable a quien delegar el gasto.'; return false; }
   if (!formState.tipo_gasto_id) { stepError.value = 'Debes seleccionar un tipo de gasto.'; return false; }
+  for (const campo of camposObligatoriosVisibles.value) {
+    if (isValorVacio(getValorCampoDinamico(campo))) {
+      stepError.value = `Debes completar el campo "${campo.etiqueta_visible}".`;
+      return false;
+    }
+  }
   return true;
 }
 function nextStep() { if (validateStep1()) { stepError.value = ''; currentStep.value = 2; } }
 function prevStep() { currentStep.value = 1; }
+function selectCajaDiaria() {
+  useCajaDiaria.value = true;
+  isDelegating.value = false;
+  isCuentaCorrienteEmpresa.value = false;
+  formState.viaje_id = null;
+  delegatedToUserId.value = null;
+}
+function selectRendicion() {
+  useCajaDiaria.value = false;
+  isDelegating.value = false;
+  isCuentaCorrienteEmpresa.value = false;
+  selectedCajaId.value = null;
+  delegatedToUserId.value = null;
+}
+function selectDelegacion() {
+  useCajaDiaria.value = false;
+  isDelegating.value = true;
+  isCuentaCorrienteEmpresa.value = false;
+  selectedCajaId.value = null;
+}
+function selectCuentaCorrienteEmpresa() {
+  useCajaDiaria.value = false;
+  isDelegating.value = false;
+  isCuentaCorrienteEmpresa.value = true;
+  formState.viaje_id = null;
+  selectedCajaId.value = null;
+  delegatedToUserId.value = null;
+  formState.vehiculo_id = null;
+  camposOpcionalesVisibles.value.delete('vehiculo_id');
+}
 
 async function handleSubmit() {
   if (!validateStep2()) return;
@@ -314,16 +422,21 @@ async function handleSubmit() {
 
     const resolverEntidadId = async (valorEntidad, tipoEntidad, idRelacionado = null) => {
       if (typeof valorEntidad === 'number') return valorEntidad;
-      if (typeof valorEntidad === 'object' && valorEntidad?.value) return valorEntidad.value;
-      if (typeof valorEntidad === 'string' && valorEntidad.trim() !== '') {
+      let nombreNuevo = null;
+      if (typeof valorEntidad === 'object' && valorEntidad?.value) {
+        if (typeof valorEntidad.value === 'number') return valorEntidad.value;
+        if (valorEntidad.__isNew || typeof valorEntidad.value === 'string') nombreNuevo = valorEntidad.value;
+      }
+      if (typeof valorEntidad === 'string' && valorEntidad.trim() !== '') nombreNuevo = valorEntidad;
+      if (nombreNuevo && nombreNuevo.trim() !== '') {
         if (tipoEntidad === 'localidades') {
             if (!idRelacionado) throw new Error(`Para crear la localidad "${valorEntidad}", primero debes seleccionar una provincia.`);
-            const { data, error } = await supabase.rpc('crear_localidad_al_vuelo', { p_nombre_localidad: valorEntidad, p_provincia_id: idRelacionado });
+            const { data, error } = await supabase.rpc('crear_localidad_al_vuelo', { p_nombre_localidad: nombreNuevo.trim(), p_provincia_id: idRelacionado });
             if (error) throw new Error(`Error al crear nueva localidad: ${error.message}`);
             return data;
         } else {
             const { data, error } = await supabase.rpc('crear_entidad_al_vuelo', {
-                p_nombre_entidad: valorEntidad.trim(),
+                p_nombre_entidad: nombreNuevo.trim(),
                 p_nombre_tabla: tipoEntidad
             });
             if (error) throw new Error(`Error al crear nueva entidad en '${tipoEntidad}': ${error.message}`);
@@ -359,10 +472,13 @@ async function handleSubmit() {
     const datosAdicionales = {};
     const CAMPOS_DIRECTOS_EN_GASTOS = new Set(['id', 'user_id', 'creado_por_id', 'estado_delegacion', 'formato_id', 'fecha_gasto', 'monto_total', 'monto_iva', 'moneda', 'descripcion_general', 'numero_factura', 'viaje_id', 'caja_id', 'tipo_gasto_id', 'cliente_id', 'transporte_id', 'proveedor_id', 'adelanto_especifico_aplicado', 'factura_url', 'datos_adicionales', 'provincia_id', 'provincia', 'provincia_origen_id', 'localidad_origen_id', 'provincia_destino_id', 'localidad_destino_id', 'vehiculo_id', 'paciente_referido', 'nombre_chofer']);
     
-    const todosLosCamposDelFormato = [...camposObligatorios.value, ...camposOpcionales.value];
+    const todosLosCamposDelFormato = [
+      ...camposObligatoriosVisibles.value,
+      ...camposOpcionalesSeleccionadosVisibles.value
+    ];
     todosLosCamposDelFormato.forEach(campo => {
       const nombreTecnico = campo.nombre_campo_tecnico;
-      if (!CAMPOS_DIRECTOS_EN_GASTOS.has(nombreTecnico)) {
+      if (!isProveedorField(campo) && !CAMPOS_DIRECTOS_EN_GASTOS.has(nombreTecnico)) {
         if (formState[nombreTecnico] !== null && formState[nombreTecnico] !== undefined && formState[nombreTecnico] !== '') {
           datosAdicionales[nombreTecnico] = formState[nombreTecnico];
         }
@@ -395,7 +511,7 @@ async function handleSubmit() {
       provincia_destino_id: showTransporteFields.value ? provinciaDestinoIdFinal : null,
       localidad_destino_id: showTransporteFields.value ? finalLocalidadDestinoId : null,
       
-      vehiculo_id: formState.vehiculo_id || null,
+      vehiculo_id: isCuentaCorrienteEmpresa.value ? null : (formState.vehiculo_id || null),
       
       paciente_referido: formState.paciente_referido || null,
       nombre_chofer: formState.nombre_chofer || null,
@@ -405,9 +521,23 @@ async function handleSubmit() {
     
     let gastoGuardadoData;
     let error;
+    const origenGastoNormalizado = isCuentaCorrienteEmpresa.value
+      ? 'cuenta_corriente_empresa'
+      : formState.origen_gasto === 'cuenta_corriente_empresa'
+        ? null
+        : formState.origen_gasto || null;
+    const payloadOrigenGasto = { origen_gasto: origenGastoNormalizado };
+    const payloadCuentaCorrienteEmpresa = isCuentaCorrienteEmpresa.value
+      ? {
+          viaje_id: null,
+          caja_id: null,
+          vehiculo_id: null,
+          estado_delegacion: 'directo'
+        }
+      : {};
 
     if (isEditMode.value) {
-      const payloadUpdate = { ...payload, user_id: user.id, creado_por_id: null, estado_delegacion: 'directo', viaje_id: useCajaDiaria.value ? null : formState.viaje_id, caja_id: useCajaDiaria.value ? selectedCajaId.value : null };
+      const payloadUpdate = { ...payload, ...payloadOrigenGasto, user_id: user.id, creado_por_id: null, estado_delegacion: 'directo', viaje_id: useCajaDiaria.value ? null : formState.viaje_id, caja_id: useCajaDiaria.value ? selectedCajaId.value : null, ...payloadCuentaCorrienteEmpresa };
       ({ data: gastoGuardadoData, error } = await supabase.from('gastos').update(payloadUpdate).eq('id', props.gastoId).select().single());
     } else {
         if (isDelegating.value) {
@@ -416,7 +546,7 @@ async function handleSubmit() {
             gastoGuardadoData = data;
             error = rpcError;
         } else {
-            let payloadPropio = { ...payload, user_id: user.id, creado_por_id: null, estado_delegacion: 'directo', viaje_id: useCajaDiaria.value ? null : formState.viaje_id, caja_id: useCajaDiaria.value ? selectedCajaId.value : null };
+            let payloadPropio = { ...payload, ...payloadOrigenGasto, user_id: user.id, creado_por_id: null, estado_delegacion: 'directo', viaje_id: useCajaDiaria.value ? null : formState.viaje_id, caja_id: useCajaDiaria.value ? selectedCajaId.value : null, ...payloadCuentaCorrienteEmpresa };
             ({ data: gastoGuardadoData, error } = await supabase.from('gastos').insert(payloadPropio).select().single());
         }
     }
@@ -428,7 +558,7 @@ async function handleSubmit() {
       throw new Error(`Error al guardar el gasto: ${error.message}`);
     }
 
-    if (useCajaDiaria.value && !isDelegating.value) {
+    if (useCajaDiaria.value && !isDelegating.value && !isCuentaCorrienteEmpresa.value) {
         const { error: rpcError } = await supabase.rpc('registrar_gasto_caja_chica', { p_gasto_id: gastoGuardadoData.id, p_caja_id: selectedCajaId.value });
         if (rpcError) throw new Error(`Problema con Caja Diaria: ${rpcError.message}`);
     }
@@ -534,16 +664,23 @@ async function handleSubmit() {
             <legend class="form-legend">¿Cómo se rinde este gasto?</legend>
             <div class="space-y-6">
               <div v-if="opcionesSelect.cajas_chicas.length > 0" class="flex items-start">
-                <div class="flex h-6 items-center"><input id="assign-caja" name="assignment-type" type="radio" :value="true" v-model="useCajaDiaria" @change="isDelegating = false" class="radio-input"></div>
+                <div class="flex h-6 items-center"><input id="assign-caja" name="assignment-type" type="radio" :checked="useCajaDiaria" @change="selectCajaDiaria" class="radio-input"></div>
                 <div class="ml-3 text-sm leading-6"><label for="assign-caja" class="font-medium text-gray-900">Pagar con mi Caja Diaria</label><transition enter-active-class="transition ease-out duration-200" enter-from-class="opacity-0" enter-to-class="opacity-100" leave-active-class="transition ease-in duration-150" leave-from-class="opacity-100" leave-to-class="opacity-0"><div v-if="useCajaDiaria" class="mt-2"><select v-model="selectedCajaId" class="form-input"><option disabled :value="null">-- Selecciona tu caja --</option><option v-for="caja in opcionesSelect.cajas_chicas" :key="caja.value" :value="caja.value">{{ caja.label }}</option></select></div></transition></div>
               </div>
               <div class="flex items-start">
-                <div class="flex h-6 items-center"><input id="assign-rendicion" name="assignment-type" type="radio" :checked="!useCajaDiaria && !isDelegating" @change="useCajaDiaria = false; isDelegating = false" class="radio-input"></div>
-                <div class="ml-3 text-sm leading-6"><label for="assign-rendicion" class="font-medium text-gray-900">Asociar a una de mis Rendiciones</label><transition enter-active-class="transition ease-out duration-200" enter-from-class="opacity-0" enter-to-class="opacity-100" leave-active-class="transition ease-in duration-150" leave-from-class="opacity-100" leave-to-class="opacity-0"><div v-if="!useCajaDiaria && !isDelegating" class="mt-2"><select v-model.number="formState.viaje_id" class="form-input"><option disabled :value="null">-- Selecciona una rendición --</option><option v-for="viaje in opcionesSelect.viajes" :key="viaje.id" :value="viaje.id">{{ viaje.nombre_viaje }}</option></select></div></transition></div>
+                <div class="flex h-6 items-center"><input id="assign-rendicion" name="assignment-type" type="radio" :checked="!useCajaDiaria && !isDelegating && !isCuentaCorrienteEmpresa" @change="selectRendicion" class="radio-input"></div>
+                <div class="ml-3 text-sm leading-6"><label for="assign-rendicion" class="font-medium text-gray-900">Asociar a una de mis Rendiciones</label><transition enter-active-class="transition ease-out duration-200" enter-from-class="opacity-0" enter-to-class="opacity-100" leave-active-class="transition ease-in duration-150" leave-from-class="opacity-100" leave-to-class="opacity-0"><div v-if="!useCajaDiaria && !isDelegating && !isCuentaCorrienteEmpresa" class="mt-2"><select v-model.number="formState.viaje_id" class="form-input"><option disabled :value="null">-- Selecciona una rendición --</option><option v-for="viaje in opcionesSelect.viajes" :key="viaje.id" :value="viaje.id">{{ viaje.nombre_viaje }}</option></select></div></transition></div>
               </div>
               <div class="flex items-start">
-                <div class="flex h-6 items-center"><input id="assign-delegar" name="assignment-type" type="radio" :value="true" v-model="isDelegating" @change="useCajaDiaria = false" class="radio-input"></div>
+                <div class="flex h-6 items-center"><input id="assign-delegar" name="assignment-type" type="radio" :checked="isDelegating" @change="selectDelegacion" class="radio-input"></div>
                 <div class="ml-3 text-sm leading-6"><label for="assign-delegar" class="font-medium text-gray-900">Delegar gasto a otro responsable</label><p class="text-gray-500">El gasto será enviado para que otro usuario lo apruebe y lo incluya en su propia rendición.</p><transition enter-active-class="transition ease-out duration-200" enter-from-class="opacity-0" enter-to-class="opacity-100" leave-active-class="transition ease-in duration-150" leave-from-class="opacity-100" leave-to-class="opacity-0"><div v-if="isDelegating" class="mt-2"><select v-model="delegatedToUserId" class="form-input"><option disabled :value="null">-- Selecciona un responsable --</option><option v-for="user in opcionesSelect.usuariosParaDelegar" :key="user.id" :value="user.id">{{ user.nombre_completo || user.email }}</option></select></div></transition></div>
+              </div>
+              <div class="flex items-start">
+                <div class="flex h-6 items-center"><input id="assign-cuenta-corriente-empresa" name="assignment-type" type="radio" :checked="isCuentaCorrienteEmpresa" @change="selectCuentaCorrienteEmpresa" class="radio-input"></div>
+                <div class="ml-3 text-sm leading-6">
+                  <label for="assign-cuenta-corriente-empresa" class="font-medium text-gray-900">A Cuenta Corriente de la Empresa</label>
+                  <p class="text-gray-500">Registra el gasto sin asociarlo a rendición, caja diaria ni delegación.</p>
+                </div>
               </div>
             </div>
           </fieldset>
@@ -569,10 +706,9 @@ async function handleSubmit() {
             </div>
           </fieldset>
           
-          <fieldset v-if="camposObligatorios.length > 0" class="mt-8"><legend class="form-legend">Detalles Específicos del Formato</legend><div class="grid grid-cols-1 sm:grid-cols-2 gap-6"><div v-for="campo in camposObligatorios" :key="campo.id" class="input-wrapper"><label :for="campo.nombre_campo_tecnico" class="form-label">{{ campo.etiqueta_visible }} <span v-if="campo.es_obligatorio" class="text-red-500">*</span></label><input v-if="campo.tipo_input === 'texto'" type="text" :id="campo.nombre_campo_tecnico" v-model="formState[campo.nombre_campo_tecnico]" :required="campo.es_obligatorio" class="form-input mt-1" />
+          <fieldset v-if="camposObligatoriosVisibles.length > 0" class="mt-8"><legend class="form-legend">Detalles Específicos del Formato</legend><div class="grid grid-cols-1 sm:grid-cols-2 gap-6"><div v-for="campo in camposObligatoriosVisibles" :key="campo.id" class="input-wrapper"><label :for="campo.nombre_campo_tecnico" class="form-label">{{ campo.etiqueta_visible }} <span v-if="campo.es_obligatorio" class="text-red-500">*</span></label><v-select v-if="isProveedorField(campo)" :id="campo.nombre_campo_tecnico" v-model="formState.proveedor_id" :options="opcionesSelect.proveedores" :loading="loadingSelects.proveedores" taggable :create-option="createEntityOption" placeholder="-- Buscar o crear proveedor --" class="mt-1" :class="{ 'v-select-required': campo.es_obligatorio && !formState.proveedor_id }"></v-select><v-select v-else-if="campo.tipo_input === 'selector_simple'" :id="campo.nombre_campo_tecnico" v-model="formState[campo.nombre_campo_tecnico]" :options="getSelectorSimpleOptions(campo)" :reduce="option => option.value" placeholder="Seleccione..." class="mt-1" :class="{ 'v-select-required': campo.es_obligatorio && !formState[campo.nombre_campo_tecnico] }"></v-select><input v-else-if="campo.tipo_input === 'texto'" type="text" :id="campo.nombre_campo_tecnico" v-model="formState[campo.nombre_campo_tecnico]" :required="campo.es_obligatorio" class="form-input mt-1" />
                 <v-select v-else-if="campo.tipo_input === 'select_cliente'" :id="campo.nombre_campo_tecnico" v-model="formState.cliente_id" :options="opcionesSelect.clientes" taggable :create-option="(newOption) => newOption" placeholder="-- Buscar o crear cliente --" class="mt-1" :class="{ 'v-select-required': campo.es_obligatorio && !formState.cliente_id }"></v-select>
                 <v-select v-else-if="campo.tipo_input === 'select_transporte'" :id="campo.nombre_campo_tecnico" v-model="formState.transporte_id" :options="opcionesSelect.transportes" taggable :create-option="(newOption) => newOption" placeholder="-- Buscar o crear transporte --" class="mt-1" :class="{ 'v-select-required': campo.es_obligatorio && !formState.transporte_id }"></v-select>
-                <v-select v-else-if="campo.tipo_input === 'select_proveedor'" :id="campo.nombre_campo_tecnico" v-model="formState.proveedor_id" :options="opcionesSelect.proveedores" taggable :create-option="(newOption) => newOption" placeholder="-- Buscar o crear proveedor --" class="mt-1" :class="{ 'v-select-required': campo.es_obligatorio && !formState.proveedor_id }"></v-select>
             </div></div></fieldset>
           
           <transition enter-active-class="transition ease-out duration-300" enter-from-class="opacity-0 -translate-y-2" enter-to-class="opacity-100 translate-y-0" leave-active-class="transition ease-in duration-200" leave-from-class="opacity-100 translate-y-0" leave-to-class="opacity-0 -translate-y-2">
@@ -611,26 +747,27 @@ async function handleSubmit() {
             <h3 class="text-base font-semibold leading-7 text-gray-900">¿Necesitas más detalles?</h3>
             <p class="mt-1 text-sm leading-6 text-gray-600">Añade solo los campos que necesites para este gasto.</p>
             <div class="mt-4 flex flex-wrap gap-3">
-              <template v-for="campo in camposOpcionales" :key="`btn-${campo.id}`">
+              <template v-for="campo in camposOpcionalesVisiblesPorTipo" :key="`btn-${campo.id}`">
                 <button v-if="!camposOpcionalesVisibles.has(campo.nombre_campo_tecnico)" type="button" @click="agregarCampoOpcional(campo)" class="btn-add-optional">+ {{ campo.etiqueta_visible }}</button>
               </template>
-              <button v-if="!camposOpcionalesVisibles.has('vehiculo_id')" type="button" @click="agregarCampoOpcional({nombre_campo_tecnico: 'vehiculo_id'})" class="btn-add-optional">+ Vehículo</button>
+              <button v-if="!isCuentaCorrienteEmpresa && !camposOpcionalesVisibles.has('vehiculo_id')" type="button" @click="agregarCampoOpcional({nombre_campo_tecnico: 'vehiculo_id'})" class="btn-add-optional">+ Vehículo</button>
             </div>
             
-            <fieldset v-if="camposOpcionalesVisibles.size > 0" class="mt-6">
+            <fieldset v-if="hasCamposOpcionalesRenderizados" class="mt-6">
               <div class="grid grid-cols-1 sm:grid-cols-2 gap-6">
-                <template v-for="campo in camposOpcionales" :key="campo.id">
-                  <div v-if="camposOpcionalesVisibles.has(campo.nombre_campo_tecnico)" class="relative group input-wrapper">
+                <template v-for="campo in camposOpcionalesSeleccionadosVisibles" :key="campo.id">
+                  <div class="relative group input-wrapper">
                     <label :for="`opcional-${campo.nombre_campo_tecnico}`" class="form-label">{{ campo.etiqueta_visible }}</label>
-                    <input v-if="campo.tipo_input === 'texto'" type="text" :id="`opcional-${campo.nombre_campo_tecnico}`" v-model="formState[campo.nombre_campo_tecnico]" class="form-input mt-1" />
+                    <v-select v-if="isProveedorField(campo)" :id="`opcional-${campo.nombre_campo_tecnico}`" v-model="formState.proveedor_id" :options="opcionesSelect.proveedores" :loading="loadingSelects.proveedores" taggable :create-option="createEntityOption" placeholder="-- Buscar o crear proveedor --" class="mt-1"></v-select>
+                    <v-select v-else-if="campo.tipo_input === 'selector_simple'" :id="`opcional-${campo.nombre_campo_tecnico}`" v-model="formState[campo.nombre_campo_tecnico]" :options="getSelectorSimpleOptions(campo)" :reduce="option => option.value" placeholder="Seleccione..." class="mt-1"></v-select>
+                    <input v-else-if="campo.tipo_input === 'texto'" type="text" :id="`opcional-${campo.nombre_campo_tecnico}`" v-model="formState[campo.nombre_campo_tecnico]" class="form-input mt-1" />
                     <v-select v-else-if="campo.tipo_input === 'select_cliente'" :id="`opcional-${campo.nombre_campo_tecnico}`" v-model="formState.cliente_id" :options="opcionesSelect.clientes" taggable :create-option="(newOption) => newOption" placeholder="-- Buscar o crear cliente --" class="mt-1"></v-select>
                     <v-select v-else-if="campo.tipo_input === 'select_transporte'" :id="`opcional-${campo.nombre_campo_tecnico}`" v-model="formState.transporte_id" :options="opcionesSelect.transportes" taggable :create-option="(newOption) => newOption" placeholder="-- Buscar o crear transporte --" class="mt-1"></v-select>
-                    <v-select v-else-if="campo.tipo_input === 'select_proveedor'" :id="`opcional-${campo.nombre_campo_tecnico}`" v-model="formState.proveedor_id" :options="opcionesSelect.proveedores" taggable :create-option="(newOption) => newOption" placeholder="-- Buscar o crear proveedor --" class="mt-1"></v-select>
                     <button type="button" @click="quitarCampoOpcional(campo)" class="btn-remove-optional" aria-label="Quitar campo"><svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z" clip-rule="evenodd" /></svg></button>
                   </div>
                 </template>
                 
-                <div v-if="camposOpcionalesVisibles.has('vehiculo_id')" class="relative group input-wrapper sm:col-span-2 p-4 border border-gray-200 rounded-lg bg-gray-50">
+                <div v-if="showVehiculoOpcional" class="relative group input-wrapper sm:col-span-2 p-4 border border-gray-200 rounded-lg bg-gray-50">
                    <button type="button" @click="quitarCampoOpcional({nombre_campo_tecnico: 'vehiculo_id'})" class="btn-remove-optional" aria-label="Quitar sección de vehículo"><svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z" clip-rule="evenodd" /></svg></button>
                    <div class="grid grid-cols-1 sm:grid-cols-3 gap-4">
                       <div class="relative z-20">

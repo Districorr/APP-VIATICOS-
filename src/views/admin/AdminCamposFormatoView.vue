@@ -11,6 +11,7 @@ const router = useRouter();
 const formatoId = ref(parseInt(route.params.formatoId));
 const nombreFormato = ref('');
 const camposConfigurados = ref([]);
+const tiposGastoMap = ref(new Map());
 const loading = ref(true);
 const errorMessage = ref('');
 
@@ -25,9 +26,10 @@ const fetchFormatoInfoYCampos = async () => {
   errorMessage.value = '';
   try {
     // Cargar en paralelo la info del formato y sus campos
-    const [formatoResult, camposResult] = await Promise.all([
+    const [formatoResult, camposResult, tiposGastoResult] = await Promise.all([
       supabase.from('formatos_gasto_config').select('nombre_formato').eq('id', formatoId.value).single(),
-      supabase.from('campos_formato_config').select('*').eq('formato_id', formatoId.value).order('orden_visualizacion')
+      supabase.from('campos_formato_config').select('*').eq('formato_id', formatoId.value).order('orden_visualizacion'),
+      supabase.from('tipos_gasto_config').select('id, nombre_tipo_gasto').order('nombre_tipo_gasto')
     ]);
 
     if (formatoResult.error) throw formatoResult.error;
@@ -35,6 +37,11 @@ const fetchFormatoInfoYCampos = async () => {
 
     if (camposResult.error) throw camposResult.error;
     camposConfigurados.value = camposResult.data;
+    if (tiposGastoResult.error) throw tiposGastoResult.error;
+    tiposGastoMap.value = new Map((tiposGastoResult.data || []).flatMap(tipo => [
+      [tipo.id, tipo.nombre_tipo_gasto],
+      [String(tipo.id), tipo.nombre_tipo_gasto]
+    ]));
 
   } catch (error) {
     console.error('Error cargando datos del formato y campos:', error.message);
@@ -157,6 +164,7 @@ const volverAFormatos = () => {
               <th class="table-header">Etiqueta Visible</th>
               <th class="table-header">Nombre Técnico</th>
               <th class="table-header">Tipo de Input</th>
+              <th class="table-header">Aplica a</th>
               <th class="table-header text-center">Obligatorio</th>
               <th class="table-header text-right">Acciones</th>
             </tr>
@@ -178,6 +186,9 @@ const volverAFormatos = () => {
                   {{ campo.tipo_input.replace('_', ' ') }}
                 </span>
                 <!-- --- FIN DE LA MODIFICACIÓN --- -->
+              </td>
+              <td class="px-4 py-3 text-sm text-gray-600">
+                {{ campo.tipo_gasto_id ? (tiposGastoMap.get(campo.tipo_gasto_id) || `Tipo ID ${campo.tipo_gasto_id}`) : 'Todos los tipos' }}
               </td>
               <td class="px-4 py-3 text-center">
                 <span :class="campo.es_obligatorio ? 'text-green-600' : 'text-red-500'" class="font-bold text-lg">

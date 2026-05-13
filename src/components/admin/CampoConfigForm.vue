@@ -1,5 +1,5 @@
 <script setup>
-import { ref, watch } from 'vue';
+import { ref, watch, onMounted } from 'vue';
 import { supabase } from '../../supabaseClient.js';
 
 const props = defineProps({
@@ -13,6 +13,8 @@ const form = ref({});
 const loading = ref(false);
 const errorMessage = ref('');
 const successMessage = ref('');
+const tiposGasto = ref([]);
+const loadingTiposGasto = ref(false);
 
 // --- INICIO DE LA MODIFICACIÓN ---
 // Añadimos la nueva opción para el selector de transportes.
@@ -40,11 +42,31 @@ watch(() => props.campoAEditar, (newVal) => {
       es_obligatorio: false,
       orden_visualizacion: 10,
       opciones_selector_str: '',
+      tipo_gasto_id: null,
     };
   }
   errorMessage.value = '';
   successMessage.value = '';
 }, { immediate: true, deep: true });
+
+async function cargarTiposGasto() {
+  loadingTiposGasto.value = true;
+  try {
+    const { data, error } = await supabase
+      .from('tipos_gasto_config')
+      .select('id, nombre_tipo_gasto')
+      .eq('activo', true)
+      .order('nombre_tipo_gasto');
+    if (error) throw error;
+    tiposGasto.value = data || [];
+  } catch (error) {
+    console.error('Error cargando tipos de gasto:', error.message);
+  } finally {
+    loadingTiposGasto.value = false;
+  }
+}
+
+onMounted(cargarTiposGasto);
 
 function autocompletarNombreTecnico() {
   if (!props.isEditMode && form.value.etiqueta_visible) {
@@ -78,6 +100,7 @@ const handleSubmit = async () => {
       tipo_input: form.value.tipo_input,
       es_obligatorio: form.value.es_obligatorio,
       orden_visualizacion: form.value.orden_visualizacion,
+      tipo_gasto_id: form.value.tipo_gasto_id || null,
       opciones_selector: form.value.tipo_input === 'selector_simple'
         ? form.value.opciones_selector_str.split(',').map(opt => opt.trim()).filter(Boolean)
         : null,
@@ -141,6 +164,17 @@ const handleSubmit = async () => {
       <label for="opciones_selector" class="form-label">Opciones del Selector</label>
       <input type="text" id="opciones_selector" v-model="form.opciones_selector_str" class="form-input" placeholder="Opción 1, Opción 2, Opción 3">
       <p class="form-hint">Escribe las opciones separadas por comas.</p>
+    </div>
+
+    <div>
+      <label for="tipo_gasto_id" class="form-label">Aplicar solo a un tipo de gasto</label>
+      <select id="tipo_gasto_id" v-model="form.tipo_gasto_id" :disabled="loadingTiposGasto" class="form-input">
+        <option :value="null">Todos los tipos de gasto</option>
+        <option v-for="tipo in tiposGasto" :key="tipo.id" :value="tipo.id">
+          {{ tipo.nombre_tipo_gasto }}
+        </option>
+      </select>
+      <p class="form-hint">Si se deja en blanco, el campo aplica a todo el formato.</p>
     </div>
 
     <div class="flex items-center">

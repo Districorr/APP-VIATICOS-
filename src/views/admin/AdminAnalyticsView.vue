@@ -7,6 +7,7 @@ import { useRouter } from 'vue-router';
 import GastosAnalyticsTab from '../../components/admin/analytics/GastosAnalyticsTab.vue';
 import RendicionesAnalyticsTab from '../../components/admin/analytics/RendicionesAnalyticsTab.vue';
 import ExploracionAvanzadaTab from '../../components/admin/analytics/ExploracionAvanzadaTab.vue';
+import EncomiendasCostosTab from '../../components/admin/analytics/EncomiendasCostosTab.vue';
 // === INICIO DE LA INTEGRACIÓN ===
 import AdminReportGenerator from '../../components/admin/AdminReportGenerator.vue';
 // === FIN DE LA INTEGRACIÓN ===
@@ -15,7 +16,7 @@ import { formatCurrency } from '../../utils/formatters.js';
 
 import ToastNotification from '../../components/ToastNotification.vue';
 // === INICIO DE LA INTEGRACIÓN: Añadimos el nuevo ícono ===
-import { ChartPieIcon, BriefcaseIcon, MagnifyingGlassIcon, UsersIcon, DocumentChartBarIcon } from '@heroicons/vue/24/outline';
+import { ChartPieIcon, BriefcaseIcon, MagnifyingGlassIcon, UsersIcon, DocumentChartBarIcon, TruckIcon } from '@heroicons/vue/24/outline';
 // === FIN DE LA INTEGRACIÓN ===
 
 const router = useRouter();
@@ -39,6 +40,7 @@ const tabs = {
   gastos: GastosAnalyticsTab,
   rendiciones: RendicionesAnalyticsTab,
   exploracion: ExploracionAvanzadaTab,
+  encomiendas: EncomiendasCostosTab,
   reportes: AdminReportGenerator, // Nueva pestaña
 };
 const activeComponent = computed(() => tabs[activeTab.value]);
@@ -122,6 +124,10 @@ onMounted(fetchSharedOptions);
             <button @click="activeTab = 'exploracion'" :class="[activeTab === 'exploracion' ? 'border-indigo-500 text-indigo-600' : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300', 'group inline-flex items-center py-4 px-1 border-b-2 font-medium text-sm whitespace-nowrap']">
               <MagnifyingGlassIcon class="-ml-0.5 mr-2 h-5 w-5" />
               <span>Exploración Avanzada</span>
+            </button>
+            <button @click="activeTab = 'encomiendas'" :class="[activeTab === 'encomiendas' ? 'border-indigo-500 text-indigo-600' : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300', 'group inline-flex items-center py-4 px-1 border-b-2 font-medium text-sm whitespace-nowrap']">
+              <TruckIcon class="-ml-0.5 mr-2 h-5 w-5" />
+              <span>Encomiendas / Costos Logísticos</span>
             </button>
             <button @click="activeTab = 'reportes'" :class="[activeTab === 'reportes' ? 'border-indigo-500 text-indigo-600' : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300', 'group inline-flex items-center py-4 px-1 border-b-2 font-medium text-sm whitespace-nowrap']">
               <DocumentChartBarIcon class="-ml-0.5 mr-2 h-5 w-5" />
