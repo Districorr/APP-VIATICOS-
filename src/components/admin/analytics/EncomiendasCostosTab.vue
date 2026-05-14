@@ -49,8 +49,12 @@ const exportingPdf = ref(false);
 const selectedWeek = ref(null);
 const isCupoModalOpen = ref(false);
 const savingCupo = ref(false);
+const loadingProviderCupos = ref(false);
+const cupoMode = ref('general');
+const providerCupos = ref([]);
 const cupoForm = ref({
   mes: '',
+  proveedorId: null,
   cupoMensual: '',
   observaciones: '',
 });
@@ -250,12 +254,15 @@ async function handleClearFilters() {
 }
 
 function openCupoModal() {
+  cupoMode.value = 'general';
   cupoForm.value = {
     mes: currentCupoMonth.value,
+    proveedorId: null,
     cupoMensual: cupo.value.cupo_mensual !== null && cupo.value.cupo_mensual !== undefined ? String(cupo.value.cupo_mensual) : '',
     observaciones: cupo.value.observaciones || '',
   };
   isCupoModalOpen.value = true;
+  fetchProviderCuposForMonth();
 }
 
 function closeCupoModal() {
@@ -263,10 +270,59 @@ function closeCupoModal() {
   isCupoModalOpen.value = false;
 }
 
+async function fetchProviderCuposForMonth() {
+  if (!cupoForm.value.mes) {
+    providerCupos.value = [];
+    return;
+  }
+
+  loadingProviderCupos.value = true;
+  try {
+    const { data, error: rpcError } = await supabase.rpc('get_cupos_encomiendas_proveedor_mensual', {
+      p_mes: `${cupoForm.value.mes}-01`,
+    });
+    if (rpcError) throw rpcError;
+    providerCupos.value = data || [];
+  } catch (e) {
+    console.error('Error cargando cupos por proveedor:', e);
+    providerCupos.value = [];
+    emit('show-notification', 'Error', 'No se pudieron cargar los cupos por proveedor del mes.', 'error');
+  } finally {
+    loadingProviderCupos.value = false;
+  }
+}
+
+function handleCupoMonthChange() {
+  fetchProviderCuposForMonth();
+}
+
+function switchCupoMode(mode) {
+  cupoMode.value = mode;
+  if (mode === 'general') {
+    cupoForm.value.proveedorId = null;
+    cupoForm.value.cupoMensual = cupo.value.cupo_mensual !== null && cupo.value.cupo_mensual !== undefined ? String(cupo.value.cupo_mensual) : '';
+    cupoForm.value.observaciones = cupo.value.observaciones || '';
+  } else {
+    cupoForm.value.cupoMensual = '';
+    cupoForm.value.observaciones = '';
+  }
+}
+
+function editProviderCupo(item) {
+  cupoMode.value = 'proveedor';
+  cupoForm.value.proveedorId = item.proveedor_id;
+  cupoForm.value.cupoMensual = item.cupo_mensual !== null && item.cupo_mensual !== undefined ? String(item.cupo_mensual) : '';
+  cupoForm.value.observaciones = item.observaciones || '';
+}
+
 async function saveCupoMensual() {
   const monto = Number(cupoForm.value.cupoMensual);
   if (!cupoForm.value.mes) {
     emit('show-notification', 'Validación', 'El mes del cupo es obligatorio.', 'warning');
+    return;
+  }
+  if (cupoMode.value === 'proveedor' && !cupoForm.value.proveedorId) {
+    emit('show-notification', 'Validación', 'El proveedor es obligatorio para configurar un cupo por proveedor.', 'warning');
     return;
   }
   if (cupoForm.value.cupoMensual === '' || !Number.isFinite(monto) || monto < 0) {
@@ -276,15 +332,22 @@ async function saveCupoMensual() {
 
   savingCupo.value = true;
   try {
-    const { error: rpcError } = await supabase.rpc('guardar_cupo_encomiendas_mensual', {
+    const rpcName = cupoMode.value === 'general'
+      ? 'guardar_cupo_encomiendas_mensual'
+      : 'guardar_cupo_encomiendas_proveedor_mensual';
+    const params = {
       p_mes: `${cupoForm.value.mes}-01`,
       p_cupo_mensual: monto,
       p_observaciones: cupoForm.value.observaciones?.trim() || null,
-    });
+    };
+    if (cupoMode.value === 'proveedor') params.p_proveedor_id = cupoForm.value.proveedorId;
+
+    const { error: rpcError } = await supabase.rpc(rpcName, params);
 
     if (rpcError) throw rpcError;
-    emit('show-notification', 'Cupo actualizado', 'El cupo mensual de encomiendas fue guardado.', 'success');
-    isCupoModalOpen.value = false;
+    emit('show-notification', 'Cupo actualizado', cupoMode.value === 'general' ? 'El cupo mensual general fue guardado.' : 'El cupo mensual por proveedor fue guardado.', 'success');
+    if (cupoMode.value === 'proveedor') await fetchProviderCuposForMonth();
+    else isCupoModalOpen.value = false;
     await fetchDashboard();
   } catch (e) {
     console.error('Error guardando cupo mensual de encomiendas:', e);
@@ -570,7 +633,7 @@ onMounted(async () => {
 
     <Transition name="modal-fade">
       <div v-if="isCupoModalOpen" class="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 p-4" @click.self="closeCupoModal">
-        <div class="w-full max-w-lg rounded-xl bg-white shadow-2xl">
+        <div class="w-full max-w-3xl rounded-xl bg-white shadow-2xl">
           <div class="flex items-start justify-between border-b border-slate-200 p-5">
             <div>
               <h3 class="text-lg font-bold text-slate-900">Ajustar cupo mensual</h3>
@@ -581,8 +644,19 @@ onMounted(async () => {
 
           <form class="space-y-5 p-5" @submit.prevent="saveCupoMensual">
             <div>
+              <label class="form-label">Tipo de cupo</label>
+              <div class="mt-1 grid grid-cols-2 gap-2 rounded-lg bg-slate-100 p-1">
+                <button type="button" class="cupo-mode-button" :class="{ 'is-active': cupoMode === 'general' }" @click="switchCupoMode('general')">Cupo general</button>
+                <button type="button" class="cupo-mode-button" :class="{ 'is-active': cupoMode === 'proveedor' }" @click="switchCupoMode('proveedor')">Cupo por proveedor</button>
+              </div>
+            </div>
+            <div>
               <label class="form-label">Mes / Año <span class="text-red-500">*</span></label>
-              <input v-model="cupoForm.mes" type="month" required class="form-input mt-1" />
+              <input v-model="cupoForm.mes" type="month" required class="form-input mt-1" @change="handleCupoMonthChange" />
+            </div>
+            <div v-if="cupoMode === 'proveedor'">
+              <label class="form-label">Proveedor <span class="text-red-500">*</span></label>
+              <v-select v-model="cupoForm.proveedorId" :options="proveedorOptions" :reduce="option => option.code" :loading="loadingFilterOptions" placeholder="Buscar proveedor" class="v-select-filter bg-white" />
             </div>
             <div>
               <label class="form-label">Cupo mensual <span class="text-red-500">*</span></label>
@@ -591,6 +665,38 @@ onMounted(async () => {
             <div>
               <label class="form-label">Observaciones</label>
               <textarea v-model="cupoForm.observaciones" rows="3" class="form-input mt-1" placeholder="Comentario opcional sobre el cupo"></textarea>
+            </div>
+
+            <div v-if="cupoMode === 'proveedor'" class="rounded-lg border border-slate-200">
+              <div class="flex items-center justify-between border-b border-slate-200 bg-slate-50 px-4 py-3">
+                <h4 class="text-sm font-bold text-slate-800">Cupos por proveedor configurados para {{ cupoForm.mes || 'el mes seleccionado' }}</h4>
+                <span v-if="loadingProviderCupos" class="text-xs font-semibold text-slate-500">Cargando...</span>
+              </div>
+              <div class="max-h-56 overflow-y-auto">
+                <table class="min-w-full">
+                  <thead>
+                    <tr>
+                      <th class="table-header">Proveedor</th>
+                      <th class="table-header text-right">Cupo mensual</th>
+                      <th class="table-header">Observación</th>
+                      <th class="table-header text-right">Acción</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    <tr v-for="item in providerCupos" :key="item.id || `${item.proveedor_id}-${item.mes}`" class="data-row">
+                      <td class="table-cell font-medium text-slate-800">{{ item.proveedor_nombre }}</td>
+                      <td class="table-cell money-cell">{{ formatCurrency(item.cupo_mensual) }}</td>
+                      <td class="table-cell max-w-xs truncate text-slate-600">{{ item.observaciones || '—' }}</td>
+                      <td class="table-cell text-right">
+                        <button type="button" class="text-sm font-semibold text-indigo-600 hover:text-indigo-800" @click="editProviderCupo(item)">Editar</button>
+                      </td>
+                    </tr>
+                    <tr v-if="!loadingProviderCupos && providerCupos.length === 0">
+                      <td colspan="4" class="empty-cell">No hay cupos por proveedor configurados para este mes.</td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
             </div>
 
             <div class="flex flex-col-reverse gap-3 border-t border-slate-200 pt-5 sm:flex-row sm:justify-end">
@@ -607,6 +713,8 @@ onMounted(async () => {
 <style scoped>
 .section-header { @apply flex flex-col gap-4 rounded-xl border border-slate-200 bg-white p-5 shadow-sm lg:flex-row lg:items-center lg:justify-between; }
 .period-badge { @apply inline-flex items-center justify-center rounded-full border border-slate-200 bg-slate-50 px-4 py-2 text-sm font-semibold text-slate-700; }
+.cupo-mode-button { @apply rounded-md px-3 py-2 text-sm font-semibold text-slate-600 transition-colors hover:bg-white/70; }
+.cupo-mode-button.is-active { @apply bg-white text-slate-900 shadow-sm; }
 .panel-section { @apply border-slate-200 shadow-sm; }
 .detail-section { @apply border-slate-300 shadow-sm; }
 .cupo-metric { @apply rounded-lg border border-slate-200 bg-slate-50 p-4; }
