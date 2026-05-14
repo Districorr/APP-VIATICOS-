@@ -75,6 +75,13 @@ const showTransporteFields = computed(() => {
   return tipoGastoSeleccionado?.es_tipo_transporte === true;
 });
 
+const ORIGEN_GASTO = Object.freeze({
+  rendicion: 'rendicion',
+  cajaDiaria: 'pago_directo',
+  delegacion: 'delegado',
+  cuentaCorrienteEmpresa: 'cuenta_corriente_empresa'
+});
+
 const handleMontoInput = (event) => {
   const input = event.target;
   let value = input.value;
@@ -223,6 +230,20 @@ function isValorVacio(valor) {
   return valor === null || valor === undefined || valor === '' || (typeof valor === 'string' && valor.trim() === '');
 }
 
+function normalizarId(valor) {
+  if (valor === null || valor === undefined || valor === '') return null;
+  const numero = Number(valor);
+  return Number.isNaN(numero) ? valor : numero;
+}
+
+function getOrigenGastoSeleccionado() {
+  if (isCuentaCorrienteEmpresa.value) return ORIGEN_GASTO.cuentaCorrienteEmpresa;
+  if (isDelegating.value) return ORIGEN_GASTO.delegacion;
+  if (useCajaDiaria.value) return ORIGEN_GASTO.cajaDiaria;
+  if (formState.viaje_id) return ORIGEN_GASTO.rendicion;
+  return null;
+}
+
 function getValorCampoDinamico(campo) {
   if (isProveedorField(campo)) return formState.proveedor_id;
   if (campo.tipo_input === 'select_cliente') return formState.cliente_id;
@@ -244,6 +265,24 @@ function inicializarFormState() {
     }
   });
   Object.assign(formState, { ...camposFijos, ...camposDeIdNormalizados, ...otrosCamposDinamicos });
+  if (!isEditMode.value) {
+    const cajaIdPredeterminada = normalizarId(props.cajaIdPredeterminada);
+    const viajeIdPredeterminado = normalizarId(props.viajeIdPredeterminado);
+
+    if (cajaIdPredeterminada) {
+      useCajaDiaria.value = true;
+      isDelegating.value = false;
+      isCuentaCorrienteEmpresa.value = false;
+      selectedCajaId.value = cajaIdPredeterminada;
+      formState.viaje_id = null;
+    } else if (viajeIdPredeterminado) {
+      useCajaDiaria.value = false;
+      isDelegating.value = false;
+      isCuentaCorrienteEmpresa.value = false;
+      selectedCajaId.value = null;
+      formState.viaje_id = viajeIdPredeterminado;
+    }
+  }
   formattedMontoTotal.value = formatCurrencyForInput(formState.monto_total);
 }
 
@@ -368,7 +407,9 @@ function validateStep1() {
   return true;
 }
 function validateStep2() {
-  if (!useCajaDiaria.value && !isDelegating.value && !isCuentaCorrienteEmpresa.value && !formState.viaje_id) { stepError.value = 'Debes asociar este gasto a una rendición o delegarlo.'; return false; }
+  const origenGastoSeleccionado = getOrigenGastoSeleccionado();
+  if (!origenGastoSeleccionado) { stepError.value = 'Seleccioná cómo se imputa este gasto antes de continuar.'; return false; }
+  if (useCajaDiaria.value && !selectedCajaId.value) { stepError.value = 'Si pagas con Caja Diaria, debes seleccionar una caja.'; return false; }
   if (isDelegating.value && !delegatedToUserId.value) { stepError.value = 'Debes seleccionar un responsable a quien delegar el gasto.'; return false; }
   if (!formState.tipo_gasto_id) { stepError.value = 'Debes seleccionar un tipo de gasto.'; return false; }
   for (const campo of camposObligatoriosVisibles.value) {
@@ -521,11 +562,10 @@ async function handleSubmit() {
     
     let gastoGuardadoData;
     let error;
-    const origenGastoNormalizado = isCuentaCorrienteEmpresa.value
-      ? 'cuenta_corriente_empresa'
-      : formState.origen_gasto === 'cuenta_corriente_empresa'
-        ? null
-        : formState.origen_gasto || null;
+    const origenGastoNormalizado = getOrigenGastoSeleccionado();
+    if (!origenGastoNormalizado) {
+      throw new Error('Seleccioná cómo se imputa este gasto antes de continuar.');
+    }
     const payloadOrigenGasto = { origen_gasto: origenGastoNormalizado };
     const payloadCuentaCorrienteEmpresa = isCuentaCorrienteEmpresa.value
       ? {
@@ -541,7 +581,7 @@ async function handleSubmit() {
       ({ data: gastoGuardadoData, error } = await supabase.from('gastos').update(payloadUpdate).eq('id', props.gastoId).select().single());
     } else {
         if (isDelegating.value) {
-            const payloadDelegado = { ...payload, user_id: delegatedToUserId.value };
+            const payloadDelegado = { ...payload, ...payloadOrigenGasto, user_id: delegatedToUserId.value };
             const { data, error: rpcError } = await supabase.rpc('crear_gasto_delegado', { payload: payloadDelegado });
             gastoGuardadoData = data;
             error = rpcError;
