@@ -155,6 +155,12 @@ const selectedMonthBase = computed(() => {
   return Number.isNaN(parsed.getTime()) ? new Date() : parsed;
 });
 
+const parseDateOnly = (value) => {
+  if (!value) return null;
+  const parsed = new Date(`${String(value).slice(0, 10)}T00:00:00`);
+  return Number.isNaN(parsed.getTime()) ? null : parsed;
+};
+
 const weekOptions = computed(() => {
   const base = selectedMonthBase.value;
   const year = base.getFullYear();
@@ -189,21 +195,129 @@ const weekOptions = computed(() => {
 
 const selectedWeekOption = computed(() => weekOptions.value.find((option) => option.code === selectedWeek.value));
 
-const weekColumns = computed(() => backendWeekColumns.value.length > 0 ? backendWeekColumns.value : weekOptions.value.slice(1).map((item) => ({
-  semana_numero: Number(String(item.code).replace('week-', '')),
-  semana_inicio: item.start,
-  semana_fin: item.end,
-})));
+const buildWeeksForPeriod = (fechaDesde, fechaHasta) => {
+  const start = parseDateOnly(fechaDesde);
+  const end = parseDateOnly(fechaHasta);
+  if (!start || !end || start > end) return [];
+
+  const weeks = [];
+  let weekStart = new Date(start);
+  let index = 1;
+
+  while (weekStart <= end) {
+    const weekEnd = new Date(weekStart);
+    const daysUntilSunday = weekEnd.getDay() === 0 ? 0 : 7 - weekEnd.getDay();
+    weekEnd.setDate(weekStart.getDate() + daysUntilSunday);
+    if (weekEnd > end) weekEnd.setTime(end.getTime());
+
+    weeks.push({
+      semana_numero: index,
+      semana_inicio: isoDate(weekStart),
+      semana_fin: isoDate(weekEnd),
+    });
+
+    weekStart = new Date(weekEnd);
+    weekStart.setDate(weekStart.getDate() + 1);
+    index += 1;
+  }
+
+  return weeks;
+};
+
+const normalizeWeekColumns = (weeks = []) => (Array.isArray(weeks) ? weeks : Object.values(weeks || {}))
+  .map((week, index) => ({
+    ...week,
+    semana_numero: Number(week?.semana_numero || index + 1),
+    semana_inicio: week?.semana_inicio,
+    semana_fin: week?.semana_fin,
+  }))
+  .filter((week) => Number.isFinite(week.semana_numero))
+  .sort((a, b) => a.semana_numero - b.semana_numero);
+
+const weekColumns = computed(() => {
+  const catalogWeeks = normalizeWeekColumns(backendWeekColumns.value);
+  const periodWeeks = buildWeeksForPeriod(periodo.value.fecha_desde || filters.fechaDesde, periodo.value.fecha_hasta || filters.fechaHasta);
+
+  if (periodWeeks.length === 0) {
+    return catalogWeeks.length > 0 ? catalogWeeks : weekOptions.value.slice(1).map((item) => ({
+      semana_numero: Number(String(item.code).replace('week-', '')),
+      semana_inicio: item.start,
+      semana_fin: item.end,
+    }));
+  }
+
+  const catalogByNumber = new Map(catalogWeeks.map((week) => [Number(week.semana_numero), week]));
+  return periodWeeks.map((periodWeek) => ({
+    ...periodWeek,
+    ...(catalogByNumber.get(Number(periodWeek.semana_numero)) || {}),
+    semana_numero: periodWeek.semana_numero,
+    semana_inicio: periodWeek.semana_inicio,
+    semana_fin: periodWeek.semana_fin,
+  }));
+});
 
 const controlProviderRows = computed(() => weeklyProviderRows.value);
 
+const dateKey = (value) => value ? String(value).slice(0, 10) : '';
+
+const findWeekData = (weeks = [], weekColumn) => {
+  const sourceWeeks = Array.isArray(weeks) ? weeks : Object.values(weeks || {});
+  return sourceWeeks.find((week) => {
+    const sameNumber = week?.semana_numero !== null
+      && week?.semana_numero !== undefined
+      && Number(week.semana_numero) === Number(weekColumn.semana_numero);
+    const sameRange = dateKey(week?.semana_inicio) === dateKey(weekColumn.semana_inicio)
+      && dateKey(week?.semana_fin) === dateKey(weekColumn.semana_fin);
+    return sameNumber || sameRange;
+  });
+};
+
 const getWeekAmount = (item, week) => {
-  const match = (item?.semanas || []).find((semana) => Number(semana.semana_numero) === Number(week.semana_numero));
+  const match = findWeekData(item?.semanas, week);
   return numberValue(match?.gasto_total);
 };
 
+const getWeekDispatches = (item, week) => {
+  const match = findWeekData(item?.semanas, week);
+  return numberValue(match?.despachos);
+};
+
+const computedWeeklyTotals = computed(() => {
+  const semanas = weekColumns.value.map((week) => ({
+    ...week,
+    gasto_total: controlProviderRows.value.reduce((total, item) => total + getWeekAmount(item, week), 0),
+    despachos: controlProviderRows.value.reduce((total, item) => total + getWeekDispatches(item, week), 0),
+  }));
+  const gastoTotalPeriodo = controlProviderRows.value.reduce((total, item) => total + numberValue(item.gasto_total_periodo), 0);
+  const despachosPeriodo = controlProviderRows.value.reduce((total, item) => total + numberValue(item.despachos_periodo), 0);
+
+  return {
+    semanas,
+    gasto_total_periodo: gastoTotalPeriodo,
+    despachos_periodo: despachosPeriodo,
+    promedio_por_despacho: despachosPeriodo > 0 ? gastoTotalPeriodo / despachosPeriodo : 0,
+    cupo_mensual_total: weeklyTotals.value?.cupo_mensual_total,
+    disponible_diferencia_total: weeklyTotals.value?.disponible_diferencia_total,
+    porcentaje_consumido_total: weeklyTotals.value?.porcentaje_consumido_total,
+  };
+});
+
+const displayWeeklyTotals = computed(() => {
+  if (controlProviderRows.value.length > 0) return computedWeeklyTotals.value;
+
+  const totals = weeklyTotals.value || {};
+  const hasCompleteBackendTotals = Array.isArray(totals.semanas)
+    && totals.semanas.length > 0
+    && totals.gasto_total_periodo !== null
+    && totals.gasto_total_periodo !== undefined
+    && totals.despachos_periodo !== null
+    && totals.despachos_periodo !== undefined;
+
+  return hasCompleteBackendTotals ? totals : computedWeeklyTotals.value;
+});
+
 const getTotalWeekAmount = (week) => {
-  const match = (weeklyTotals.value?.semanas || []).find((semana) => Number(semana.semana_numero) === Number(week.semana_numero));
+  const match = findWeekData(displayWeeklyTotals.value?.semanas, week);
   return numberValue(match?.gasto_total);
 };
 
@@ -518,18 +632,18 @@ onMounted(async () => {
                 </td>
                 <td class="table-cell"><span class="status-pill" :class="statusClass(item.estado)">{{ item.estado || '—' }}</span></td>
               </tr>
-              <tr v-if="weeklyTotals" class="total-row">
+              <tr v-if="controlProviderRows.length > 0 || weeklyTotals" class="total-row">
                 <td class="table-cell font-bold text-slate-900">TOTAL</td>
                 <td v-for="week in weekColumns" :key="week.semana_numero" class="table-cell money-cell">{{ formatCurrency(getTotalWeekAmount(week)) }}</td>
-                <td class="table-cell money-cell">{{ formatCurrency(weeklyTotals.gasto_total_periodo) }}</td>
-                <td class="table-cell numeric-cell">{{ numberValue(weeklyTotals.despachos_periodo).toLocaleString('es-AR') }}</td>
-                <td class="table-cell money-cell">{{ formatCurrency(weeklyTotals.promedio_por_despacho) }}</td>
-                <td class="table-cell money-cell">{{ formatNullableCurrency(weeklyTotals.cupo_mensual_total) }}</td>
-                <td class="table-cell text-right" :class="differenceClass(weeklyTotals.disponible_diferencia_total)">{{ formatNullableCurrency(weeklyTotals.disponible_diferencia_total) }}</td>
+                <td class="table-cell money-cell">{{ formatCurrency(displayWeeklyTotals.gasto_total_periodo) }}</td>
+                <td class="table-cell numeric-cell">{{ numberValue(displayWeeklyTotals.despachos_periodo).toLocaleString('es-AR') }}</td>
+                <td class="table-cell money-cell">{{ formatCurrency(displayWeeklyTotals.promedio_por_despacho) }}</td>
+                <td class="table-cell money-cell">{{ formatNullableCurrency(displayWeeklyTotals.cupo_mensual_total) }}</td>
+                <td class="table-cell text-right" :class="differenceClass(displayWeeklyTotals.disponible_diferencia_total)">{{ formatNullableCurrency(displayWeeklyTotals.disponible_diferencia_total) }}</td>
                 <td class="table-cell min-w-32">
-                  <div v-if="weeklyTotals.porcentaje_consumido_total !== null && weeklyTotals.porcentaje_consumido_total !== undefined" class="space-y-1">
-                    <div class="text-right font-semibold text-slate-800">{{ numberValue(weeklyTotals.porcentaje_consumido_total).toFixed(2) }}%</div>
-                    <div class="h-1.5 rounded-full bg-slate-200"><div class="h-full rounded-full bg-slate-500" :style="{ width: percentWidth(weeklyTotals.porcentaje_consumido_total) }"></div></div>
+                  <div v-if="displayWeeklyTotals.porcentaje_consumido_total !== null && displayWeeklyTotals.porcentaje_consumido_total !== undefined" class="space-y-1">
+                    <div class="text-right font-semibold text-slate-800">{{ numberValue(displayWeeklyTotals.porcentaje_consumido_total).toFixed(2) }}%</div>
+                    <div class="h-1.5 rounded-full bg-slate-200"><div class="h-full rounded-full bg-slate-500" :style="{ width: percentWidth(displayWeeklyTotals.porcentaje_consumido_total) }"></div></div>
                   </div>
                   <span v-else class="block text-right text-slate-500">—</span>
                 </td>

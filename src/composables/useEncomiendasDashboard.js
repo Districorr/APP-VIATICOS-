@@ -87,7 +87,7 @@ export function useEncomiendasDashboard() {
 
     try {
       const { data, error: rpcError } = await supabase.rpc(
-        'get_admin_encomiendas_dashboard',
+        'get_admin_encomiendas_dashboard_v2',
         buildRpcParams()
       );
 
@@ -104,7 +104,7 @@ export function useEncomiendasDashboard() {
 
   const fetchExportDashboard = async () => {
     const { data, error: rpcError } = await supabase.rpc(
-      'get_admin_encomiendas_dashboard',
+      'get_admin_encomiendas_dashboard_v2',
       buildRpcParams({ limit: null, pageOffset: 0 })
     );
 
