@@ -70,3 +70,6 @@ El gasto se persiste en `gastos` mediante el flujo frontend existente de alta/ed
 - Build frontend ejecutado correctamente con `npm.cmd run build`.
 - La tabla `gastos` ya admite registros sin `viaje_id`, `caja_id` ni `vehiculo_id`.
 - Este caso se diferencia de delegaciones pendientes/rechazadas por `estado_delegacion = 'directo'` y `origen_gasto = 'cuenta_corriente_empresa'`.
+## 7. Relacion con evoluciones posteriores (2026-06-01)
+- F-LOG-002 extiende este flujo con edicion administrativa para gastos `cuenta_corriente_empresa` desde Encomiendas/Costos, via RPC `admin_actualizar_gasto_cuenta_corriente`.
+- F-LOG-003 agrega creacion de proveedor desde el modal de edicion admin, via RPC `admin_crear_proveedor_basico`, con autoseleccion del proveedor creado.

@@ -1,10 +1,11 @@
 <script setup>
-import { computed, onMounted, ref } from 'vue';
+import { computed, inject, onMounted, ref } from 'vue';
 import vSelect from 'vue-select';
 import 'vue-select/dist/vue-select.css';
 import { ArrowDownTrayIcon, BanknotesIcon, ClipboardDocumentListIcon, CurrencyDollarIcon, FunnelIcon } from '@heroicons/vue/24/outline';
 
 import StatCard from '../StatCard.vue';
+import AdminEditarGastoCuentaCorrienteModal from '../AdminEditarGastoCuentaCorrienteModal.vue';
 import { supabase } from '../../../supabaseClient';
 import { useEncomiendasDashboard } from '../../../composables/useEncomiendasDashboard';
 import { useEncomiendasExcelExporter } from '../../../composables/useEncomiendasExcelExporter';
@@ -17,6 +18,7 @@ const props = defineProps({
 });
 
 const emit = defineEmits(['show-notification']);
+const userProfile = inject('userProfile', ref(null));
 
 const {
   dashboard,
@@ -52,6 +54,8 @@ const savingCupo = ref(false);
 const loadingProviderCupos = ref(false);
 const cupoMode = ref('general');
 const providerCupos = ref([]);
+const isEditModalOpen = ref(false);
+const gastoEnEdicion = ref(null);
 const cupoForm = ref({
   mes: '',
   proveedorId: null,
@@ -142,6 +146,7 @@ const proveedorRows = computed(() => [...(dashboard.value?.por_proveedor || [])]
 }));
 
 const detalleRows = computed(() => dashboard.value?.detalle || []);
+const isAdmin = computed(() => userProfile.value?.rol === 'admin');
 const weeklyProviderRows = computed(() => dashboard.value?.control_semanal_por_proveedor || []);
 const backendWeekColumns = computed(() => dashboard.value?.semanas_catalogo || []);
 const weeklyTotals = computed(() => dashboard.value?.control_semanal_totales || null);
@@ -320,6 +325,46 @@ const getTotalWeekAmount = (week) => {
   const match = findWeekData(displayWeeklyTotals.value?.semanas, week);
   return numberValue(match?.gasto_total);
 };
+
+const getGastoId = (item) => getValue(item, ['gasto_id', 'id'], null);
+const isCuentaCorrienteEmpresaRow = (item) => {
+  const rawValue = getValue(item, ['origen_gasto', 'modalidad_imputacion', 'modalidad'], '');
+  const normalized = String(rawValue).trim().toLowerCase().replaceAll(' ', '_');
+  return normalized === 'cuenta_corriente_empresa';
+};
+
+const canEditCuentaCorriente = (item) => {
+  return isAdmin.value
+    && getGastoId(item)
+    && isCuentaCorrienteEmpresaRow(item);
+};
+
+function openEditGastoCuentaCorriente(item) {
+  if (!isAdmin.value) {
+    emit('show-notification', 'Sin permisos', 'No tenes permisos para editar este registro.', 'warning');
+    return;
+  }
+  if (!canEditCuentaCorriente(item)) {
+    emit('show-notification', 'No editable', 'Este gasto no corresponde a cuenta corriente empresa y no puede editarse desde esta pantalla.', 'warning');
+    return;
+  }
+  gastoEnEdicion.value = {
+    ...item,
+    id: getGastoId(item),
+    origen_gasto: getValue(item, ['origen_gasto'], 'cuenta_corriente_empresa'),
+    fecha_gasto: getValue(item, ['fecha_gasto', 'fecha']),
+    monto_total: getValue(item, ['monto_total', 'monto', 'total']),
+    descripcion_general: getValue(item, ['descripcion_general', 'descripcion', 'detalle']),
+    paciente_referido: getValue(item, ['paciente_referido', 'paciente', 'nombre_paciente']),
+    tipo_movimiento_encomienda: getValue(item, ['tipo_movimiento_encomienda', 'tipo_movimiento']),
+  };
+  isEditModalOpen.value = true;
+}
+
+async function handleGastoCuentaCorrienteSaved() {
+  emit('show-notification', 'Registro actualizado', 'Registro actualizado correctamente.', 'success');
+  await fetchDashboard();
+}
 
 const percentBarClass = (estado) => {
   const normalized = String(estado || '').toLowerCase();
@@ -710,6 +755,7 @@ onMounted(async () => {
                 <th class="table-header">Paciente</th>
                 <th class="table-header">Descripción</th>
                 <th class="table-header text-right">Monto</th>
+                <th v-if="isAdmin" class="table-header text-right">Acciones</th>
               </tr>
             </thead>
             <tbody>
@@ -723,8 +769,14 @@ onMounted(async () => {
                 <td class="table-cell" :class="textToneClass(getValue(item, ['paciente', 'paciente_referido', 'nombre_paciente'], 'N/A'))">{{ getValue(item, ['paciente', 'paciente_referido', 'nombre_paciente'], 'N/A') }}</td>
                 <td class="table-cell max-w-xs truncate" :class="textToneClass(getValue(item, ['descripcion', 'descripcion_general', 'detalle'], 'N/A'))">{{ getValue(item, ['descripcion', 'descripcion_general', 'detalle'], 'N/A') }}</td>
                 <td class="table-cell money-cell">{{ formatCurrency(getValue(item, ['monto', 'monto_total', 'total'])) }}</td>
+                <td v-if="isAdmin" class="table-cell text-right">
+                  <button v-if="canEditCuentaCorriente(item)" type="button" class="edit-button" @click="openEditGastoCuentaCorriente(item)">
+                    Editar
+                  </button>
+                  <span v-else class="text-slate-400">-</span>
+                </td>
               </tr>
-              <tr v-if="detalleRows.length === 0"><td colspan="9" class="empty-cell">Sin operaciones para mostrar.</td></tr>
+              <tr v-if="detalleRows.length === 0"><td :colspan="isAdmin ? 10 : 9" class="empty-cell">Sin operaciones para mostrar.</td></tr>
             </tbody>
           </table>
         </div>
@@ -821,6 +873,15 @@ onMounted(async () => {
         </div>
       </div>
     </Transition>
+
+    <AdminEditarGastoCuentaCorrienteModal
+      v-model="isEditModalOpen"
+      :gasto="gastoEnEdicion"
+      :proveedores="proveedorOptions"
+      :transportes="transporteOptions"
+      :loading-options="loadingFilterOptions"
+      @saved="handleGastoCuentaCorrienteSaved"
+    />
   </div>
 </template>
 
@@ -851,6 +912,7 @@ onMounted(async () => {
 .status-pill { @apply inline-flex rounded-full px-2.5 py-1 text-xs font-semibold; }
 .empty-cell { @apply px-4 py-8 text-center text-sm font-medium text-slate-500; }
 .pagination-button { @apply inline-flex min-w-28 items-center justify-center rounded-md border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-slate-700 shadow-sm transition-colors hover:bg-slate-100 hover:text-slate-900 disabled:cursor-not-allowed disabled:border-slate-200 disabled:bg-slate-50 disabled:text-slate-400 disabled:shadow-none; }
+.edit-button { @apply inline-flex items-center justify-center rounded-md border border-indigo-200 bg-indigo-50 px-3 py-1.5 text-xs font-bold text-indigo-700 transition-colors hover:bg-indigo-100 hover:text-indigo-900; }
 
 .modal-fade-enter-active,
 .modal-fade-leave-active { transition: opacity 0.2s ease; }

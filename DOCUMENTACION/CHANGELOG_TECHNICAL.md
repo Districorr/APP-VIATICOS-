@@ -130,3 +130,22 @@ Este documento registra los cambios técnicos significativos realizados en el pr
 
 \---
 
+\### 2026-06-01
+
+\- \*\*Feature:\*\* F-LOG-002 + F-LOG-003 + ajuste de reporte de Encomiendas/Costos.
+\- \*\*Archivos Afectados (Frontend):\*\*
+   - `src/components/admin/analytics/EncomiendasCostosTab.vue`
+   - `src/components/admin/AdminEditarGastoCuentaCorrienteModal.vue`
+   - `src/composables/useEncomiendasPdfExporter.js`
+   - `src/composables/useEncomiendasExcelExporter.js`
+\- \*\*Backend Afectado:\*\*
+   - No aplica (sin cambios SQL estructurales en esta sesiÃ³n).
+\- \*\*RPCs usadas:\*\*
+   - `admin_actualizar_gasto_cuenta_corriente`
+   - `admin_crear_proveedor_basico`
+\- \*\*Comportamiento:\*\*
+   - EdiciÃ³n admin de gastos `cuenta_corriente_empresa` vÃ­a modal.
+   - Alta de proveedor desde modal con autoselecciÃ³n del nuevo proveedor.
+   - Reporte: bloque de imputaciÃ³n con monto total + cantidad de operaciones por modalidad.
+\- \*\*Validaciones:\*\*
+   - `npm.cmd run build` ejecutado correctamente.

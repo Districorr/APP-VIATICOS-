@@ -331,3 +331,7 @@ Las preguntas abiertas actuales se concentran en:
 - cierre de módulos parciales.
 
 Este documento debe mantenerse vivo y actualizarse cada vez que una pregunta se resuelva o aparezca un nuevo punto de ambigüedad.
+## 8. Actualizacion de verificacion 2026-06-01
+- F-LOG-002: implementacion verificada en `src/components/admin/analytics/EncomiendasCostosTab.vue` con modal `src/components/admin/AdminEditarGastoCuentaCorrienteModal.vue`.
+- F-LOG-003: implementacion/avance verificado con RPC `admin_crear_proveedor_basico` y seleccion automatica del proveedor creado.
+- Pendiente funcional: validar en QA de negocio la coherencia del bloque de imputacion (monto + operaciones) del reporte segun filtros de periodo.

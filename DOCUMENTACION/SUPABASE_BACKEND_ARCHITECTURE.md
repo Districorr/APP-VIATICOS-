@@ -411,3 +411,7 @@ El backend de InfoGastos es amplio, relacional y funcionalmente rico.
 La auditoría real confirma que el proyecto cuenta con una base avanzada, pero también con puntos sensibles que requieren disciplina técnica.
 
 Este documento debe mantenerse como **síntesis arquitectónica del backend**, mientras que los catálogos técnicos específicos actúan como fuente de detalle exhaustivo.
+## 17. Nota de backend aplicada (2026-06-01)
+- Se mantiene el patron de operaciones administrativas via RPC para gastos de cuenta corriente y alta de proveedores (sin escritura directa FE sobre tablas criticas).
+- RPCs utilizadas por frontend admin: `admin_actualizar_gasto_cuenta_corriente` y `admin_crear_proveedor_basico`.
+- Se mantiene la regla funcional de no alterar en este flujo: `viaje_id`, `caja_id`, `vehiculo_id`, `origen_gasto`, `estado_delegacion`.

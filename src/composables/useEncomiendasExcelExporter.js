@@ -25,6 +25,41 @@ const modalidadLabel = (value) => {
   return labels[value] || value || 'Sin modalidad';
 };
 
+const normalizeText = (value) => String(value || '')
+  .normalize('NFD')
+  .replace(/[\u0300-\u036f]/g, '')
+  .trim()
+  .toLowerCase();
+
+const classifyModalidad = (item) => {
+  const origen = normalizeText(getValue(item, ['origen_gasto', 'modalidad_imputacion', 'modalidad'], '')).replace(/ /g, '_');
+  const viajeId = getValue(item, ['viaje_id'], null);
+  const cajaId = getValue(item, ['caja_id'], null);
+
+  if (origen === 'cuenta_corriente_empresa') return 'cuenta_corriente_empresa';
+  if (origen === 'rendicion' || viajeId !== null) return 'rendicion';
+  if (origen === 'caja_chica' || cajaId !== null) return 'caja_chica';
+  return 'sin_clasificar';
+};
+
+const buildImputacionSummary = (dashboard) => {
+  const summary = {
+    cuenta_corriente_empresa: { amount: 0, count: 0 },
+    rendicion: { amount: 0, count: 0 },
+    caja_chica: { amount: 0, count: 0 },
+    sin_clasificar: { amount: 0, count: 0 },
+  };
+
+  for (const item of dashboard?.detalle || []) {
+    const modalidadKey = classifyModalidad(item);
+    const amount = numberValue(getValue(item, ['monto', 'monto_total', 'total'], 0));
+    summary[modalidadKey].amount += amount;
+    summary[modalidadKey].count += 1;
+  }
+
+  return summary;
+};
+
 const titleStyle = { font: { bold: true, sz: 16, color: { rgb: '1E293B' } }, fill: { fgColor: { rgb: 'E2E8F0' } } };
 const sectionStyle = { font: { bold: true, color: { rgb: 'FFFFFF' } }, fill: { fgColor: { rgb: '334155' } } };
 const headerStyle = { font: { bold: true, color: { rgb: '1E293B' } }, fill: { fgColor: { rgb: 'CBD5E1' } }, alignment: { horizontal: 'center' } };
@@ -89,6 +124,7 @@ const buildProveedorSheet = (dashboard, context = {}) => {
   const periodo = dashboard?.periodo || {};
   const cupo = dashboard?.cupo || {};
   const kpis = dashboard?.kpis || {};
+  const imputacionSummary = buildImputacionSummary(dashboard);
   const weeks = dashboard?.semanas_catalogo || [];
   const proveedores = dashboard?.control_semanal_por_proveedor || [];
   const totals = dashboard?.control_semanal_totales || null;
@@ -104,9 +140,12 @@ const buildProveedorSheet = (dashboard, context = {}) => {
     ['Gasto del período', numberValue(kpis.gasto_total_periodo)],
     ['Cantidad de despachos', numberValue(kpis.cantidad_despachos)],
     ['Promedio por despacho', numberValue(kpis.gasto_promedio_despacho)],
-    ['Cuenta corriente empresa', numberValue(kpis.total_cuenta_corriente)],
-    ['Rendición', numberValue(kpis.total_rendicion)],
-    ['Caja chica', numberValue(kpis.total_caja_chica)],
+    ['Cuenta corriente empresa - monto', numberValue(imputacionSummary.cuenta_corriente_empresa.amount)],
+    ['Cuenta corriente empresa - operaciones', numberValue(imputacionSummary.cuenta_corriente_empresa.count)],
+    ['Rendición - monto', numberValue(imputacionSummary.rendicion.amount)],
+    ['Rendición - operaciones', numberValue(imputacionSummary.rendicion.count)],
+    ['Caja chica - monto', numberValue(imputacionSummary.caja_chica.amount)],
+    ['Caja chica - operaciones', numberValue(imputacionSummary.caja_chica.count)],
   ]));
   tables.push(addTable(rows, 'Cupo mensual general', ['Indicador', 'Valor'], [
     ['Cupo mensual', numberValue(cupo.cupo_mensual)],
@@ -157,7 +196,11 @@ const buildProveedorSheet = (dashboard, context = {}) => {
   applyTableStyles(worksheet, tables[1], [1], [1]);
   for (let row = tables[1].firstDataRow; row <= tables[1].lastDataRow; row += 1) {
     const label = worksheet[XLSX.utils.encode_cell({ r: row - 1, c: 0 })]?.v;
-    setCellStyle(worksheet, XLSX.utils.encode_cell({ r: row - 1, c: 1 }), label === 'Cantidad de despachos' ? integerStyle : moneyStyle);
+    setCellStyle(
+      worksheet,
+      XLSX.utils.encode_cell({ r: row - 1, c: 1 }),
+      label === 'Cantidad de despachos' || String(label).includes('operaciones') ? integerStyle : moneyStyle,
+    );
   }
   applyTableStyles(worksheet, tables[2], [1], [], [1]);
   for (let row = tables[2].firstDataRow; row <= tables[2].lastDataRow; row += 1) {

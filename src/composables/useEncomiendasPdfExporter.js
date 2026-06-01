@@ -112,6 +112,35 @@ const movementLabel = (value) => {
   return value || 'Sin movimiento';
 };
 
+const classifyModalidad = (item) => {
+  const origen = normalizeText(getValue(item, ['origen_gasto', 'modalidad_imputacion', 'modalidad'], '')).replace(/ /g, '_');
+  const viajeId = getValue(item, ['viaje_id'], null);
+  const cajaId = getValue(item, ['caja_id'], null);
+
+  if (origen === 'cuenta_corriente_empresa') return 'cuenta_corriente_empresa';
+  if (origen === 'rendicion' || viajeId !== null) return 'rendicion';
+  if (origen === 'caja_chica' || cajaId !== null) return 'caja_chica';
+  return 'sin_clasificar';
+};
+
+const buildImputacionSummary = (dashboard) => {
+  const summary = {
+    cuenta_corriente_empresa: { amount: 0, count: 0 },
+    rendicion: { amount: 0, count: 0 },
+    caja_chica: { amount: 0, count: 0 },
+    sin_clasificar: { amount: 0, count: 0 },
+  };
+
+  for (const item of dashboard?.detalle || []) {
+    const modalidadKey = classifyModalidad(item);
+    const amount = numberValue(getValue(item, ['monto', 'monto_total', 'total'], 0));
+    summary[modalidadKey].amount += amount;
+    summary[modalidadKey].count += 1;
+  }
+
+  return summary;
+};
+
 const weekAmount = (item, week) => {
   const match = (item?.semanas || []).find((semana) => Number(semana.semana_numero) === Number(week.semana_numero));
   return numberValue(match?.gasto_total);
@@ -223,6 +252,7 @@ export function useEncomiendasPdfExporter() {
     const periodo = dashboard?.periodo || {};
     const cupo = dashboard?.cupo || {};
     const kpis = dashboard?.kpis || {};
+    const imputacionSummary = buildImputacionSummary(dashboard);
     const weeks = buildWeekColumns(dashboard);
     const pageWidth = doc.internal.pageSize.getWidth();
     const margin = 9;
@@ -271,9 +301,9 @@ export function useEncomiendasPdfExporter() {
       width: blockWidth,
       title: 'Imputación del gasto',
       rows: [
-        { label: 'Cuenta corriente empresa', value: formatCurrency(kpis.total_cuenta_corriente) },
-        { label: 'Rendiciones', value: formatCurrency(kpis.total_rendicion) },
-        { label: 'Caja chica', value: formatCurrency(kpis.total_caja_chica) },
+        { label: 'Cuenta corriente empresa', value: `${formatCurrency(imputacionSummary.cuenta_corriente_empresa.amount)} | ${imputacionSummary.cuenta_corriente_empresa.count.toLocaleString('es-AR')} operaciones` },
+        { label: 'Rendiciones', value: `${formatCurrency(imputacionSummary.rendicion.amount)} | ${imputacionSummary.rendicion.count.toLocaleString('es-AR')} operaciones` },
+        { label: 'Caja chica', value: `${formatCurrency(imputacionSummary.caja_chica.amount)} | ${imputacionSummary.caja_chica.count.toLocaleString('es-AR')} operaciones` },
       ],
     });
     drawSummaryBlock(doc, {

@@ -732,3 +732,12 @@ El núcleo operativo está implementado, pero varios de sus módulos centrales r
 - reportes.
 
 La documentación técnica consolidada permite a partir de ahora trabajar con IA de forma mucho más segura, siempre que se mantenga el enfoque **Spec-Driven** y se actualicen los documentos maestros tras cada cambio relevante.
+---
+
+## 10. ActualizaciÃ³n breve de sesiÃ³n (2026-06-01)
+
+- **F-LOG-002:** implementada ediciÃ³n administrativa de gastos `cuenta_corriente_empresa` en `src/components/admin/analytics/EncomiendasCostosTab.vue` con modal `src/components/admin/AdminEditarGastoCuentaCorrienteModal.vue`.
+- **Persistencia F-LOG-002:** RPC `admin_actualizar_gasto_cuenta_corriente` (sin `update()` directo sobre `public.gastos`).
+- **F-LOG-003:** implementada/avanzada creaciÃ³n de proveedor desde modal con RPC `admin_crear_proveedor_basico` (sin `insert` directo sobre `public.proveedores`) y selecciÃ³n automÃ¡tica del proveedor creado.
+- **Reporte Encomiendas/Costos:** ajuste para mostrar por modalidad de imputaciÃ³n monto total + cantidad de operaciones (cuenta corriente empresa, rendiciones, caja chica).
+- **Regla backend vigente:** no tocar `viaje_id`, `caja_id`, `vehiculo_id`, `origen_gasto`, `estado_delegacion` fuera de la lÃ³gica definida.

@@ -461,3 +461,7 @@ El proyecto cuenta ahora con una documentación técnica suficientemente sólida
 - trabajar mediante especificaciones.
 
 Este archivo debe mantenerse como **índice maestro y síntesis estratégica del proyecto**.
+## 16.1. Actualizacion breve 2026-06-01
+- F-LOG-002 implementada en UI admin de Encomiendas/Costos con RPC `admin_actualizar_gasto_cuenta_corriente` (sin `update` directo sobre `public.gastos`).
+- F-LOG-003 implementada/avanzada para crear proveedor desde modal con RPC `admin_crear_proveedor_basico` (sin `insert` directo sobre `public.proveedores`) y autoseleccion del nuevo proveedor.
+- Reporte Control de Encomiendas y Costos Logisticos ajustado para informar monto y cantidad de operaciones por modalidad de imputacion.

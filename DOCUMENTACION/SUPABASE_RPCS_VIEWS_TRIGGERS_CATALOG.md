@@ -491,3 +491,8 @@ Debe consolidar:
 - acciones,
 - puntos de riesgo.
 
+## 14. Actualizacion puntual 2026-06-01
+RPCs validadas en uso frontend admin:
+- `admin_actualizar_gasto_cuenta_corriente`: usada para edicion administrativa de gastos con origen `cuenta_corriente_empresa`.
+- `admin_crear_proveedor_basico`: usada para alta de proveedor desde modal admin, con seleccion inmediata en UI.
+Regla aplicada en frontend: no usar `update()` directo sobre `public.gastos` ni `insert` directo sobre `public.proveedores` en estos flujos.
