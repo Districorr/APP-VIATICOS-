@@ -40,38 +40,60 @@ const toIsoDate = (date) => {
 
 const compactDate = (value) => formatDate(value, { day: '2-digit', month: '2-digit' });
 
-const buildWeekColumns = (dashboard) => {
-  const backendWeeks = dashboard?.semanas_catalogo || [];
-  const periodo = dashboard?.periodo || {};
-  const start = parseDateOnly(periodo.fecha_desde);
-  const end = parseDateOnly(periodo.fecha_hasta);
-
-  if (!start || !end || start > end) return backendWeeks;
+const buildWeeksForPeriod = (fechaDesde, fechaHasta) => {
+  const start = parseDateOnly(fechaDesde);
+  const end = parseDateOnly(fechaHasta);
+  if (!start || !end || start > end) return [];
 
   const weeks = [];
-  let current = new Date(start);
+  let weekStart = new Date(start);
   let index = 1;
 
-  while (current <= end) {
-    const weekEnd = new Date(current);
+  while (weekStart <= end) {
+    const weekEnd = new Date(weekStart);
     const daysUntilSunday = weekEnd.getDay() === 0 ? 0 : 7 - weekEnd.getDay();
-    weekEnd.setDate(weekEnd.getDate() + daysUntilSunday);
+    weekEnd.setDate(weekStart.getDate() + daysUntilSunday);
     if (weekEnd > end) weekEnd.setTime(end.getTime());
 
-    const backendWeek = backendWeeks.find((week) => Number(week.semana_numero) === index) || {};
     weeks.push({
-      ...backendWeek,
-      semana_numero: Number(backendWeek.semana_numero || index),
-      semana_inicio: toIsoDate(current),
+      semana_numero: index,
+      semana_inicio: toIsoDate(weekStart),
       semana_fin: toIsoDate(weekEnd),
     });
 
-    current = new Date(weekEnd);
-    current.setDate(current.getDate() + 1);
+    weekStart = new Date(weekEnd);
+    weekStart.setDate(weekStart.getDate() + 1);
     index += 1;
   }
 
   return weeks;
+};
+
+const normalizeWeekColumns = (weeks = []) => (Array.isArray(weeks) ? weeks : Object.values(weeks || {}))
+  .map((week, index) => ({
+    ...week,
+    semana_numero: Number(week?.semana_numero || index + 1),
+    semana_inicio: week?.semana_inicio,
+    semana_fin: week?.semana_fin,
+  }))
+  .filter((week) => Number.isFinite(week.semana_numero))
+  .sort((a, b) => a.semana_numero - b.semana_numero);
+
+const buildWeekColumns = (dashboard) => {
+  const periodo = dashboard?.periodo || {};
+  const catalogWeeks = normalizeWeekColumns(dashboard?.semanas_catalogo || []);
+  const periodWeeks = buildWeeksForPeriod(periodo.fecha_desde, periodo.fecha_hasta);
+
+  if (periodWeeks.length === 0) return catalogWeeks;
+
+  const catalogByNumber = new Map(catalogWeeks.map((week) => [Number(week.semana_numero), week]));
+  return periodWeeks.map((periodWeek) => ({
+    ...periodWeek,
+    ...(catalogByNumber.get(Number(periodWeek.semana_numero)) || {}),
+    semana_numero: periodWeek.semana_numero,
+    semana_inicio: periodWeek.semana_inicio,
+    semana_fin: periodWeek.semana_fin,
+  }));
 };
 
 const weekHeaderLabel = (week) => [
@@ -141,13 +163,64 @@ const buildImputacionSummary = (dashboard) => {
   return summary;
 };
 
+const dateKey = (value) => (value ? String(value).slice(0, 10) : '');
+
+const findWeekData = (weeks = [], weekColumn) => {
+  const sourceWeeks = Array.isArray(weeks) ? weeks : Object.values(weeks || {});
+  return sourceWeeks.find((week) => {
+    const sameNumber = week?.semana_numero !== null
+      && week?.semana_numero !== undefined
+      && Number(week.semana_numero) === Number(weekColumn.semana_numero);
+    const sameRange = dateKey(week?.semana_inicio) === dateKey(weekColumn.semana_inicio)
+      && dateKey(week?.semana_fin) === dateKey(weekColumn.semana_fin);
+    return sameNumber || sameRange;
+  });
+};
+
 const weekAmount = (item, week) => {
-  const match = (item?.semanas || []).find((semana) => Number(semana.semana_numero) === Number(week.semana_numero));
+  const match = findWeekData(item?.semanas, week);
   return numberValue(match?.gasto_total);
 };
 
-const buildControlRows = (dashboard) => {
-  const weeks = buildWeekColumns(dashboard);
+const weekDispatches = (item, week) => {
+  const match = findWeekData(item?.semanas, week);
+  return numberValue(match?.despachos);
+};
+
+const buildWeeklyTotals = (dashboard, weeks) => {
+  const providerRows = dashboard?.control_semanal_por_proveedor || [];
+  const backendTotals = dashboard?.control_semanal_totales || {};
+  const computedTotals = {
+    semanas: weeks.map((week) => ({
+      ...week,
+      gasto_total: providerRows.reduce((total, item) => total + weekAmount(item, week), 0),
+      despachos: providerRows.reduce((total, item) => total + weekDispatches(item, week), 0),
+    })),
+    gasto_total_periodo: providerRows.reduce((total, item) => total + numberValue(item.gasto_total_periodo), 0),
+    despachos_periodo: providerRows.reduce((total, item) => total + numberValue(item.despachos_periodo), 0),
+    promedio_por_despacho: 0,
+    cupo_mensual_total: backendTotals.cupo_mensual_total,
+    disponible_diferencia_total: backendTotals.disponible_diferencia_total,
+    porcentaje_consumido_total: backendTotals.porcentaje_consumido_total,
+  };
+
+  computedTotals.promedio_por_despacho = computedTotals.despachos_periodo > 0
+    ? computedTotals.gasto_total_periodo / computedTotals.despachos_periodo
+    : 0;
+
+  if (providerRows.length > 0) return computedTotals;
+
+  const hasCompleteBackendTotals = Array.isArray(backendTotals.semanas)
+    && backendTotals.semanas.length > 0
+    && backendTotals.gasto_total_periodo !== null
+    && backendTotals.gasto_total_periodo !== undefined
+    && backendTotals.despachos_periodo !== null
+    && backendTotals.despachos_periodo !== undefined;
+
+  return hasCompleteBackendTotals ? backendTotals : computedTotals;
+};
+
+const buildControlRows = (dashboard, weeks, totals) => {
   const rows = (dashboard?.control_semanal_por_proveedor || []).map((item) => {
     const percent = item.porcentaje_consumido;
     return [
@@ -162,12 +235,11 @@ const buildControlRows = (dashboard) => {
     ];
   });
 
-  const totals = dashboard?.control_semanal_totales;
   if (totals) {
     rows.push([
       'TOTAL',
       ...weeks.map((week) => {
-        const match = (totals.semanas || []).find((semana) => Number(semana.semana_numero) === Number(week.semana_numero));
+        const match = findWeekData(totals.semanas, week);
         return formatCurrency(numberValue(match?.gasto_total));
       }),
       formatCurrency(totals.gasto_total_periodo),
@@ -198,7 +270,15 @@ const summarizeOperations = (dashboard) => {
     movements[movementKey].count += 1;
     movements[movementKey].amount += amount;
 
-    const current = providersMap.get(provider) || { proveedor: provider, despachos: 0, total: 0 };
+    const current = providersMap.get(provider) || {
+      proveedor: provider,
+      envios: 0,
+      recepciones: 0,
+      despachos: 0,
+      total: 0,
+    };
+    if (movementKey === 'Recepciones') current.recepciones += 1;
+    else current.envios += 1;
     current.despachos += 1;
     current.total += amount;
     providersMap.set(provider, current);
@@ -221,13 +301,17 @@ const drawSummaryBlock = (doc, { x, y, width, title, rows }) => {
   doc.text(title, x + 3, y + 5);
 
   let rowY = y + 11;
+  const valueX = x + width - 3;
+  const labelMaxWidth = Math.max(18, width * 0.5);
+  const valueMaxWidth = Math.max(20, width * 0.46);
+
   rows.forEach((row, index) => {
     doc.setFontSize(index === 0 ? 9 : 7.2);
     doc.setFont(undefined, index === 0 ? 'bold' : 'normal');
     doc.setTextColor(index === 0 ? 15 : 51, index === 0 ? 23 : 65, index === 0 ? 42 : 85);
-    doc.text(row.label, x + 3, rowY);
+    doc.text(String(row.label), x + 3, rowY, { maxWidth: labelMaxWidth });
     doc.setFont(undefined, 'bold');
-    doc.text(String(row.value), x + width - 3, rowY, { align: 'right' });
+    doc.text(String(row.value), valueX, rowY, { align: 'right', maxWidth: valueMaxWidth });
     rowY += index === 0 ? 7 : 6;
   });
 };
@@ -254,6 +338,7 @@ export function useEncomiendasPdfExporter() {
     const kpis = dashboard?.kpis || {};
     const imputacionSummary = buildImputacionSummary(dashboard);
     const weeks = buildWeekColumns(dashboard);
+    const weeklyTotals = buildWeeklyTotals(dashboard, weeks);
     const pageWidth = doc.internal.pageSize.getWidth();
     const margin = 9;
     const contentWidth = pageWidth - (margin * 2);
@@ -291,7 +376,7 @@ export function useEncomiendasPdfExporter() {
       title: 'Gasto del período',
       rows: [
         { label: 'Gasto total', value: formatCurrency(kpis.gasto_total_periodo) },
-        { label: 'Operaciones registradas', value: numberValue(kpis.cantidad_despachos || dashboard?.total_count).toLocaleString('es-AR') },
+        { label: 'Operaciones registradas', value: numberValue((dashboard?.detalle || []).length || dashboard?.total_count || weeklyTotals.despachos_periodo).toLocaleString('es-AR') },
         { label: 'Promedio por operación', value: formatCurrency(kpis.gasto_promedio_despacho) },
       ],
     });
@@ -353,7 +438,7 @@ export function useEncomiendasPdfExporter() {
     doc.autoTable({
       startY: y,
       head,
-      body: buildControlRows(dashboard),
+      body: buildControlRows(dashboard, weeks, weeklyTotals),
       theme: 'grid',
       margin: { left: margin, right: margin },
       showHead: 'firstPage',
@@ -421,23 +506,29 @@ export function useEncomiendasPdfExporter() {
       },
     });
 
-    const providersStartY = y;
     doc.autoTable({
-      startY: providersStartY,
-      head: [['Proveedor', 'Despachos', 'Importe total']],
+      startY: y,
+      head: [['Proveedor', 'Envíos', 'Recepciones', 'Despachos', 'Importe total']],
       body: providerRows.map((item) => [
         item.proveedor,
+        item.envios.toLocaleString('es-AR'),
+        item.recepciones.toLocaleString('es-AR'),
         item.despachos.toLocaleString('es-AR'),
         formatCurrency(item.total),
       ]),
       theme: 'grid',
-      margin: { left: margin + 98, right: margin },
+      margin: { left: margin + 95, right: margin },
       showHead: 'firstPage',
       rowPageBreak: 'avoid',
       styles: { fontSize: 7, cellPadding: 1.4, textColor: [30, 41, 59], lineColor: [226, 232, 240], lineWidth: 0.1 },
       headStyles: { fillColor: [51, 65, 85], textColor: 255, fontStyle: 'bold' },
       alternateRowStyles: { fillColor: [248, 250, 252] },
-      columnStyles: { 1: { halign: 'right', cellWidth: 22 }, 2: { halign: 'right', fontStyle: 'bold', cellWidth: 32 } },
+      columnStyles: {
+        1: { halign: 'right', cellWidth: 15 },
+        2: { halign: 'right', cellWidth: 19 },
+        3: { halign: 'right', cellWidth: 16 },
+        4: { halign: 'right', fontStyle: 'bold', cellWidth: 27 },
+      },
     });
 
     y = Math.max(doc.lastAutoTable.finalY, y + 24) + 5;
