@@ -54,9 +54,12 @@ const getRowValue = (keys, fallback = null) => {
   return fallback;
 };
 
-const isCuentaCorrienteEmpresa = computed(() => {
+const editableLogisticOrigins = new Set(['cuenta_corriente_empresa', 'rendicion', 'caja_chica']);
+const normalizeOrigin = (value) => String(value || '').trim().toLowerCase().replaceAll(' ', '_');
+
+const isEditableLogisticExpense = computed(() => {
   const origen = gastoCompleto.value?.origen_gasto || getRowValue(['origen_gasto', 'modalidad_imputacion', 'modalidad']);
-  return origen === 'cuenta_corriente_empresa';
+  return editableLogisticOrigins.has(normalizeOrigin(origen));
 });
 
 function closeModal() {
@@ -65,11 +68,11 @@ function closeModal() {
 }
 
 function mapErrorMessage(message = '') {
-  if (message.includes('No autorizado')) return 'No tenes permisos para editar este registro.';
-  if (message.includes('Solo se pueden editar gastos de cuenta corriente empresa')) {
-    return 'Este gasto no corresponde a cuenta corriente empresa y no puede editarse desde esta pantalla.';
+  if (message.includes('No autorizado. Solo administradores pueden editar datos logísticos de gastos.')) {
+    return 'No tenés permisos para editar este registro.';
   }
-  return 'No se pudo actualizar el registro. Revisa los datos e intenta nuevamente.';
+  if (message.includes('No autorizado')) return 'No tenés permisos para editar este registro.';
+  return 'No se pudo actualizar el registro. Revisá los datos e intentá nuevamente.';
 }
 
 function mapProveedorCreateError(message = '') {
@@ -166,8 +169,8 @@ async function createProveedorFromModal() {
 }
 
 function validateForm() {
-  if (!isCuentaCorrienteEmpresa.value) {
-    errorMessage.value = 'Este gasto no corresponde a cuenta corriente empresa y no puede editarse desde esta pantalla.';
+  if (!isEditableLogisticExpense.value) {
+    errorMessage.value = 'Este gasto no corresponde al contexto de encomiendas/logística y no puede editarse desde esta pantalla.';
     return false;
   }
   if (!form.value.fecha_gasto) {
@@ -194,7 +197,7 @@ async function saveGasto() {
       numero_guia: form.value.numero_guia || null,
     };
 
-    const { error } = await supabase.rpc('admin_actualizar_gasto_cuenta_corriente', {
+    const { error } = await supabase.rpc('admin_actualizar_datos_logisticos_gasto', {
       p_gasto_id: gastoId.value,
       p_proveedor_id: form.value.proveedor_id || null,
       p_transporte_id: form.value.transporte_id || null,
@@ -235,7 +238,7 @@ watch(() => props.proveedores, (items) => {
       <div class="flex max-h-[92vh] w-full max-w-3xl flex-col rounded-xl bg-white shadow-2xl">
         <div class="flex items-start justify-between border-b border-slate-200 p-5">
           <div>
-            <h3 class="text-lg font-bold text-slate-900">Editar gasto cuenta corriente</h3>
+            <h3 class="text-lg font-bold text-slate-900">Editar datos logísticos del gasto</h3>
             <p class="mt-1 text-sm font-medium text-slate-600">ID {{ gastoId || '-' }}</p>
           </div>
           <button type="button" class="rounded-md p-2 text-2xl leading-none text-slate-500 hover:bg-slate-100 hover:text-slate-800" :disabled="saving" @click="closeModal">x</button>

@@ -327,31 +327,34 @@ const getTotalWeekAmount = (week) => {
 };
 
 const getGastoId = (item) => getValue(item, ['gasto_id', 'id'], null);
-const isCuentaCorrienteEmpresaRow = (item) => {
+const editableLogisticOrigins = new Set(['cuenta_corriente_empresa', 'rendicion', 'caja_chica']);
+
+const normalizeOrigin = (value) => String(value || '').trim().toLowerCase().replaceAll(' ', '_');
+
+const isEditableLogisticRow = (item) => {
   const rawValue = getValue(item, ['origen_gasto', 'modalidad_imputacion', 'modalidad'], '');
-  const normalized = String(rawValue).trim().toLowerCase().replaceAll(' ', '_');
-  return normalized === 'cuenta_corriente_empresa';
+  return editableLogisticOrigins.has(normalizeOrigin(rawValue));
 };
 
-const canEditCuentaCorriente = (item) => {
+const canEditGastoLogistico = (item) => {
   return isAdmin.value
     && getGastoId(item)
-    && isCuentaCorrienteEmpresaRow(item);
+    && isEditableLogisticRow(item);
 };
 
-function openEditGastoCuentaCorriente(item) {
+function openEditGastoLogistico(item) {
   if (!isAdmin.value) {
     emit('show-notification', 'Sin permisos', 'No tenes permisos para editar este registro.', 'warning');
     return;
   }
-  if (!canEditCuentaCorriente(item)) {
-    emit('show-notification', 'No editable', 'Este gasto no corresponde a cuenta corriente empresa y no puede editarse desde esta pantalla.', 'warning');
+  if (!canEditGastoLogistico(item)) {
+    emit('show-notification', 'No editable', 'Este gasto no corresponde al contexto de encomiendas/logistica y no puede editarse desde esta pantalla.', 'warning');
     return;
   }
   gastoEnEdicion.value = {
     ...item,
     id: getGastoId(item),
-    origen_gasto: getValue(item, ['origen_gasto'], 'cuenta_corriente_empresa'),
+    origen_gasto: getValue(item, ['origen_gasto', 'modalidad_imputacion', 'modalidad'], ''),
     fecha_gasto: getValue(item, ['fecha_gasto', 'fecha']),
     monto_total: getValue(item, ['monto_total', 'monto', 'total']),
     descripcion_general: getValue(item, ['descripcion_general', 'descripcion', 'detalle']),
@@ -361,7 +364,7 @@ function openEditGastoCuentaCorriente(item) {
   isEditModalOpen.value = true;
 }
 
-async function handleGastoCuentaCorrienteSaved() {
+async function handleGastoLogisticoSaved() {
   emit('show-notification', 'Registro actualizado', 'Registro actualizado correctamente.', 'success');
   await fetchDashboard();
 }
@@ -770,7 +773,7 @@ onMounted(async () => {
                 <td class="table-cell max-w-xs truncate" :class="textToneClass(getValue(item, ['descripcion', 'descripcion_general', 'detalle'], 'N/A'))">{{ getValue(item, ['descripcion', 'descripcion_general', 'detalle'], 'N/A') }}</td>
                 <td class="table-cell money-cell">{{ formatCurrency(getValue(item, ['monto', 'monto_total', 'total'])) }}</td>
                 <td v-if="isAdmin" class="table-cell text-right">
-                  <button v-if="canEditCuentaCorriente(item)" type="button" class="edit-button" @click="openEditGastoCuentaCorriente(item)">
+                  <button v-if="canEditGastoLogistico(item)" type="button" class="edit-button" @click="openEditGastoLogistico(item)">
                     Editar
                   </button>
                   <span v-else class="text-slate-400">-</span>
@@ -880,7 +883,7 @@ onMounted(async () => {
       :proveedores="proveedorOptions"
       :transportes="transporteOptions"
       :loading-options="loadingFilterOptions"
-      @saved="handleGastoCuentaCorrienteSaved"
+      @saved="handleGastoLogisticoSaved"
     />
   </div>
 </template>
