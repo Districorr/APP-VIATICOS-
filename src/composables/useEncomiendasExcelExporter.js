@@ -13,6 +13,8 @@ const getValue = (item, keys, fallback = '') => {
   return fallback;
 };
 
+const detailRows = (dashboard) => dashboard?.detalle || [];
+
 const getModalidadValue = (item) => getValue(item, ['modalidad_imputacion', 'modalidad']);
 
 const modalidadLabel = (value) => {
@@ -50,7 +52,7 @@ const buildImputacionSummary = (dashboard) => {
     sin_clasificar: { amount: 0, count: 0 },
   };
 
-  for (const item of dashboard?.detalle || []) {
+  for (const item of detailRows(dashboard)) {
     const modalidadKey = classifyModalidad(item);
     const amount = numberValue(getValue(item, ['monto', 'monto_total', 'total'], 0));
     summary[modalidadKey].amount += amount;
@@ -112,6 +114,9 @@ const filterRows = (context = {}) => {
     ['Operador logístico', labels.transporte || 'Todos', 'Movimiento', labels.tipoMovimiento || 'Todos'],
     ['Modalidad', labels.modalidad || 'Todas', 'Responsable', labels.responsable || 'Todos'],
     ['Búsqueda', filters.paciente || 'Sin texto', '', ''],
+    ['Cliente detalle', context.detailFilters?.cliente || 'Todos', 'Destino detalle', context.detailFilters?.destino || 'Todos'],
+    ['Guía detalle', context.detailFilters?.numeroGuia || 'Todos', 'Proveedor detalle', context.detailFilters?.proveedor || 'Todos'],
+    ['Vista', context.detailFilters?.vista || 'Detallada', '', ''],
   ];
 };
 
@@ -222,7 +227,7 @@ const buildProveedorSheet = (dashboard, context = {}) => {
 const buildDetalleSheet = (dashboard) => {
   const rows = [
     ['Fecha', 'Responsable', 'Proveedor', 'Operador logístico', 'Movimiento', 'Modalidad', 'Paciente', 'Descripción', 'Monto'],
-    ...(dashboard?.detalle || []).map((item) => [
+    ...detailRows(dashboard).map((item) => [
       formatDate(getValue(item, ['fecha', 'fecha_gasto', 'created_at'])),
       getValue(item, ['responsable', 'responsable_nombre', 'nombre_responsable']),
       getValue(item, ['proveedor', 'proveedor_nombre', 'nombre_proveedor']),

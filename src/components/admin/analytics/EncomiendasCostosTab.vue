@@ -6,6 +6,7 @@ import { ArrowDownTrayIcon, BanknotesIcon, ClipboardDocumentListIcon, CurrencyDo
 
 import StatCard from '../StatCard.vue';
 import AdminEditarGastoCuentaCorrienteModal from '../AdminEditarGastoCuentaCorrienteModal.vue';
+import EncomiendasBulkPaymentsModal from '../EncomiendasBulkPaymentsModal.vue';
 import { supabase } from '../../../supabaseClient';
 import { useEncomiendasDashboard } from '../../../composables/useEncomiendasDashboard';
 import { useEncomiendasExcelExporter } from '../../../composables/useEncomiendasExcelExporter';
@@ -32,10 +33,10 @@ const {
   hasResults,
   resultFrom,
   resultTo,
-  fetchDashboard,
+  fetchDashboard: fetchDashboardBase,
   fetchExportDashboard,
-  applyFilters,
-  clearFilters,
+  applyFilters: applyDashboardFilters,
+  clearFilters: clearDashboardFilters,
   goToPage,
   changePageSize,
 } = useEncomiendasDashboard();
@@ -56,6 +57,20 @@ const cupoMode = ref('general');
 const providerCupos = ref([]);
 const isEditModalOpen = ref(false);
 const gastoEnEdicion = ref(null);
+const isBulkModalOpen = ref(false);
+const seedPayment = ref(null);
+const detailViewMode = ref('detailed');
+const detailLoading = ref(false);
+const fullDetailRows = ref([]);
+const detailPage = ref(1);
+const detailPageSize = ref(10);
+const detailPageSizeOptions = [10, 25, 50];
+const localDetailFilters = ref({
+  cliente: '',
+  destino: '',
+  numeroGuia: '',
+  proveedor: '',
+});
 const cupoForm = ref({
   mes: '',
   proveedorId: null,
@@ -83,6 +98,8 @@ const numberValue = (value) => {
   return Number.isFinite(parsed) ? parsed : 0;
 };
 
+const defaultDate = () => new Date().toISOString().split('T')[0];
+
 const isoDate = (date) => {
   const copy = new Date(date.getFullYear(), date.getMonth(), date.getDate());
   return copy.toISOString().split('T')[0];
@@ -106,6 +123,94 @@ const modalidadLabel = (value) => {
 };
 
 const getModalidadValue = (item) => getValue(item, ['modalidad_imputacion', 'modalidad']);
+
+const getAdditionalData = (item) => {
+  const raw = item?.datos_adicionales;
+  if (!raw) return {};
+  if (typeof raw === 'object') return raw;
+  try {
+    return JSON.parse(raw);
+  } catch {
+    return {};
+  }
+};
+
+const firstNonEmptyText = (...values) => {
+  for (const value of values) {
+    if (value !== null && value !== undefined && String(value).trim() !== '') return String(value).trim();
+  }
+  return '';
+};
+
+const normalizeText = (value) => String(value || '')
+  .normalize('NFD')
+  .replace(/[\u0300-\u036f]/g, '')
+  .trim()
+  .toLowerCase();
+
+const getClienteValue = (item) => firstNonEmptyText(
+  getValue(item, ['cliente', 'cliente_nombre', 'nombre_cliente', 'cliente_referido'], ''),
+  getAdditionalData(item).cliente_nombre,
+);
+
+const getProveedorValue = (item) => firstNonEmptyText(
+  getValue(item, ['proveedor', 'proveedor_nombre', 'nombre_proveedor'], ''),
+  getAdditionalData(item).proveedor_nombre,
+);
+
+const getTransporteValue = (item) => firstNonEmptyText(
+  getValue(item, ['transporte', 'transporte_nombre', 'operador_logistico', 'nombre_transporte'], ''),
+  getAdditionalData(item).transporte_nombre,
+);
+
+const getNumeroGuiaValue = (item) => firstNonEmptyText(
+  getValue(item, ['numero_guia', 'numero_factura', 'guia', 'remito'], ''),
+  getAdditionalData(item).numero_guia,
+);
+
+const getDestinoValue = (item) => {
+  const additional = getAdditionalData(item);
+  const destinoTexto = firstNonEmptyText(
+    getValue(item, ['destino', 'destino_texto', 'localidad', 'localidad_destino', 'provincia', 'provincia_nombre'], ''),
+    additional.destino_texto,
+  );
+  const provincia = firstNonEmptyText(
+    getValue(item, ['provincia', 'provincia_nombre'], ''),
+    additional.provincia_nombre,
+  );
+  if (destinoTexto && provincia && !normalizeText(destinoTexto).includes(normalizeText(provincia))) {
+    return `${destinoTexto} - ${provincia}`;
+  }
+  return destinoTexto || provincia || '';
+};
+
+const detailRowsSource = computed(() => fullDetailRows.value.length > 0 ? fullDetailRows.value : (dashboard.value?.detalle || []));
+const detailRowsFiltered = computed(() => {
+  const clienteFilter = normalizeText(localDetailFilters.value.cliente);
+  const destinoFilter = normalizeText(localDetailFilters.value.destino);
+  const guiaFilter = normalizeText(localDetailFilters.value.numeroGuia);
+  const proveedorFilter = normalizeText(localDetailFilters.value.proveedor);
+
+  return detailRowsSource.value.filter((item) => {
+    const cliente = normalizeText(getClienteValue(item));
+    const destino = normalizeText(getDestinoValue(item));
+    const guia = normalizeText(getNumeroGuiaValue(item));
+    const proveedor = normalizeText(getProveedorValue(item));
+    if (clienteFilter && !cliente.includes(clienteFilter)) return false;
+    if (destinoFilter && !destino.includes(destinoFilter)) return false;
+    if (guiaFilter && !guia.includes(guiaFilter)) return false;
+    if (proveedorFilter && !proveedor.includes(proveedorFilter)) return false;
+    return true;
+  });
+});
+
+const detailTotalCount = computed(() => detailRowsFiltered.value.length);
+const detailTotalPages = computed(() => Math.max(1, Math.ceil(detailTotalCount.value / detailPageSize.value)));
+const detailOffset = computed(() => (detailPage.value - 1) * detailPageSize.value);
+const detailResultFrom = computed(() => detailTotalCount.value === 0 ? 0 : detailOffset.value + 1);
+const detailResultTo = computed(() => Math.min(detailOffset.value + detailPageSize.value, detailTotalCount.value));
+const detailFilteredTotal = computed(() => detailRowsFiltered.value.reduce((total, item) => total + numberValue(getValue(item, ['monto', 'monto_total', 'total'], 0)), 0));
+const paginatedDetailRows = computed(() => detailRowsFiltered.value.slice(detailOffset.value, detailOffset.value + detailPageSize.value));
 
 const textToneClass = (value) => {
   const normalized = String(value || '').trim();
@@ -366,7 +471,7 @@ function openEditGastoLogistico(item) {
 
 async function handleGastoLogisticoSaved() {
   emit('show-notification', 'Registro actualizado', 'Registro actualizado correctamente.', 'success');
-  await fetchDashboard();
+  await refreshDashboardData();
 }
 
 const percentBarClass = (estado) => {
@@ -396,6 +501,13 @@ const filterExportContext = computed(() => ({
     modalidad: modalidadOptions.find((option) => option.code === filters.modalidad)?.label,
     responsable: props.perfilesOptions.find((option) => option.code === filters.responsableId)?.label,
   },
+  detailFilters: {
+    cliente: localDetailFilters.value.cliente || 'Todos',
+    destino: localDetailFilters.value.destino || 'Todos',
+    numeroGuia: localDetailFilters.value.numeroGuia || 'Todos',
+    proveedor: localDetailFilters.value.proveedor || 'Todos',
+    vista: detailViewMode.value === 'simple' ? 'Simple' : 'Detallada',
+  },
 }));
 
 function clearSelectedWeek() {
@@ -412,7 +524,98 @@ async function handleWeekChange() {
 
 async function handleClearFilters() {
   selectedWeek.value = null;
+  localDetailFilters.value = {
+    cliente: '',
+    destino: '',
+    numeroGuia: '',
+    proveedor: '',
+  };
+  detailPage.value = 1;
   await clearFilters();
+}
+
+async function refreshDetailRows() {
+  detailLoading.value = true;
+  try {
+    const exportData = await fetchExportDashboard();
+    fullDetailRows.value = exportData?.detalle || [];
+  } catch (e) {
+    console.error('Error cargando detalle completo de encomiendas:', e);
+    fullDetailRows.value = dashboard.value?.detalle || [];
+  } finally {
+    detailLoading.value = false;
+  }
+}
+
+async function refreshDashboardData() {
+  await fetchDashboardBase();
+  await refreshDetailRows();
+}
+
+async function applyFilters() {
+  detailPage.value = 1;
+  await applyDashboardFilters();
+  await refreshDetailRows();
+}
+
+async function clearFilters() {
+  detailPage.value = 1;
+  await clearDashboardFilters();
+  await refreshDetailRows();
+}
+
+function openBulkPaymentsModal(item = null) {
+  const additional = getAdditionalData(item || {});
+  seedPayment.value = item ? {
+    fecha: String(getValue(item, ['fecha', 'fecha_gasto'], defaultDate())).slice(0, 10),
+    cliente_id: getValue(item, ['cliente_id'], null),
+    transporte_id: getValue(item, ['transporte_id'], null),
+    provincia_id: getValue(item, ['provincia_id'], null),
+    localidad_destino_id: getValue(item, ['localidad_destino_id'], null),
+    destino_texto: getDestinoValue(item),
+    descripcion: firstNonEmptyText(getValue(item, ['descripcion', 'descripcion_general', 'detalle'], ''), 'Pago de encomienda'),
+    proveedor_id: getValue(item, ['proveedor_id'], null),
+    numero_guia: firstNonEmptyText(getNumeroGuiaValue(item), getValue(item, ['numero_factura'], '')),
+    observacion: firstNonEmptyText(additional.observacion_logistica, ''),
+    tipo_movimiento_encomienda: firstNonEmptyText(getValue(item, ['tipo_movimiento', 'tipo_movimiento_encomienda'], ''), additional.tipo_movimiento_encomienda),
+    encomienda_id: additional.encomienda_id || null,
+    importe: numberValue(getValue(item, ['monto', 'monto_total', 'total'], 0)),
+  } : null;
+  isBulkModalOpen.value = true;
+}
+
+async function handleBulkPaymentsSaved() {
+  await refreshDashboardData();
+}
+
+function handleDetailPageChange(page) {
+  const nextPage = Math.min(Math.max(1, page), detailTotalPages.value);
+  detailPage.value = nextPage;
+}
+
+function changeDetailPageSize(size) {
+  detailPageSize.value = Number(size);
+  detailPage.value = 1;
+}
+
+function handleLocalFilterInput() {
+  detailPage.value = 1;
+}
+
+function buildDetailExportDashboard(baseDashboard) {
+  const total = detailFilteredTotal.value;
+  const count = detailTotalCount.value;
+  return {
+    ...baseDashboard,
+    detalle: detailRowsFiltered.value,
+    total_count: count,
+    kpis: {
+      ...(baseDashboard?.kpis || {}),
+      gasto_total_periodo: total,
+      cantidad_despachos: count,
+      gasto_promedio_despacho: count > 0 ? total / count : 0,
+    },
+  };
 }
 
 function openCupoModal() {
@@ -510,7 +713,7 @@ async function saveCupoMensual() {
     emit('show-notification', 'Cupo actualizado', cupoMode.value === 'general' ? 'El cupo mensual general fue guardado.' : 'El cupo mensual por proveedor fue guardado.', 'success');
     if (cupoMode.value === 'proveedor') await fetchProviderCuposForMonth();
     else isCupoModalOpen.value = false;
-    await fetchDashboard();
+    await refreshDashboardData();
   } catch (e) {
     console.error('Error guardando cupo mensual de encomiendas:', e);
     emit('show-notification', 'Error', e.message || 'No se pudo guardar el cupo mensual.', 'error');
@@ -543,7 +746,7 @@ async function fetchFilterOptions() {
 async function handleExport() {
   exporting.value = true;
   try {
-    const exportData = await fetchExportDashboard();
+    const exportData = buildDetailExportDashboard(await fetchExportDashboard());
     exportDashboard(exportData, filterExportContext.value);
     emit('show-notification', 'Excel generado', 'El archivo de encomiendas fue descargado.', 'success');
   } catch (e) {
@@ -557,7 +760,7 @@ async function handleExport() {
 async function handleExportPdf() {
   exportingPdf.value = true;
   try {
-    const exportData = await fetchExportDashboard();
+    const exportData = buildDetailExportDashboard(await fetchExportDashboard());
     exportDashboardPdf(exportData, filterExportContext.value);
     emit('show-notification', 'PDF generado', 'El reporte ejecutivo de encomiendas fue descargado.', 'success');
   } catch (e) {
@@ -569,7 +772,7 @@ async function handleExportPdf() {
 }
 
 onMounted(async () => {
-  await Promise.all([fetchFilterOptions(), fetchDashboard()]);
+  await Promise.all([fetchFilterOptions(), refreshDashboardData()]);
 });
 </script>
 
@@ -592,6 +795,9 @@ onMounted(async () => {
         </div>
         <div class="flex flex-col gap-3 sm:flex-row sm:items-center">
           <span class="period-badge">{{ currentPeriodLabel }}</span>
+          <button v-if="isAdmin" type="button" class="btn-primary inline-flex items-center justify-center gap-2" @click="openBulkPaymentsModal()">
+            Cargar pagos
+          </button>
           <button type="button" class="btn-secondary inline-flex items-center justify-center gap-2" :disabled="loading || exporting" @click="handleExport">
             <ArrowDownTrayIcon class="h-5 w-5" />
             {{ exporting ? 'Exportando...' : 'Exportar Excel' }}
@@ -706,8 +912,12 @@ onMounted(async () => {
       <section class="section-container detail-section">
         <div class="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
           <div>
-            <h2 class="section-title">Detalle de operaciones</h2>
-            <p class="text-sm font-medium text-slate-600">Operaciones filtrables por período, semana, proveedor, operador y modalidad.</p>
+            <h2 class="section-title">Pagos asociados</h2>
+            <p class="text-sm font-medium text-slate-600">Vista operativa y detallada de pagos logísticos asociados a encomiendas.</p>
+          </div>
+          <div class="flex flex-wrap gap-2">
+            <button type="button" class="btn-secondary" :class="{ 'is-view-active': detailViewMode === 'simple' }" @click="detailViewMode = 'simple'">Vista simple</button>
+            <button type="button" class="btn-secondary" :class="{ 'is-view-active': detailViewMode === 'detailed' }" @click="detailViewMode = 'detailed'">Vista detallada</button>
           </div>
         </div>
 
@@ -728,6 +938,13 @@ onMounted(async () => {
           <div class="xl:col-span-2"><label class="form-label">Paciente / texto de búsqueda</label><input v-model="filters.paciente" type="text" class="form-input mt-1" placeholder="Buscar en paciente o detalle" @keyup.enter="applyFilters" /></div>
         </div>
 
+        <div class="mt-4 grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-4">
+          <div><label class="form-label">Cliente</label><input v-model="localDetailFilters.cliente" type="text" class="form-input mt-1" placeholder="Filtrar cliente" @input="handleLocalFilterInput" /></div>
+          <div><label class="form-label">Destino</label><input v-model="localDetailFilters.destino" type="text" class="form-input mt-1" placeholder="Filtrar destino" @input="handleLocalFilterInput" /></div>
+          <div><label class="form-label">N° guía</label><input v-model="localDetailFilters.numeroGuia" type="text" class="form-input mt-1" placeholder="Filtrar guía" @input="handleLocalFilterInput" /></div>
+          <div><label class="form-label">Proveedor en detalle</label><input v-model="localDetailFilters.proveedor" type="text" class="form-input mt-1" placeholder="Filtrar proveedor" @input="handleLocalFilterInput" /></div>
+        </div>
+
         <div v-if="selectedWeekOption" class="mt-3 text-sm font-semibold text-slate-600">
           Semana seleccionada: {{ formatDate(selectedWeekOption.start, { day: '2-digit', month: '2-digit' }) }}-{{ formatDate(selectedWeekOption.end, { day: '2-digit', month: '2-digit' }) }}
         </div>
@@ -737,65 +954,70 @@ onMounted(async () => {
           <button type="button" class="btn-primary inline-flex items-center justify-center gap-2" @click="applyFilters"><FunnelIcon class="h-5 w-5" />Aplicar filtros</button>
         </div>
 
-        <div class="mt-6 grid grid-cols-1 gap-3 md:grid-cols-3">
-          <div class="detail-summary"><span>Operaciones filtradas</span><strong>{{ totalCount.toLocaleString('es-AR') }}</strong></div>
-          <div class="detail-summary"><span>Mostrando</span><strong>{{ resultFrom }}-{{ resultTo }}</strong></div>
-          <div class="detail-summary"><span>Total filtrado</span><strong>{{ formatCurrency(filteredTotal) }}</strong></div>
+        <div class="mt-6 grid grid-cols-1 gap-3 md:grid-cols-4">
+          <div class="detail-summary"><span>Pagos cargados</span><strong>{{ detailTotalCount.toLocaleString('es-AR') }}</strong></div>
+          <div class="detail-summary"><span>Mostrando</span><strong>{{ detailResultFrom }}-{{ detailResultTo }}</strong></div>
+          <div class="detail-summary"><span>Total filtrado</span><strong>{{ formatCurrency(detailFilteredTotal) }}</strong></div>
+          <div class="detail-summary"><span>Vista activa</span><strong>{{ detailViewMode === 'simple' ? 'Simple' : 'Detallada' }}</strong></div>
         </div>
 
-        <div v-if="emptyDashboard" class="mt-6 rounded-lg border border-slate-200 bg-slate-50 py-10 text-center text-sm font-medium text-slate-600">No hay operaciones de encomiendas para los filtros seleccionados.</div>
+        <div v-if="detailLoading" class="mt-6 rounded-lg border border-slate-200 bg-slate-50 py-10 text-center text-sm font-medium text-slate-600">Actualizando detalle logístico…</div>
+        <div v-else-if="emptyDashboard && detailTotalCount === 0" class="mt-6 rounded-lg border border-slate-200 bg-slate-50 py-10 text-center text-sm font-medium text-slate-600">No hay operaciones de encomiendas para los filtros seleccionados.</div>
 
-        <div class="mt-6 overflow-x-auto">
+        <div v-else class="mt-6 overflow-x-auto">
           <table class="data-table min-w-full">
             <thead>
               <tr>
                 <th class="table-header">Fecha</th>
-                <th class="table-header">Responsable</th>
-                <th class="table-header">Proveedor</th>
+                <th v-if="detailViewMode === 'detailed'" class="table-header">Cliente</th>
+                <th v-if="detailViewMode === 'detailed'" class="table-header">Proveedor</th>
                 <th class="table-header">Operador logístico</th>
-                <th class="table-header">Movimiento</th>
-                <th class="table-header">Modalidad</th>
-                <th class="table-header">Paciente</th>
+                <th v-if="detailViewMode === 'detailed'" class="table-header">Destino</th>
+                <th v-if="detailViewMode === 'detailed'" class="table-header">N° guía</th>
                 <th class="table-header">Descripción</th>
+                <th v-if="detailViewMode === 'simple'" class="table-header">Cliente</th>
                 <th class="table-header text-right">Monto</th>
                 <th v-if="isAdmin" class="table-header text-right">Acciones</th>
               </tr>
             </thead>
             <tbody>
-              <tr v-for="item in detalleRows" :key="getValue(item, ['gasto_id', 'id', 'fecha'])" class="data-row detail-row">
+              <tr v-for="item in paginatedDetailRows" :key="getValue(item, ['gasto_id', 'id', 'fecha'])" class="data-row detail-row">
                 <td class="table-cell font-medium text-slate-800">{{ formatDate(getValue(item, ['fecha', 'fecha_gasto', 'created_at'])) }}</td>
-                <td class="table-cell" :class="textToneClass(getValue(item, ['responsable', 'responsable_nombre', 'nombre_responsable'], 'N/A'))">{{ getValue(item, ['responsable', 'responsable_nombre', 'nombre_responsable'], 'N/A') }}</td>
-                <td class="table-cell" :class="textToneClass(getValue(item, ['proveedor', 'proveedor_nombre', 'nombre_proveedor'], 'N/A'))">{{ getValue(item, ['proveedor', 'proveedor_nombre', 'nombre_proveedor'], 'N/A') }}</td>
-                <td class="table-cell" :class="textToneClass(getValue(item, ['transporte', 'transporte_nombre', 'operador_logistico', 'nombre_transporte'], 'N/A'))">{{ getValue(item, ['transporte', 'transporte_nombre', 'operador_logistico', 'nombre_transporte'], 'N/A') }}</td>
-                <td class="table-cell" :class="textToneClass(getValue(item, ['tipo_movimiento', 'tipo_movimiento_encomienda'], 'N/A'))">{{ getValue(item, ['tipo_movimiento', 'tipo_movimiento_encomienda'], 'N/A') }}</td>
-                <td class="table-cell font-semibold text-slate-800">{{ modalidadLabel(getModalidadValue(item)) }}</td>
-                <td class="table-cell" :class="textToneClass(getValue(item, ['paciente', 'paciente_referido', 'nombre_paciente'], 'N/A'))">{{ getValue(item, ['paciente', 'paciente_referido', 'nombre_paciente'], 'N/A') }}</td>
+                <td v-if="detailViewMode === 'detailed'" class="table-cell" :class="textToneClass(getClienteValue(item) || 'N/A')">{{ getClienteValue(item) || 'N/A' }}</td>
+                <td v-if="detailViewMode === 'detailed'" class="table-cell" :class="textToneClass(getProveedorValue(item) || 'N/A')">{{ getProveedorValue(item) || 'N/A' }}</td>
+                <td class="table-cell" :class="textToneClass(getTransporteValue(item) || 'N/A')">{{ getTransporteValue(item) || 'N/A' }}</td>
+                <td v-if="detailViewMode === 'detailed'" class="table-cell" :class="textToneClass(getDestinoValue(item) || 'N/A')">{{ getDestinoValue(item) || 'N/A' }}</td>
+                <td v-if="detailViewMode === 'detailed'" class="table-cell" :class="textToneClass(getNumeroGuiaValue(item) || 'N/A')">{{ getNumeroGuiaValue(item) || 'N/A' }}</td>
                 <td class="table-cell max-w-xs truncate" :class="textToneClass(getValue(item, ['descripcion', 'descripcion_general', 'detalle'], 'N/A'))">{{ getValue(item, ['descripcion', 'descripcion_general', 'detalle'], 'N/A') }}</td>
+                <td v-if="detailViewMode === 'simple'" class="table-cell" :class="textToneClass(getClienteValue(item) || 'N/A')">{{ getClienteValue(item) || 'N/A' }}</td>
                 <td class="table-cell money-cell">{{ formatCurrency(getValue(item, ['monto', 'monto_total', 'total'])) }}</td>
                 <td v-if="isAdmin" class="table-cell text-right">
-                  <button v-if="canEditGastoLogistico(item)" type="button" class="edit-button" @click="openEditGastoLogistico(item)">
-                    Editar
-                  </button>
-                  <span v-else class="text-slate-400">-</span>
+                  <div class="flex justify-end gap-2">
+                    <button type="button" class="edit-button secondary" @click="openBulkPaymentsModal(item)">Usar base</button>
+                    <button v-if="canEditGastoLogistico(item)" type="button" class="edit-button" @click="openEditGastoLogistico(item)">
+                      Editar
+                    </button>
+                    <span v-else class="self-center text-slate-400">-</span>
+                  </div>
                 </td>
               </tr>
-              <tr v-if="detalleRows.length === 0"><td :colspan="isAdmin ? 10 : 9" class="empty-cell">Sin operaciones para mostrar.</td></tr>
+              <tr v-if="paginatedDetailRows.length === 0"><td :colspan="isAdmin ? (detailViewMode === 'simple' ? 6 : 9) : (detailViewMode === 'simple' ? 5 : 8)" class="empty-cell">Sin operaciones para mostrar.</td></tr>
             </tbody>
           </table>
         </div>
 
         <div class="mt-5 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-          <button type="button" class="pagination-button" :disabled="currentPage <= 1 || loading" @click="goToPage(currentPage - 1)">Anterior</button>
+          <button type="button" class="pagination-button" :disabled="detailPage <= 1 || detailLoading" @click="handleDetailPageChange(detailPage - 1)">Anterior</button>
           <div class="flex items-center justify-center gap-3 text-center text-sm font-semibold text-slate-700">
-            <span>Página {{ currentPage }} de {{ totalPages }}</span>
+            <span>Página {{ detailPage }} de {{ detailTotalPages }}</span>
             <label class="flex items-center gap-2">
               <span>Filas</span>
-              <select :value="pageSize" class="form-input !mt-0 w-24" @change="changePageSize($event.target.value)">
-                <option v-for="size in pageSizeOptions" :key="size" :value="size">{{ size }}</option>
+              <select :value="detailPageSize" class="form-input !mt-0 w-24" @change="changeDetailPageSize($event.target.value)">
+                <option v-for="size in detailPageSizeOptions" :key="size" :value="size">{{ size }}</option>
               </select>
             </label>
           </div>
-          <button type="button" class="pagination-button" :disabled="currentPage >= totalPages || loading" @click="goToPage(currentPage + 1)">Siguiente</button>
+          <button type="button" class="pagination-button" :disabled="detailPage >= detailTotalPages || detailLoading" @click="handleDetailPageChange(detailPage + 1)">Siguiente</button>
         </div>
       </section>
     </div>
@@ -885,6 +1107,13 @@ onMounted(async () => {
       :loading-options="loadingFilterOptions"
       @saved="handleGastoLogisticoSaved"
     />
+
+    <EncomiendasBulkPaymentsModal
+      v-model="isBulkModalOpen"
+      :seed-payment="seedPayment"
+      @saved="handleBulkPaymentsSaved"
+      @show-notification="(...args) => emit('show-notification', ...args)"
+    />
   </div>
 </template>
 
@@ -916,6 +1145,8 @@ onMounted(async () => {
 .empty-cell { @apply px-4 py-8 text-center text-sm font-medium text-slate-500; }
 .pagination-button { @apply inline-flex min-w-28 items-center justify-center rounded-md border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-slate-700 shadow-sm transition-colors hover:bg-slate-100 hover:text-slate-900 disabled:cursor-not-allowed disabled:border-slate-200 disabled:bg-slate-50 disabled:text-slate-400 disabled:shadow-none; }
 .edit-button { @apply inline-flex items-center justify-center rounded-md border border-indigo-200 bg-indigo-50 px-3 py-1.5 text-xs font-bold text-indigo-700 transition-colors hover:bg-indigo-100 hover:text-indigo-900; }
+.edit-button.secondary { @apply border-slate-200 bg-white text-slate-700 hover:bg-slate-100 hover:text-slate-900; }
+.btn-secondary.is-view-active { @apply border-indigo-300 bg-indigo-50 text-indigo-700; }
 
 .modal-fade-enter-active,
 .modal-fade-leave-active { transition: opacity 0.2s ease; }

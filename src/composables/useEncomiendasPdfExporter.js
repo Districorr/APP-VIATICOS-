@@ -14,6 +14,8 @@ const getValue = (item, keys, fallback = '') => {
   return fallback;
 };
 
+const detailRows = (dashboard) => dashboard?.detalle || [];
+
 const nullableCurrency = (value) => (
   value === null || value === undefined ? '-' : formatCurrency(value)
 );
@@ -153,7 +155,7 @@ const buildImputacionSummary = (dashboard) => {
     sin_clasificar: { amount: 0, count: 0 },
   };
 
-  for (const item of dashboard?.detalle || []) {
+  for (const item of detailRows(dashboard)) {
     const modalidadKey = classifyModalidad(item);
     const amount = numberValue(getValue(item, ['monto', 'monto_total', 'total'], 0));
     summary[modalidadKey].amount += amount;
@@ -261,7 +263,7 @@ const summarizeOperations = (dashboard) => {
   };
   const providersMap = new Map();
 
-  for (const item of dashboard?.detalle || []) {
+  for (const item of detailRows(dashboard)) {
     const amount = numberValue(getValue(item, ['monto', 'monto_total', 'total'], 0));
     const movement = movementLabel(getValue(item, ['tipo_movimiento', 'tipo_movimiento_encomienda']));
     const movementKey = movement === 'Recepciones' ? 'Recepciones' : 'Envíos';
@@ -376,7 +378,7 @@ export function useEncomiendasPdfExporter() {
       title: 'Gasto del período',
       rows: [
         { label: 'Gasto total', value: formatCurrency(kpis.gasto_total_periodo) },
-        { label: 'Operaciones registradas', value: numberValue((dashboard?.detalle || []).length || dashboard?.total_count || weeklyTotals.despachos_periodo).toLocaleString('es-AR') },
+        { label: 'Operaciones registradas', value: numberValue(detailRows(dashboard).length || dashboard?.total_count || weeklyTotals.despachos_periodo).toLocaleString('es-AR') },
         { label: 'Promedio por operación', value: formatCurrency(kpis.gasto_promedio_despacho) },
       ],
     });
