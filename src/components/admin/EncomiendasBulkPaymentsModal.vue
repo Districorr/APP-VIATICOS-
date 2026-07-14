@@ -241,7 +241,27 @@ async function saveRows() {
     });
     if (error) throw error;
 
-    const count = Array.isArray(data) ? data.length : payload.length;
+    // Verificar si la respuesta del RPC indica error interno (ej: problemas de permisos)
+    if (data && typeof data === 'object' && data.ok === false) {
+      const msgs = (data.errores || []).map((e) => e.mensaje).join(', ');
+      throw new Error(msgs || 'Error al registrar los pagos.');
+    }
+
+    // Obtener los IDs insertados para asignarle tipo_gasto_id = 22 (Logística : Envíos | Devoluciones)
+    // Esto es crítico porque el RPC los crea con tipo_gasto_id null, lo que hace que no se filtren en la tabla de analíticas
+    const insertedIds = Array.isArray(data)
+      ? data.map(item => item.id).filter(Boolean)
+      : (data && data.ids ? data.ids : []);
+
+    if (insertedIds.length > 0) {
+      const { error: updateError } = await supabase
+        .from('gastos')
+        .update({ tipo_gasto_id: 22 })
+        .in('id', insertedIds);
+      if (updateError) throw updateError;
+    }
+
+    const count = insertedIds.length || payload.length;
     successMessage.value = `${count} pago(s) registrados correctamente.`;
     emit('saved', { count });
     emit('show-notification', 'Pagos registrados', `${count} pago(s) registrados en cuenta corriente empresa.`, 'success');

@@ -1,0 +1,817 @@
+{
+  "postcss.config.js": {
+    "mtime": 1784037625.4987092,
+    "ast_hash": "c76714d5754a5c3fbcc87b2bba27efcc",
+    "semantic_hash": "c76714d5754a5c3fbcc87b2bba27efcc"
+  },
+  "tailwind.config.js": {
+    "mtime": 1784037625.551517,
+    "ast_hash": "e20b376039b37c9561ed35faca955421",
+    "semantic_hash": "e20b376039b37c9561ed35faca955421"
+  },
+  "vite.config.js": {
+    "mtime": 1784037625.551517,
+    "ast_hash": "8c74d0e60d883bc00011f5b8417e1390",
+    "semantic_hash": "8c74d0e60d883bc00011f5b8417e1390"
+  },
+  "src/App.vue": {
+    "mtime": 1784037625.5125945,
+    "ast_hash": "a8ad8d2416304036c3a64e1c383c8131",
+    "semantic_hash": "a8ad8d2416304036c3a64e1c383c8131"
+  },
+  "src/main.js": {
+    "mtime": 1784037625.5333831,
+    "ast_hash": "8f7c030e01a397bec7b2972bd1ba62bd",
+    "semantic_hash": "8f7c030e01a397bec7b2972bd1ba62bd"
+  },
+  "src/supabaseClient.js": {
+    "mtime": 1784037625.5333831,
+    "ast_hash": "2928a31f48efdf5cae4629c0e734feaf",
+    "semantic_hash": "2928a31f48efdf5cae4629c0e734feaf"
+  },
+  "src/assets/dejavu-sans-font.js": {
+    "mtime": 1784037625.5125945,
+    "ast_hash": "2b848048fbaa079a25c56d8d20660abb",
+    "semantic_hash": "2b848048fbaa079a25c56d8d20660abb"
+  },
+  "src/components/AppHeader.vue": {
+    "mtime": 1784037625.516111,
+    "ast_hash": "dbbfa6cd84572b22479939087920db95",
+    "semantic_hash": "dbbfa6cd84572b22479939087920db95"
+  },
+  "src/components/CajaReportExporter.vue": {
+    "mtime": 1784037625.5171113,
+    "ast_hash": "2a37fafca2de264db84529017247ba2f",
+    "semantic_hash": "2a37fafca2de264db84529017247ba2f"
+  },
+  "src/components/DelegatedExpenseCard.vue": {
+    "mtime": 1784037625.5171113,
+    "ast_hash": "3c942add170b96d54bb8f207368e650f",
+    "semantic_hash": "3c942add170b96d54bb8f207368e650f"
+  },
+  "src/components/DetallesJson.vue": {
+    "mtime": 1784037625.5171113,
+    "ast_hash": "ec3cc59e5a479f6af7bd5a237789444f",
+    "semantic_hash": "ec3cc59e5a479f6af7bd5a237789444f"
+  },
+  "src/components/GastoForm.vue": {
+    "mtime": 1784037625.5171113,
+    "ast_hash": "9fe7e4bc3dda48a59b6b26a4af5e8a2f",
+    "semantic_hash": "9fe7e4bc3dda48a59b6b26a4af5e8a2f"
+  },
+  "src/components/HistorialMovimientosCaja.vue": {
+    "mtime": 1784037625.5186167,
+    "ast_hash": "35d853ddd76602ca28ac2ad1cb6b6df4",
+    "semantic_hash": "35d853ddd76602ca28ac2ad1cb6b6df4"
+  },
+  "src/components/HistorialSolicitudesCaja.vue": {
+    "mtime": 1784037625.5186167,
+    "ast_hash": "f73b58bac3de91f09648023b0c134eda",
+    "semantic_hash": "f73b58bac3de91f09648023b0c134eda"
+  },
+  "src/components/IconRenderer.vue": {
+    "mtime": 1784037625.5186167,
+    "ast_hash": "675f0db3278c2761e80bd7b643471886",
+    "semantic_hash": "675f0db3278c2761e80bd7b643471886"
+  },
+  "src/components/LoginForm.vue": {
+    "mtime": 1784037625.5186167,
+    "ast_hash": "16d44d8b57df31744db4930b01ca76e7",
+    "semantic_hash": "16d44d8b57df31744db4930b01ca76e7"
+  },
+  "src/components/RegisterForm.vue": {
+    "mtime": 1784037625.5186167,
+    "ast_hash": "7407ddbc7d5fd18f5fc96a5f9b033b44",
+    "semantic_hash": "7407ddbc7d5fd18f5fc96a5f9b033b44"
+  },
+  "src/components/ReporteBloqueTabla.vue": {
+    "mtime": 1784037625.520136,
+    "ast_hash": "d41d8cd98f00b204e9800998ecf8427e",
+    "semantic_hash": "d41d8cd98f00b204e9800998ecf8427e"
+  },
+  "src/components/ReporteRendicion.vue": {
+    "mtime": 1784037625.520136,
+    "ast_hash": "6962089816a60e12d5122364bd03e118",
+    "semantic_hash": "6962089816a60e12d5122364bd03e118"
+  },
+  "src/components/SummaryCard.vue": {
+    "mtime": 1784037625.520654,
+    "ast_hash": "09867b55ea75b45b19f43726727a1599",
+    "semantic_hash": "09867b55ea75b45b19f43726727a1599"
+  },
+  "src/components/TipoGastoSelector.vue": {
+    "mtime": 1784037625.520654,
+    "ast_hash": "eab97a12700d81f663dc31fc6756e9c9",
+    "semantic_hash": "eab97a12700d81f663dc31fc6756e9c9"
+  },
+  "src/components/ToastNotification.vue": {
+    "mtime": 1784037625.520654,
+    "ast_hash": "bd4ef6e3f2a746ed6899fc9a92c5bdf7",
+    "semantic_hash": "bd4ef6e3f2a746ed6899fc9a92c5bdf7"
+  },
+  "src/components/ViajeForm.vue": {
+    "mtime": 1784037625.5216613,
+    "ast_hash": "531e874902ef6aa2535e8b5dff5745e8",
+    "semantic_hash": "531e874902ef6aa2535e8b5dff5745e8"
+  },
+  "src/components/admin/AdminDashboardView.vue": {
+    "mtime": 1784037625.5216613,
+    "ast_hash": "699aa19339f13ceceef4539a86dad2e3",
+    "semantic_hash": "699aa19339f13ceceef4539a86dad2e3"
+  },
+  "src/components/admin/AdminEditarGastoCuentaCorrienteModal.vue": {
+    "mtime": 1784037625.5226612,
+    "ast_hash": "4798beab5baa2123fef054178194fa78",
+    "semantic_hash": "4798beab5baa2123fef054178194fa78"
+  },
+  "src/components/admin/AdminRendicionCard.vue": {
+    "mtime": 1784037625.5231662,
+    "ast_hash": "2abd1ebb21c6338182b5b4286fb97628",
+    "semantic_hash": "2abd1ebb21c6338182b5b4286fb97628"
+  },
+  "src/components/admin/AdminReportGenerator.vue": {
+    "mtime": 1784037625.5231662,
+    "ast_hash": "b6ad2d7fe0b535b0468543b9138345c6",
+    "semantic_hash": "b6ad2d7fe0b535b0468543b9138345c6"
+  },
+  "src/components/admin/AdminSeccionTiposGastoView.vue": {
+    "mtime": 1784037625.5231662,
+    "ast_hash": "dbec66f02bdd642ef0dcc04ec62e1efe",
+    "semantic_hash": "dbec66f02bdd642ef0dcc04ec62e1efe"
+  },
+  "src/components/admin/CampoConfigForm.vue": {
+    "mtime": 1784037625.5231662,
+    "ast_hash": "baf84a5596724ff85e739cc220bbcbbc",
+    "semantic_hash": "baf84a5596724ff85e739cc220bbcbbc"
+  },
+  "src/components/admin/EncomiendasBulkPaymentsModal.vue": {
+    "mtime": 1784037625.524672,
+    "ast_hash": "0226a7e2955e89797a2ee07250cc7119",
+    "semantic_hash": "0226a7e2955e89797a2ee07250cc7119"
+  },
+  "src/components/admin/FormatoGastoForm.vue": {
+    "mtime": 1784037625.524672,
+    "ast_hash": "e406143c27acf450f561bfbb4a9729a8",
+    "semantic_hash": "e406143c27acf450f561bfbb4a9729a8"
+  },
+  "src/components/admin/GastoActionsMenu.vue": {
+    "mtime": 1784037625.524672,
+    "ast_hash": "65ae7798eda05e73dc5901fb29fd1ee1",
+    "semantic_hash": "65ae7798eda05e73dc5901fb29fd1ee1"
+  },
+  "src/components/admin/PagoDirectoForm.vue": {
+    "mtime": 1784037625.524672,
+    "ast_hash": "cc8e097f0cd912149379b5055af5dbe7",
+    "semantic_hash": "cc8e097f0cd912149379b5055af5dbe7"
+  },
+  "src/components/admin/PeriodoFilter.vue": {
+    "mtime": 1784037625.5256803,
+    "ast_hash": "f9ac2ac3a313ba036d4833877b604545",
+    "semantic_hash": "f9ac2ac3a313ba036d4833877b604545"
+  },
+  "src/components/admin/ReportEmailModal.vue": {
+    "mtime": 1784037625.5256803,
+    "ast_hash": "c384f6692ed2e47d837dfe06c101f28c",
+    "semantic_hash": "c384f6692ed2e47d837dfe06c101f28c"
+  },
+  "src/components/admin/ReportScheduleDrawer.vue": {
+    "mtime": 1784037625.5256803,
+    "ast_hash": "194284e938e329ff84a6cdf5bc85970e",
+    "semantic_hash": "194284e938e329ff84a6cdf5bc85970e"
+  },
+  "src/components/admin/StatCard.vue": {
+    "mtime": 1784037625.52668,
+    "ast_hash": "f0f4973241e58ec2ff3323329a89195e",
+    "semantic_hash": "f0f4973241e58ec2ff3323329a89195e"
+  },
+  "src/components/admin/TipoGastoForm.vue": {
+    "mtime": 1784037625.52668,
+    "ast_hash": "85925ece10392a4fe5414cf92bfeef5f",
+    "semantic_hash": "85925ece10392a4fe5414cf92bfeef5f"
+  },
+  "src/components/admin/UsuarioEditForm.vue": {
+    "mtime": 1784037625.52668,
+    "ast_hash": "6acc4b72efa9dd526034d4aec143aafe",
+    "semantic_hash": "6acc4b72efa9dd526034d4aec143aafe"
+  },
+  "src/components/admin/analytics/EncomiendasCostosTab.vue": {
+    "mtime": 1784037625.527681,
+    "ast_hash": "3631993d224ab5f968d0a3ae553014e1",
+    "semantic_hash": "3631993d224ab5f968d0a3ae553014e1"
+  },
+  "src/components/admin/analytics/ExploracionAvanzadaTab.vue": {
+    "mtime": 1784037625.5288403,
+    "ast_hash": "03417890d61b9eef1dc70f10d3ad4728",
+    "semantic_hash": "03417890d61b9eef1dc70f10d3ad4728"
+  },
+  "src/components/admin/analytics/GastosAnalyticsTab.vue": {
+    "mtime": 1784037625.5288403,
+    "ast_hash": "77f91c2fc99a2d03197247651a19678c",
+    "semantic_hash": "77f91c2fc99a2d03197247651a19678c"
+  },
+  "src/components/admin/analytics/RendicionesAnalyticsTab.vue": {
+    "mtime": 1784037625.5288403,
+    "ast_hash": "e6bdb3106acc7d6635df26ea0e7ded39",
+    "semantic_hash": "e6bdb3106acc7d6635df26ea0e7ded39"
+  },
+  "src/components/charts/LineChart.vue": {
+    "mtime": 1784037625.5288403,
+    "ast_hash": "041c909aa2e3be4ea9dd29347affa714",
+    "semantic_hash": "041c909aa2e3be4ea9dd29347affa714"
+  },
+  "src/components/charts/PieChart.vue": {
+    "mtime": 1784037625.5288403,
+    "ast_hash": "f64a9b3a46d2dcdfb7eaa36330d08425",
+    "semantic_hash": "f64a9b3a46d2dcdfb7eaa36330d08425"
+  },
+  "src/composables/useAdminReports.js": {
+    "mtime": 1784037625.5303478,
+    "ast_hash": "41799bc3d413c77a1e154732f6eee7a2",
+    "semantic_hash": "41799bc3d413c77a1e154732f6eee7a2"
+  },
+  "src/composables/useEncomiendasDashboard.js": {
+    "mtime": 1784037625.5303478,
+    "ast_hash": "bdd4e0082086dacf9e667388987c2f57",
+    "semantic_hash": "bdd4e0082086dacf9e667388987c2f57"
+  },
+  "src/composables/useEncomiendasExcelExporter.js": {
+    "mtime": 1784037625.5303478,
+    "ast_hash": "f7a6ff3712e85622c357e3c5c0eafd9a",
+    "semantic_hash": "f7a6ff3712e85622c357e3c5c0eafd9a"
+  },
+  "src/composables/useEncomiendasPdfExporter.js": {
+    "mtime": 1784037625.5303478,
+    "ast_hash": "d5a2fc527fc44e9e856c84dc486159e7",
+    "semantic_hash": "d5a2fc527fc44e9e856c84dc486159e7"
+  },
+  "src/composables/useExcelExporter.js": {
+    "mtime": 1784037625.5318725,
+    "ast_hash": "7e3cd89aa94c811b885cbddbaac7949d",
+    "semantic_hash": "7e3cd89aa94c811b885cbddbaac7949d"
+  },
+  "src/composables/useReportGenerator.js": {
+    "mtime": 1784037625.5318725,
+    "ast_hash": "88ccb8a0fb836a6d18e72875229d5bf7",
+    "semantic_hash": "88ccb8a0fb836a6d18e72875229d5bf7"
+  },
+  "src/composables/useViajes.js": {
+    "mtime": 1784037625.5318725,
+    "ast_hash": "a17e67e56cfc1f7ac5b6f2302f701d5d",
+    "semantic_hash": "a17e67e56cfc1f7ac5b6f2302f701d5d"
+  },
+  "src/router/index.js": {
+    "mtime": 1784037625.5333831,
+    "ast_hash": "6be824cf20ae910b6ce0b7714b5041da",
+    "semantic_hash": "6be824cf20ae910b6ce0b7714b5041da"
+  },
+  "src/utils/formatters.js": {
+    "mtime": 1784037625.5348878,
+    "ast_hash": "a807e505c7a5df7ada3af25945d86764",
+    "semantic_hash": "a807e505c7a5df7ada3af25945d86764"
+  },
+  "src/views/ActualizarContrasenaView.vue": {
+    "mtime": 1784037625.5348878,
+    "ast_hash": "fad3dd3b23a4cf27800dd2a846bca190",
+    "semantic_hash": "fad3dd3b23a4cf27800dd2a846bca190"
+  },
+  "src/views/CajaDiariaView.vue": {
+    "mtime": 1784037625.5348878,
+    "ast_hash": "f51b73158d67d30b8c96c06aebf33606",
+    "semantic_hash": "f51b73158d67d30b8c96c06aebf33606"
+  },
+  "src/views/DashboardView.vue": {
+    "mtime": 1784037625.5358932,
+    "ast_hash": "1ad9d06eba04416ce4af88a5f51b5d07",
+    "semantic_hash": "1ad9d06eba04416ce4af88a5f51b5d07"
+  },
+  "src/views/GastoFormView.vue": {
+    "mtime": 1784037625.5358932,
+    "ast_hash": "ce15ed64dc3444abea9a226ba9410d57",
+    "semantic_hash": "ce15ed64dc3444abea9a226ba9410d57"
+  },
+  "src/views/GastosDelegadosView.vue": {
+    "mtime": 1784037625.5358932,
+    "ast_hash": "a0d9896fd740787cefb5419d3a49f201",
+    "semantic_hash": "a0d9896fd740787cefb5419d3a49f201"
+  },
+  "src/views/GastosListView.vue": {
+    "mtime": 1784037625.536894,
+    "ast_hash": "e0299158ed6e90868ec587e94721c346",
+    "semantic_hash": "e0299158ed6e90868ec587e94721c346"
+  },
+  "src/views/LoginView.vue": {
+    "mtime": 1784037625.536894,
+    "ast_hash": "55ebb199c1ddbdc78cf70ce52e6e3fe8",
+    "semantic_hash": "55ebb199c1ddbdc78cf70ce52e6e3fe8"
+  },
+  "src/views/NotificacionesView.vue": {
+    "mtime": 1784037625.5378945,
+    "ast_hash": "d3e3c75f79331a9c7d1117a988a0a445",
+    "semantic_hash": "d3e3c75f79331a9c7d1117a988a0a445"
+  },
+  "src/views/PerfilView.vue": {
+    "mtime": 1784037625.5378945,
+    "ast_hash": "befcfccf72993f796d55432db6347db2",
+    "semantic_hash": "befcfccf72993f796d55432db6347db2"
+  },
+  "src/views/RegisterView.vue": {
+    "mtime": 1784037625.5378945,
+    "ast_hash": "df8a07155602deab32298c841e59fa84",
+    "semantic_hash": "df8a07155602deab32298c841e59fa84"
+  },
+  "src/views/ReportesView.vue": {
+    "mtime": 1784037625.5378945,
+    "ast_hash": "0752343c727ae3a5c9003840ac31934c",
+    "semantic_hash": "0752343c727ae3a5c9003840ac31934c"
+  },
+  "src/views/TestView.vue": {
+    "mtime": 1784037625.5388944,
+    "ast_hash": "2cc026398b5a5455e6f07ffcc5f08902",
+    "semantic_hash": "2cc026398b5a5455e6f07ffcc5f08902"
+  },
+  "src/views/ViajeFormView.vue": {
+    "mtime": 1784037625.5388944,
+    "ast_hash": "4e76c1177a313c40e86da98e491906b5",
+    "semantic_hash": "4e76c1177a313c40e86da98e491906b5"
+  },
+  "src/views/ViajesListView.vue": {
+    "mtime": 1784037625.5398936,
+    "ast_hash": "94fd3da0c85c79f41d376e968934c4b3",
+    "semantic_hash": "94fd3da0c85c79f41d376e968934c4b3"
+  },
+  "src/views/admin/AdminAnalisisClientesView.vue": {
+    "mtime": 1784037625.540398,
+    "ast_hash": "7e49511422bd3c33b52f0ea8cca8d365",
+    "semantic_hash": "7e49511422bd3c33b52f0ea8cca8d365"
+  },
+  "src/views/admin/AdminAnalyticsView.vue": {
+    "mtime": 1784037625.540398,
+    "ast_hash": "a19fc8979f66cc791d37c2f8a5b980ab",
+    "semantic_hash": "a19fc8979f66cc791d37c2f8a5b980ab"
+  },
+  "src/views/admin/AdminAsignarUsuariosFormatoView.vue": {
+    "mtime": 1784037625.540398,
+    "ast_hash": "911ffbac5084cc0456be37a58b843146",
+    "semantic_hash": "911ffbac5084cc0456be37a58b843146"
+  },
+  "src/views/admin/AdminCamposFormatoView.vue": {
+    "mtime": 1784037625.5414035,
+    "ast_hash": "64e19e022c5974d18161d1598d50388e",
+    "semantic_hash": "64e19e022c5974d18161d1598d50388e"
+  },
+  "src/views/admin/AdminClientesView.vue": {
+    "mtime": 1784037625.5414035,
+    "ast_hash": "dbd4fb70be3e9a0cf6f4e2ce6be0715b",
+    "semantic_hash": "dbd4fb70be3e9a0cf6f4e2ce6be0715b"
+  },
+  "src/views/admin/AdminDashboardView.vue": {
+    "mtime": 1784037625.5414035,
+    "ast_hash": "947a200c8ec25bc8d899187e52ef888e",
+    "semantic_hash": "947a200c8ec25bc8d899187e52ef888e"
+  },
+  "src/views/admin/AdminGastosListView.vue": {
+    "mtime": 1784037625.5414035,
+    "ast_hash": "47015973b808468a658fc31105ef364e",
+    "semantic_hash": "47015973b808468a658fc31105ef364e"
+  },
+  "src/views/admin/AdminGestionCajasView.vue": {
+    "mtime": 1784037625.542909,
+    "ast_hash": "a449b5d22a1037153be2d488b1827ca3",
+    "semantic_hash": "a449b5d22a1037153be2d488b1827ca3"
+  },
+  "src/views/admin/AdminGestionFormatos.vue": {
+    "mtime": 1784037625.542909,
+    "ast_hash": "9cfb1e445ed4bd3582ef10169835cb2c",
+    "semantic_hash": "9cfb1e445ed4bd3582ef10169835cb2c"
+  },
+  "src/views/admin/AdminGestionSolicitudesView.vue": {
+    "mtime": 1784037625.5439167,
+    "ast_hash": "3ee882cfcd57d79cbaa53f2bea51784a",
+    "semantic_hash": "3ee882cfcd57d79cbaa53f2bea51784a"
+  },
+  "src/views/admin/AdminLayout.vue": {
+    "mtime": 1784037625.5439167,
+    "ast_hash": "24dc4f6afe5bc75eb125ea62ad08b284",
+    "semantic_hash": "24dc4f6afe5bc75eb125ea62ad08b284"
+  },
+  "src/views/admin/AdminProveedoresView.vue": {
+    "mtime": 1784037625.544358,
+    "ast_hash": "b130f8206b68c896268e86cbb1d95890",
+    "semantic_hash": "b130f8206b68c896268e86cbb1d95890"
+  },
+  "src/views/admin/AdminTiposGastoGlobalesView.vue": {
+    "mtime": 1784037625.544971,
+    "ast_hash": "5551c0e78b01ed36aba0ce44e608a51d",
+    "semantic_hash": "5551c0e78b01ed36aba0ce44e608a51d"
+  },
+  "src/views/admin/AdminTransportesView.vue": {
+    "mtime": 1784037625.5454853,
+    "ast_hash": "4da9cfbb3fe8345fd2e30dbe7f6bf11f",
+    "semantic_hash": "4da9cfbb3fe8345fd2e30dbe7f6bf11f"
+  },
+  "src/views/admin/AdminUsuariosView.vue": {
+    "mtime": 1784037625.5454853,
+    "ast_hash": "b84cab312572f838af7465bd1a75fe76",
+    "semantic_hash": "b84cab312572f838af7465bd1a75fe76"
+  },
+  "src/views/admin/AdminVehiculosView.vue": {
+    "mtime": 1784037625.5454853,
+    "ast_hash": "50015d948a741ab69298bb8e9fac804e",
+    "semantic_hash": "50015d948a741ab69298bb8e9fac804e"
+  },
+  "src/views/admin/AdminViajesListView.vue": {
+    "mtime": 1784037625.5464928,
+    "ast_hash": "70c5b5ae91c09c18de4d954c6be9b15b",
+    "semantic_hash": "70c5b5ae91c09c18de4d954c6be9b15b"
+  },
+  "src/views/admin/PagosDirectosView.vue": {
+    "mtime": 1784037625.5464928,
+    "ast_hash": "822d6d5222543b3793c037d8dedc3287",
+    "semantic_hash": "822d6d5222543b3793c037d8dedc3287"
+  },
+  "src/views/admin/VehiculoDetalleView.vue": {
+    "mtime": 1784037625.5464928,
+    "ast_hash": "d7b2d447393e066ed2219f31c12ddd30",
+    "semantic_hash": "d7b2d447393e066ed2219f31c12ddd30"
+  },
+  "supabase/functions/listar-usuarios-para-admin/index.ts": {
+    "mtime": 1784037625.5505095,
+    "ast_hash": "cba8db3c2d9aff71d0d7c3cf3de24bd1",
+    "semantic_hash": "cba8db3c2d9aff71d0d7c3cf3de24bd1"
+  },
+  "supabase/functions/send-report/index.ts": {
+    "mtime": 1784037625.551517,
+    "ast_hash": "bd40aa249922f3600bb3814f135e5297",
+    "semantic_hash": "bd40aa249922f3600bb3814f135e5297"
+  },
+  "index.html": {
+    "mtime": 1784037625.497193,
+    "ast_hash": "b54792d01a7f3d6441be98f273449008",
+    "semantic_hash": "b54792d01a7f3d6441be98f273449008"
+  },
+  "Nuevo documento de texto.txt": {
+    "mtime": 1784037625.4809408,
+    "ast_hash": "d41d8cd98f00b204e9800998ecf8427e",
+    "semantic_hash": "d41d8cd98f00b204e9800998ecf8427e"
+  },
+  "README.md": {
+    "mtime": 1784037625.4824471,
+    "ast_hash": "a9ecf48d61f4771ac5612aecaa2fcb77",
+    "semantic_hash": "a9ecf48d61f4771ac5612aecaa2fcb77"
+  },
+  "docs/A.txt": {
+    "mtime": 1784037625.4824471,
+    "ast_hash": "31408a2dfa876cb82fc42aadc223b30b",
+    "semantic_hash": "31408a2dfa876cb82fc42aadc223b30b"
+  },
+  "docs/AdminAnalisiscliente.txt": {
+    "mtime": 1784037625.4824471,
+    "ast_hash": "92763cc9c9c39bbc0ee44f4665ff80a5",
+    "semantic_hash": "92763cc9c9c39bbc0ee44f4665ff80a5"
+  },
+  "docs/AdminAnalyticsView.vue.txt": {
+    "mtime": 1784037625.4837759,
+    "ast_hash": "e9aa4c386fd1b1ba8c2c753769886fea",
+    "semantic_hash": "e9aa4c386fd1b1ba8c2c753769886fea"
+  },
+  "docs/Admindashboard.txt": {
+    "mtime": 1784037625.4847982,
+    "ast_hash": "a3b8fe76b0f9b35b58889b2dd95dc504",
+    "semantic_hash": "a3b8fe76b0f9b35b58889b2dd95dc504"
+  },
+  "docs/AdminDashboardView.txt": {
+    "mtime": 1784037625.484282,
+    "ast_hash": "10267472f0ad7644a698d2ee25fb5df7",
+    "semantic_hash": "10267472f0ad7644a698d2ee25fb5df7"
+  },
+  "docs/AdminGastosList.txt": {
+    "mtime": 1784037625.4847982,
+    "ast_hash": "a9a045875fe2def189ec1dff234a42a0",
+    "semantic_hash": "a9a045875fe2def189ec1dff234a42a0"
+  },
+  "docs/AdminGestionCajasView.txt": {
+    "mtime": 1784037625.4847982,
+    "ast_hash": "ce02000e8736f42acfaea0a725c1b1ee",
+    "semantic_hash": "ce02000e8736f42acfaea0a725c1b1ee"
+  },
+  "docs/AdminGestionCajasView.vue.txt": {
+    "mtime": 1784037625.4847982,
+    "ast_hash": "ce02000e8736f42acfaea0a725c1b1ee",
+    "semantic_hash": "ce02000e8736f42acfaea0a725c1b1ee"
+  },
+  "docs/AdminTiposdegastosglobales.txt": {
+    "mtime": 1784037625.4847982,
+    "ast_hash": "6323498cdd0f25742c5f2203c56c2a57",
+    "semantic_hash": "6323498cdd0f25742c5f2203c56c2a57"
+  },
+  "docs/B.txt": {
+    "mtime": 1784037625.4847982,
+    "ast_hash": "be25aa9d9ed6db443b6c5fedfa56cae7",
+    "semantic_hash": "be25aa9d9ed6db443b6c5fedfa56cae7"
+  },
+  "docs/CajaDiariaView.txt": {
+    "mtime": 1784037625.4847982,
+    "ast_hash": "b55f9ed31e665a2f322286fa9feda6c8",
+    "semantic_hash": "b55f9ed31e665a2f322286fa9feda6c8"
+  },
+  "docs/CajasDiariaView.txt": {
+    "mtime": 1784037625.4874845,
+    "ast_hash": "476225aed232019ad3b0a5a1ebba5ecd",
+    "semantic_hash": "476225aed232019ad3b0a5a1ebba5ecd"
+  },
+  "docs/const generateCajaReportePDF.txt": {
+    "mtime": 1784037625.4956884,
+    "ast_hash": "7c59c62e2745f77ee4c54908fa902a25",
+    "semantic_hash": "7c59c62e2745f77ee4c54908fa902a25"
+  },
+  "docs/DelegateExpenseCard.txt": {
+    "mtime": 1784037625.4874845,
+    "ast_hash": "da2b4f7b5898eec1f58180a1ab545b79",
+    "semantic_hash": "da2b4f7b5898eec1f58180a1ab545b79"
+  },
+  "docs/ExploracionAvanzadaTab.vue.txt": {
+    "mtime": 1784037625.4874845,
+    "ast_hash": "c61869976d48a3c571b0a5c117a18d2a",
+    "semantic_hash": "c61869976d48a3c571b0a5c117a18d2a"
+  },
+  "docs/formatters.js.txt": {
+    "mtime": 1784037625.4956884,
+    "ast_hash": "74a0708f3b790b1f1603202e23a5b38f",
+    "semantic_hash": "74a0708f3b790b1f1603202e23a5b38f"
+  },
+  "docs/GastosDelegadosView.txt": {
+    "mtime": 1784037625.4885023,
+    "ast_hash": "a0f7227e9ffd42a794fe02d4fdf07788",
+    "semantic_hash": "a0f7227e9ffd42a794fe02d4fdf07788"
+  },
+  "docs/GastosForm.txt": {
+    "mtime": 1784037625.4885023,
+    "ast_hash": "184368b77ddf7bf05222621e9fef4172",
+    "semantic_hash": "184368b77ddf7bf05222621e9fef4172"
+  },
+  "docs/GastosListView.txt": {
+    "mtime": 1784037625.4885023,
+    "ast_hash": "702955934477bd456b43cf34b209d336",
+    "semantic_hash": "702955934477bd456b43cf34b209d336"
+  },
+  "docs/get_admin_analytics_dashboard.txt": {
+    "mtime": 1784037625.4956884,
+    "ast_hash": "6f6667155c5438f421de5a2b50f51658",
+    "semantic_hash": "6f6667155c5438f421de5a2b50f51658"
+  },
+  "docs/get_desglose_adelantos_por_responsable.txt": {
+    "mtime": 1784037625.4956884,
+    "ast_hash": "f82144c728deb8e5a798d352608a7390",
+    "semantic_hash": "f82144c728deb8e5a798d352608a7390"
+  },
+  "docs/HistorialMovimientosCaja.txt": {
+    "mtime": 1784037625.4900193,
+    "ast_hash": "374cb6bc26b9ef870182761b931434fe",
+    "semantic_hash": "374cb6bc26b9ef870182761b931434fe"
+  },
+  "docs/HistorialSolicitudesCaja.txt": {
+    "mtime": 1784037625.4900193,
+    "ast_hash": "f73b58bac3de91f09648023b0c134eda",
+    "semantic_hash": "f73b58bac3de91f09648023b0c134eda"
+  },
+  "docs/Index.js.txt": {
+    "mtime": 1784037625.4905684,
+    "ast_hash": "a13dff5a6fa99f18eb5c07aa24ec97f6",
+    "semantic_hash": "a13dff5a6fa99f18eb5c07aa24ec97f6"
+  },
+  "docs/index.txt": {
+    "mtime": 1784037625.497193,
+    "ast_hash": "a13dff5a6fa99f18eb5c07aa24ec97f6",
+    "semantic_hash": "a13dff5a6fa99f18eb5c07aa24ec97f6"
+  },
+  "docs/README.md": {
+    "mtime": 1784037625.4905684,
+    "ast_hash": "e4039e29024de05387b5bf7870120e8f",
+    "semantic_hash": "e4039e29024de05387b5bf7870120e8f"
+  },
+  "docs/RendicionesAnalyticsTab.vue.txt": {
+    "mtime": 1784037625.4905684,
+    "ast_hash": "4265ade75c13b5f0d07bbd08bdbaf704",
+    "semantic_hash": "4265ade75c13b5f0d07bbd08bdbaf704"
+  },
+  "docs/StatCard.txt": {
+    "mtime": 1784037625.4905684,
+    "ast_hash": "7aabb2891e43efdad5719fe839fb614b",
+    "semantic_hash": "7aabb2891e43efdad5719fe839fb614b"
+  },
+  "docs/useReportGenerator.js.txt": {
+    "mtime": 1784037625.497193,
+    "ast_hash": "d12e8d62c837e4bd4638f48782c6241f",
+    "semantic_hash": "d12e8d62c837e4bd4638f48782c6241f"
+  },
+  "docs/backend/supabase/rcp/admin_gastos_completos.txt": {
+    "mtime": 1784037625.4925902,
+    "ast_hash": "bae2b9a6939758fc597f5c7433b1650c",
+    "semantic_hash": "bae2b9a6939758fc597f5c7433b1650c"
+  },
+  "docs/backend/supabase/rcp/ajustar_saldo_caja_manual.txt": {
+    "mtime": 1784037625.4925902,
+    "ast_hash": "04791ac9ec68b3233f820b9b86bf8bd3",
+    "semantic_hash": "04791ac9ec68b3233f820b9b86bf8bd3"
+  },
+  "docs/backend/supabase/rcp/crear_gasto_delegado.txt": {
+    "mtime": 1784037625.4925902,
+    "ast_hash": "bea90f09a6d57b0a97edb6fd5b5195aa",
+    "semantic_hash": "bea90f09a6d57b0a97edb6fd5b5195aa"
+  },
+  "docs/backend/supabase/rcp/get_analisis_por_cliente.txt": {
+    "mtime": 1784037625.4925902,
+    "ast_hash": "f6054cc33aeaf7feeecbd8ce1df4f910",
+    "semantic_hash": "f6054cc33aeaf7feeecbd8ce1df4f910"
+  },
+  "docs/backend/supabase/rcp/get_dashboard_analisis_rendiciones.txt": {
+    "mtime": 1784037625.4941761,
+    "ast_hash": "42c8f4bf3723af3bc208f2fd13d479c9",
+    "semantic_hash": "42c8f4bf3723af3bc208f2fd13d479c9"
+  },
+  "docs/backend/supabase/rcp/get_reporte_rendicion_completa.txt": {
+    "mtime": 1784037625.4941761,
+    "ast_hash": "d1651258a840d860ea8afdb3b5f19fcc",
+    "semantic_hash": "d1651258a840d860ea8afdb3b5f19fcc"
+  },
+  "docs/backend/supabase/rcp/obtener_mi_historial_delegaciones.txt": {
+    "mtime": 1784037625.4946823,
+    "ast_hash": "7e516714ea7b6ec2101e7692104065d7",
+    "semantic_hash": "7e516714ea7b6ec2101e7692104065d7"
+  },
+  "docs/backend/supabase/rcp/rechazar_gasto_delegado.txt": {
+    "mtime": 1784037625.4946823,
+    "ast_hash": "0c1f27fdc62461ba08b4c2f35450f9c1",
+    "semantic_hash": "0c1f27fdc62461ba08b4c2f35450f9c1"
+  },
+  "docs/backend/supabase/tables/gastos.txt": {
+    "mtime": 1784037625.4946823,
+    "ast_hash": "1f163f9f8e2c6be425c22d8af8a441ac",
+    "semantic_hash": "1f163f9f8e2c6be425c22d8af8a441ac"
+  },
+  "docs/backend/supabase/tables/historial_delegaciones.txt": {
+    "mtime": 1784037625.4956884,
+    "ast_hash": "676098438dacb5ec8d9bba0cd6d2a61d",
+    "semantic_hash": "676098438dacb5ec8d9bba0cd6d2a61d"
+  },
+  "docs/backend/supabase/tables/perfiles.txt": {
+    "mtime": 1784037625.4956884,
+    "ast_hash": "8ce4d1fb71938d42387ee20bf0af4707",
+    "semantic_hash": "8ce4d1fb71938d42387ee20bf0af4707"
+  },
+  "DOCUMENTACION/AI_WORKING_CONTEXT.md": {
+    "mtime": 1784037625.4745784,
+    "ast_hash": "0d84e922e4dc4bc14f3b9c9f6fa9664c",
+    "semantic_hash": "0d84e922e4dc4bc14f3b9c9f6fa9664c"
+  },
+  "DOCUMENTACION/BUSINESS_DOMAIN_AND_FLOWS.md": {
+    "mtime": 1784037625.4745784,
+    "ast_hash": "76825ea602e4181cdca1367969f29207",
+    "semantic_hash": "76825ea602e4181cdca1367969f29207"
+  },
+  "DOCUMENTACION/CHANGELOG_TECHNICAL.md": {
+    "mtime": 1784037625.4745784,
+    "ast_hash": "452a1398784ac2d6c6bbe64422a1469e",
+    "semantic_hash": "452a1398784ac2d6c6bbe64422a1469e"
+  },
+  "DOCUMENTACION/CURRENT_IMPLEMENTATION_STATUS.md": {
+    "mtime": 1784037625.4745784,
+    "ast_hash": "9ee532b2291433e74e67b0bdd8e970b7",
+    "semantic_hash": "9ee532b2291433e74e67b0bdd8e970b7"
+  },
+  "DOCUMENTACION/DATABASE_SCHEMA_AND_RELATIONSHIPS_FINAL.md": {
+    "mtime": 1784037625.4745784,
+    "ast_hash": "141ef3b930f026eedf6104df8f14db2d",
+    "semantic_hash": "141ef3b930f026eedf6104df8f14db2d"
+  },
+  "DOCUMENTACION/FRONTEND_ARCHITECTURE.md": {
+    "mtime": 1784037625.4784276,
+    "ast_hash": "36f160a510c9780461e2d3febc719fb7",
+    "semantic_hash": "36f160a510c9780461e2d3febc719fb7"
+  },
+  "DOCUMENTACION/FRONTEND_BACKEND_DATA_FLOW.md": {
+    "mtime": 1784037625.4784276,
+    "ast_hash": "aeb7f89589a41057abe02ef1de3debd1",
+    "semantic_hash": "aeb7f89589a41057abe02ef1de3debd1"
+  },
+  "DOCUMENTACION/OPEN_QUESTIONS_AND_VERIFICATION_PENDING.md": {
+    "mtime": 1784037625.4784276,
+    "ast_hash": "a15093a13dbbe559697ed190feeb4fb2",
+    "semantic_hash": "a15093a13dbbe559697ed190feeb4fb2"
+  },
+  "DOCUMENTACION/PROJECT_CONTEXT_MASTER.md": {
+    "mtime": 1784037625.479933,
+    "ast_hash": "a7097f48e312aab21e6b87bd467cca9a",
+    "semantic_hash": "a7097f48e312aab21e6b87bd467cca9a"
+  },
+  "DOCUMENTACION/SPEC_DRIVEN_DEVELOPMENT_GUIDE.md": {
+    "mtime": 1784037625.479933,
+    "ast_hash": "17ec3a7420a8f94649ab43c6a6d4f1ce",
+    "semantic_hash": "17ec3a7420a8f94649ab43c6a6d4f1ce"
+  },
+  "DOCUMENTACION/SUPABASE_BACKEND_ARCHITECTURE.md": {
+    "mtime": 1784037625.479933,
+    "ast_hash": "211a515fc1f28936274fcdab6b5de7e8",
+    "semantic_hash": "211a515fc1f28936274fcdab6b5de7e8"
+  },
+  "DOCUMENTACION/SUPABASE_RLS_SECURITY_MATRIX.md": {
+    "mtime": 1784037625.4809408,
+    "ast_hash": "b63ba01cf9d362d99f34526618c6d264",
+    "semantic_hash": "b63ba01cf9d362d99f34526618c6d264"
+  },
+  "DOCUMENTACION/SUPABASE_RPCS_VIEWS_TRIGGERS_CATALOG.md": {
+    "mtime": 1784037625.4809408,
+    "ast_hash": "7d98c51695cb73afbe04909a6696c333",
+    "semantic_hash": "7d98c51695cb73afbe04909a6696c333"
+  },
+  "DOCUMENTACION/TECHNICAL_RISKS_AND_REFACTOR_NOTES.md": {
+    "mtime": 1784037625.4809408,
+    "ast_hash": "b7324b99f7ff37be751a61b2448dc0a6",
+    "semantic_hash": "b7324b99f7ff37be751a61b2448dc0a6"
+  },
+  "DOCUMENTACION/FEATURE_SPECS/FEATURE_SPECSTEMPLATE_FEATURE_SPEC.md": {
+    "mtime": 1784037625.4774194,
+    "ast_hash": "1e758855c22b3bb0c78aff808be48290",
+    "semantic_hash": "1e758855c22b3bb0c78aff808be48290"
+  },
+  "DOCUMENTACION/FEATURE_SPECS/FEATURE_SPEC_CUENTA_CORRIENTE_EMPRESA.md": {
+    "mtime": 1784037625.4784276,
+    "ast_hash": "1de407cda1f010b5e381069996dd0449",
+    "semantic_hash": "1de407cda1f010b5e381069996dd0449"
+  },
+  "DOCUMENTACION/FEATURE_SPECS/FEATURE_SPEC_F-LOG-001_CUENTA_CORRIENTE_EMPRESA.md": {
+    "mtime": 1784037625.4784276,
+    "ast_hash": "b2ee23c285f19c4c998552db67a04a08",
+    "semantic_hash": "b2ee23c285f19c4c998552db67a04a08"
+  },
+  "public/districorr-ilustracion-login.svg": {
+    "mtime": 1784037625.500638,
+    "ast_hash": "f98b562c488fedd1f255cc12b2294a2e",
+    "semantic_hash": "f98b562c488fedd1f255cc12b2294a2e"
+  },
+  "public/districorr-logo-circular (2).png": {
+    "mtime": 1784037625.5026445,
+    "ast_hash": "8863123c3f4653ee876c5488c77e53f1",
+    "semantic_hash": "8863123c3f4653ee876c5488c77e53f1"
+  },
+  "public/districorr-logo-circular.png": {
+    "mtime": 1784037625.5026445,
+    "ast_hash": "1ec15821a1492e5cfd32a574d3febb07",
+    "semantic_hash": "1ec15821a1492e5cfd32a574d3febb07"
+  },
+  "public/districorr-logo-nombre.png": {
+    "mtime": 1784037625.5046742,
+    "ast_hash": "b631301aa3c8598f71924fba22df0b37",
+    "semantic_hash": "b631301aa3c8598f71924fba22df0b37"
+  },
+  "public/login-banner-districorr.jpg": {
+    "mtime": 1784037625.5046742,
+    "ast_hash": "4b28ffab7b2a23cd4defdb44ba67597d",
+    "semantic_hash": "4b28ffab7b2a23cd4defdb44ba67597d"
+  },
+  "public/Logo Info gastos.svg": {
+    "mtime": 1784037625.500638,
+    "ast_hash": "7fbb258ce56a2c96b112f45f9202e898",
+    "semantic_hash": "7fbb258ce56a2c96b112f45f9202e898"
+  },
+  "public/logo.png": {
+    "mtime": 1784037625.5101092,
+    "ast_hash": "8863123c3f4653ee876c5488c77e53f1",
+    "semantic_hash": "8863123c3f4653ee876c5488c77e53f1"
+  },
+  "public/pdf_icon.png": {
+    "mtime": 1784037625.512075,
+    "ast_hash": "a30ae0567a861643795f0ac2929af874",
+    "semantic_hash": "a30ae0567a861643795f0ac2929af874"
+  },
+  "public/img/districorr-ilustracion-login.svg": {
+    "mtime": 1784037625.5046742,
+    "ast_hash": "f98b562c488fedd1f255cc12b2294a2e",
+    "semantic_hash": "f98b562c488fedd1f255cc12b2294a2e"
+  },
+  "public/img/districorr-logo-circular.png": {
+    "mtime": 1784037625.5046742,
+    "ast_hash": "1ec15821a1492e5cfd32a574d3febb07",
+    "semantic_hash": "1ec15821a1492e5cfd32a574d3febb07"
+  },
+  "public/img/login-banner-districorr.jpg": {
+    "mtime": 1784037625.5046742,
+    "ast_hash": "4b28ffab7b2a23cd4defdb44ba67597d",
+    "semantic_hash": "4b28ffab7b2a23cd4defdb44ba67597d"
+  },
+  "src/districorr-logo-circular.png": {
+    "mtime": 1784037625.5333831,
+    "ast_hash": "1ec15821a1492e5cfd32a574d3febb07",
+    "semantic_hash": "1ec15821a1492e5cfd32a574d3febb07"
+  },
+  "src/assets/img/districorr-logo-circular.png": {
+    "mtime": 1784037625.5136013,
+    "ast_hash": "1ec15821a1492e5cfd32a574d3febb07",
+    "semantic_hash": "1ec15821a1492e5cfd32a574d3febb07"
+  },
+  "src/assets/img/login-banner-districorr.jpg": {
+    "mtime": 1784037625.516111,
+    "ast_hash": "4b28ffab7b2a23cd4defdb44ba67597d",
+    "semantic_hash": "4b28ffab7b2a23cd4defdb44ba67597d"
+  }
+}
