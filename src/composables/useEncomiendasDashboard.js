@@ -61,6 +61,26 @@ export function useEncomiendasDashboard() {
     paciente: '',
   });
 
+  const sinProveedorId = ref(null);
+
+  const loadSinProveedorId = async () => {
+    try {
+      const { data } = await supabase
+        .from('proveedores')
+        .select('id')
+        .ilike('nombre', 'sin proveedor')
+        .eq('activo', true)
+        .maybeSingle();
+      if (data) {
+        sinProveedorId.value = data.id;
+      }
+    } catch (e) {
+      console.error('Error cargando id de sin proveedor:', e);
+    }
+  };
+
+  loadSinProveedorId();
+
   const offset = computed(() => (currentPage.value - 1) * pageSize.value);
   const totalCount = computed(() => Number(dashboard.value?.total_count || 0));
   const totalPages = computed(() => Math.max(1, Math.ceil(totalCount.value / pageSize.value)));
@@ -68,18 +88,79 @@ export function useEncomiendasDashboard() {
   const resultFrom = computed(() => totalCount.value === 0 ? 0 : offset.value + 1);
   const resultTo = computed(() => Math.min(offset.value + pageSize.value, totalCount.value));
 
-  const buildRpcParams = ({ limit = pageSize.value, pageOffset = offset.value } = {}) => ({
-    p_fecha_desde: filters.fechaDesde || null,
-    p_fecha_hasta: filters.fechaHasta || null,
-    p_proveedor_id: filters.proveedorId || null,
-    p_transporte_id: filters.transporteId || null,
-    p_tipo_movimiento: filters.tipoMovimiento || null,
-    p_modalidad: filters.modalidad || null,
-    p_responsable_id: filters.responsableId || null,
-    p_paciente: filters.paciente?.trim() || null,
-    p_limit: limit,
-    p_offset: pageOffset,
-  });
+  const buildRpcParams = ({ limit = pageSize.value, pageOffset = offset.value } = {}) => {
+    const isSinProveedor = filters.proveedorId && sinProveedorId.value === filters.proveedorId;
+    const provId = isSinProveedor ? null : filters.proveedorId;
+    return {
+      p_fecha_desde: filters.fechaDesde || null,
+      p_fecha_hasta: filters.fechaHasta || null,
+      p_proveedor_id: provId || null,
+      p_transporte_id: filters.transporteId || null,
+      p_tipo_movimiento: filters.tipoMovimiento || null,
+      p_modalidad: filters.modalidad || null,
+      p_responsable_id: filters.responsableId || null,
+      p_paciente: filters.paciente?.trim() || null,
+      p_limit: isSinProveedor ? null : limit,
+      p_offset: isSinProveedor ? 0 : pageOffset,
+    };
+  };
+
+  const postProcessDashboard = (data) => {
+    const normalized = normalizeDashboard(data);
+    const isSinProveedorFilter = filters.proveedorId && sinProveedorId.value === filters.proveedorId;
+    if (!isSinProveedorFilter) return normalized;
+
+    // Filtrar detalles: proveedor_id es null o coincide con sinProveedorId
+    const filteredDetalle = (normalized.detalle || []).filter(
+      item => item.proveedor_id === null || item.proveedor_id === undefined || item.proveedor_id === sinProveedorId.value
+    );
+
+    // Filtrar resumen de proveedor
+    const filteredPorProveedor = (normalized.por_proveedor || []).filter(
+      item => item.proveedor_id === null || item.proveedor_id === undefined || item.proveedor_id === sinProveedorId.value
+    );
+
+    // Filtrar control semanal
+    const filteredControlSemanal = (normalized.control_semanal_por_proveedor || []).filter(
+      item => item.proveedor_id === null || item.proveedor_id === undefined || item.proveedor_id === sinProveedorId.value
+    );
+
+    // Recalcular KPIs
+    const getVal = (item, keys, fallback = 0) => {
+      for (const key of keys) {
+        if (item?.[key] !== null && item?.[key] !== undefined && item?.[key] !== '') return Number(item[key]);
+      }
+      return fallback;
+    };
+
+    const getModalidad = (item) => {
+      const val = item?.modalidad_imputacion || item?.modalidad || '';
+      return String(val).trim().toLowerCase();
+    };
+
+    const totalGasto = filteredDetalle.reduce((sum, item) => sum + getVal(item, ['monto', 'monto_total', 'total']), 0);
+    const countDespachos = filteredDetalle.length;
+    const totalCC = filteredDetalle.filter(item => getModalidad(item) === 'cuenta_corriente_empresa').reduce((sum, item) => sum + getVal(item, ['monto', 'monto_total', 'total']), 0);
+    const totalRend = filteredDetalle.filter(item => getModalidad(item) === 'rendicion').reduce((sum, item) => sum + getVal(item, ['monto', 'monto_total', 'total']), 0);
+    const totalCaja = filteredDetalle.filter(item => getModalidad(item) === 'caja_chica').reduce((sum, item) => sum + getVal(item, ['monto', 'monto_total', 'total']), 0);
+
+    return {
+      ...normalized,
+      detalle: filteredDetalle,
+      por_proveedor: filteredPorProveedor,
+      control_semanal_por_proveedor: filteredControlSemanal,
+      total_count: countDespachos,
+      kpis: {
+        ...normalized.kpis,
+        gasto_total_periodo: totalGasto,
+        cantidad_despachos: countDespachos,
+        gasto_promedio_despacho: countDespachos > 0 ? totalGasto / countDespachos : null,
+        total_cuenta_corriente: totalCC,
+        total_rendicion: totalRend,
+        total_caja_chica: totalCaja
+      }
+    };
+  };
 
   const fetchDashboard = async () => {
     loading.value = true;
@@ -92,7 +173,7 @@ export function useEncomiendasDashboard() {
       );
 
       if (rpcError) throw rpcError;
-      dashboard.value = normalizeDashboard(data);
+      dashboard.value = postProcessDashboard(data);
     } catch (e) {
       console.error('Error cargando dashboard de encomiendas:', e);
       error.value = e.message || 'No se pudo cargar el panel de encomiendas.';
@@ -109,7 +190,7 @@ export function useEncomiendasDashboard() {
     );
 
     if (rpcError) throw rpcError;
-    return normalizeDashboard(data);
+    return postProcessDashboard(data);
   };
 
   const applyFilters = async () => {
