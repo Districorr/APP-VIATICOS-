@@ -148,34 +148,42 @@ const normalizeText = (value) => String(value || '')
   .trim()
   .toLowerCase();
 
+const extractName = (val) => {
+  if (!val) return '';
+  if (typeof val === 'object') {
+    return String(val.nombre || val.nombre_cliente || val.cliente_nombre || val.transporte_nombre || val.proveedor_nombre || val.nombre_proveedor || '').trim();
+  }
+  return String(val).trim();
+};
+
 const getClienteValue = (item) => firstNonEmptyText(
-  getValue(item, ['cliente', 'cliente_nombre', 'nombre_cliente', 'cliente_referido'], ''),
+  extractName(getValue(item, ['cliente_nombre', 'cliente', 'nombre_cliente', 'cliente_referido'], '')),
   getAdditionalData(item).cliente_nombre,
 );
 
 const getProveedorValue = (item) => firstNonEmptyText(
-  getValue(item, ['proveedor', 'proveedor_nombre', 'nombre_proveedor'], ''),
+  extractName(getValue(item, ['proveedor_nombre', 'proveedor', 'nombre_proveedor'], '')),
   getAdditionalData(item).proveedor_nombre,
 );
 
 const getTransporteValue = (item) => firstNonEmptyText(
-  getValue(item, ['transporte', 'transporte_nombre', 'operador_logistico', 'nombre_transporte'], ''),
+  extractName(getValue(item, ['transporte_nombre', 'transporte', 'operador_logistico', 'nombre_transporte'], '')),
   getAdditionalData(item).transporte_nombre,
 );
 
 const getNumeroGuiaValue = (item) => firstNonEmptyText(
-  getValue(item, ['numero_guia', 'numero_factura', 'guia', 'remito'], ''),
+  extractName(getValue(item, ['numero_guia', 'numero_factura', 'guia', 'remito'], '')),
   getAdditionalData(item).numero_guia,
 );
 
 const getDestinoValue = (item) => {
   const additional = getAdditionalData(item);
   const destinoTexto = firstNonEmptyText(
-    getValue(item, ['destino', 'destino_texto', 'localidad', 'localidad_destino', 'provincia', 'provincia_nombre'], ''),
+    extractName(getValue(item, ['destino_texto', 'destino', 'localidad', 'localidad_destino', 'provincia', 'provincia_nombre'], '')),
     additional.destino_texto,
   );
   const provincia = firstNonEmptyText(
-    getValue(item, ['provincia', 'provincia_nombre'], ''),
+    extractName(getValue(item, ['provincia_nombre', 'provincia'], '')),
     additional.provincia_nombre,
   );
   if (destinoTexto && provincia && !normalizeText(destinoTexto).includes(normalizeText(provincia))) {
