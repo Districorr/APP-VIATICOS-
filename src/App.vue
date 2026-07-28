@@ -158,7 +158,7 @@ console.log("App.vue (V-Final-Restaurado): Script setup FINALIZADO");
     <main 
       class="flex-grow w-full" 
       :class="[
-        {'pt-[68px]': !isAuthRoute}, 
+        {'pt-4': !isAuthRoute}, 
         isAuthRoute ? 'bg-gradient-to-br from-blue-900 to-blue-700' : 'bg-gray-100/50' 
       ]"
     > 

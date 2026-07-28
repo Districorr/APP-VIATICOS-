@@ -7,6 +7,7 @@ import { ArrowDownTrayIcon, BanknotesIcon, ClipboardDocumentListIcon, CurrencyDo
 import StatCard from '../StatCard.vue';
 import AdminEditarGastoCuentaCorrienteModal from '../AdminEditarGastoCuentaCorrienteModal.vue';
 import EncomiendasBulkPaymentsModal from '../EncomiendasBulkPaymentsModal.vue';
+import AdminCtaCteVencimientosModal from '../AdminCtaCteVencimientosModal.vue';
 import { supabase } from '../../../supabaseClient';
 import { useEncomiendasDashboard } from '../../../composables/useEncomiendasDashboard';
 import { useEncomiendasExcelExporter } from '../../../composables/useEncomiendasExcelExporter';
@@ -59,6 +60,66 @@ const isEditModalOpen = ref(false);
 const gastoEnEdicion = ref(null);
 const isBulkModalOpen = ref(false);
 const seedPayment = ref(null);
+const isCtaCteModalOpen = ref(false);
+const showFilters = ref(false);
+
+const expandedRows = ref({});
+const isTotalExpanded = ref(false);
+
+const getRowKey = (item) => {
+  return String(getValue(item, ['proveedor_id']) || getValue(item, ['proveedor_nombre']) || 'sin_proveedor');
+};
+
+const toggleRow = (key) => {
+  expandedRows.value[key] = !expandedRows.value[key];
+};
+
+const drillDownFilter = ref({
+  providerName: null,
+  weekNumber: null,
+  startDate: null,
+  endDate: null
+});
+
+function drillDownToWeek(item, week) {
+  const isTotalRow = !item;
+  const providerName = isTotalRow ? null : getValue(item, ['proveedor_nombre', 'proveedor', 'nombre_proveedor'], 'Sin proveedor');
+  
+  drillDownFilter.value = {
+    providerName,
+    weekNumber: week.semana_numero,
+    startDate: week.semana_inicio,
+    endDate: week.semana_fin
+  };
+  
+  const detailSection = document.querySelector('.detail-section');
+  if (detailSection) {
+    detailSection.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  }
+}
+
+function clearDrillDown() {
+  drillDownFilter.value = {
+    providerName: null,
+    weekNumber: null,
+    startDate: null,
+    endDate: null
+  };
+}
+const activeFiltersCount = computed(() => {
+  let count = 0;
+  if (filters.proveedorId) count++;
+  if (filters.transporteId) count++;
+  if (filters.tipoMovimiento) count++;
+  if (filters.modalidad) count++;
+  if (filters.responsableId) count++;
+  if (filters.paciente?.trim()) count++;
+  if (localDetailFilters.value.cliente?.trim()) count++;
+  if (localDetailFilters.value.destino?.trim()) count++;
+  if (localDetailFilters.value.numeroGuia?.trim()) count++;
+  if (localDetailFilters.value.proveedor?.trim()) count++;
+  return count;
+});
 const detailViewMode = ref('detailed');
 const detailLoading = ref(false);
 const fullDetailRows = ref([]);
@@ -199,7 +260,10 @@ const detailRowsFiltered = computed(() => {
   const guiaFilter = normalizeText(localDetailFilters.value.numeroGuia);
   const proveedorFilter = normalizeText(localDetailFilters.value.proveedor);
 
+  const dd = drillDownFilter.value;
+
   return detailRowsSource.value.filter((item) => {
+    // 1. Filtros locales del usuario
     const cliente = normalizeText(getClienteValue(item));
     const destino = normalizeText(getDestinoValue(item));
     const guia = normalizeText(getNumeroGuiaValue(item));
@@ -208,6 +272,20 @@ const detailRowsFiltered = computed(() => {
     if (destinoFilter && !destino.includes(destinoFilter)) return false;
     if (guiaFilter && !guia.includes(guiaFilter)) return false;
     if (proveedorFilter && !proveedor.includes(proveedorFilter)) return false;
+
+    // 2. Filtros de Drill-Down por semana y proveedor
+    if (dd.startDate && dd.endDate) {
+      const itemFecha = item.fecha_gasto || item.fecha || '';
+      if (!itemFecha) return false;
+      const fString = String(itemFecha).slice(0, 10);
+      if (fString < dd.startDate || fString > dd.endDate) return false;
+    }
+    
+    if (dd.providerName) {
+      const itemProv = getProveedorValue(item) || 'Sin proveedor';
+      if (normalizeText(itemProv) !== normalizeText(dd.providerName)) return false;
+    }
+
     return true;
   });
 });
@@ -539,6 +617,7 @@ async function handleClearFilters() {
     proveedor: '',
   };
   detailPage.value = 1;
+  clearDrillDown();
   await clearFilters();
 }
 
@@ -779,6 +858,85 @@ async function handleExportPdf() {
   }
 }
 
+const selectedGastoIds = ref([]);
+const bulkFields = ref({
+  proveedorId: null,
+  transporteId: null,
+  tipoMovimiento: null,
+  isSurgeryLogistics: false,
+});
+const savingBulk = ref(false);
+
+const isAllSelected = computed(() => {
+  const pageIds = paginatedDetailRows.value.map(getGastoId).filter(Boolean);
+  if (pageIds.length === 0) return false;
+  return pageIds.every(id => selectedGastoIds.value.includes(id));
+});
+
+const toggleSelectAll = (e) => {
+  const pageIds = paginatedDetailRows.value.map(getGastoId).filter(Boolean);
+  if (e.target.checked) {
+    pageIds.forEach(id => {
+      if (!selectedGastoIds.value.includes(id)) {
+        selectedGastoIds.value.push(id);
+      }
+    });
+  } else {
+    selectedGastoIds.value = selectedGastoIds.value.filter(id => !pageIds.includes(id));
+  }
+};
+
+async function applyBulkUpdates() {
+  if (selectedGastoIds.value.length === 0) return;
+  
+  const payload = {};
+  if (bulkFields.value.isSurgeryLogistics) {
+    payload.proveedor_id = 14;
+  } else if (bulkFields.value.proveedorId) {
+    payload.proveedor_id = bulkFields.value.proveedorId;
+  }
+  
+  if (bulkFields.value.transporteId) {
+    payload.transporte_id = bulkFields.value.transporteId;
+  }
+  
+  if (bulkFields.value.tipoMovimiento) {
+    payload.tipo_movimiento_encomienda = bulkFields.value.tipoMovimiento;
+  }
+  
+  if (Object.keys(payload).length === 0) {
+    emit('show-notification', 'Sin cambios', 'Selecciona al menos un campo para modificar.', 'warning');
+    return;
+  }
+  
+  savingBulk.value = true;
+  try {
+    const { error } = await supabase
+      .from('gastos')
+      .update(payload)
+      .in('id', selectedGastoIds.value);
+      
+    if (error) throw error;
+    
+    emit('show-notification', 'Actualización masiva exitosa', `Se actualizaron ${selectedGastoIds.value.length} registros correctamente.`, 'success');
+    
+    selectedGastoIds.value = [];
+    bulkFields.value = {
+      proveedorId: null,
+      transporteId: null,
+      tipoMovimiento: null,
+      isSurgeryLogistics: false,
+    };
+    
+    await refreshDashboardData();
+  } catch (e) {
+    console.error('Error al aplicar actualización masiva:', e);
+    emit('show-notification', 'Error', `No se pudieron actualizar los registros: ${e.message}`, 'error');
+  } finally {
+    savingBulk.value = false;
+  }
+}
+
 onMounted(async () => {
   await Promise.all([fetchFilterOptions(), refreshDashboardData()]);
 });
@@ -795,7 +953,7 @@ onMounted(async () => {
 
     <div v-else-if="error" class="error-banner">{{ error }}</div>
 
-    <div v-else class="space-y-10">
+    <div v-else class="space-y-4">
       <section class="section-header">
         <div>
           <h2 class="text-2xl font-bold tracking-tight text-slate-900">Encomiendas / Costos Logísticos</h2>
@@ -805,6 +963,9 @@ onMounted(async () => {
           <span class="period-badge">{{ currentPeriodLabel }}</span>
           <button v-if="isAdmin" type="button" class="btn-primary inline-flex items-center justify-center gap-2" @click="openBulkPaymentsModal()">
             Cargar pagos
+          </button>
+          <button type="button" class="btn-secondary inline-flex items-center justify-center gap-2" @click="isCtaCteModalOpen = true">
+            Vencimientos Cta. Cte.
           </button>
           <button type="button" class="btn-secondary inline-flex items-center justify-center gap-2" :disabled="loading || exporting" @click="handleExport">
             <ArrowDownTrayIcon class="h-5 w-5" />
@@ -816,37 +977,64 @@ onMounted(async () => {
         </div>
       </section>
 
-      <section>
-        <div class="grid grid-cols-1 gap-6 sm:grid-cols-2 xl:grid-cols-6">
-          <StatCard title="Gasto del período" :value="kpis.gasto_total_periodo" formatAs="currency" :loading="loading" :icon="CurrencyDollarIcon" />
-          <StatCard title="Despachos" :value="kpis.cantidad_despachos" :loading="loading" :icon="ClipboardDocumentListIcon" />
-          <StatCard title="Promedio por despacho" :value="kpis.gasto_promedio_despacho" formatAs="currency" :loading="loading" />
-          <StatCard title="Cuenta corriente empresa" :value="kpis.total_cuenta_corriente" formatAs="currency" :loading="loading" :icon="BanknotesIcon" />
-          <StatCard title="Rendición" :value="kpis.total_rendicion" formatAs="currency" :loading="loading" />
-          <StatCard title="Caja chica" :value="kpis.total_caja_chica" formatAs="currency" :loading="loading" />
+      <section class="bg-white border border-slate-200 rounded-xl p-4 shadow-sm grid grid-cols-1 gap-6 lg:grid-cols-3 divide-y lg:divide-y-0 lg:divide-x divide-slate-200">
+        <!-- Bloque 1: Resumen de Operación -->
+        <div class="flex flex-col justify-between space-y-2 pb-4 lg:pb-0 lg:pr-6">
+          <h3 class="text-xs font-bold uppercase tracking-wider text-slate-500">Resumen de Operación</h3>
+          <div class="grid grid-cols-3 gap-2">
+            <div>
+              <span class="block text-[11px] font-medium text-slate-500">Gasto Total</span>
+              <span class="text-base font-extrabold text-slate-900 leading-tight block mt-0.5">{{ formatCurrency(kpis.gasto_total_periodo || 0) }}</span>
+            </div>
+            <div>
+              <span class="block text-[11px] font-medium text-slate-500">Despachos</span>
+              <span class="text-base font-extrabold text-slate-900 leading-tight block mt-0.5">{{ kpis.cantidad_despachos || 0 }}</span>
+            </div>
+            <div>
+              <span class="block text-[11px] font-medium text-slate-500">Promedio</span>
+              <span class="text-base font-extrabold text-slate-950 leading-tight block mt-0.5 text-slate-800">{{ formatCurrency(kpis.gasto_promedio_despacho || 0) }}</span>
+            </div>
+          </div>
         </div>
-      </section>
 
-      <section class="section-container panel-section">
-        <div class="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
-          <div>
-            <h2 class="section-title">Cupo mensual general</h2>
-            <p class="text-sm font-medium text-slate-600">Período: {{ formatDate(periodo.fecha_desde) }} - {{ formatDate(periodo.fecha_hasta) }}</p>
-          </div>
-          <div class="flex flex-col gap-2 sm:flex-row sm:items-center">
-            <div v-if="!isCupoConfigurado" class="rounded-lg bg-amber-50 px-4 py-2 text-sm font-semibold text-amber-800">Cupo no configurado</div>
-            <button type="button" class="btn-secondary inline-flex items-center justify-center" @click="openCupoModal">Ajustar cupo</button>
+        <!-- Bloque 2: Modalidad de Imputación -->
+        <div class="flex flex-col justify-between space-y-2 py-4 lg:py-0 lg:px-6">
+          <h3 class="text-xs font-bold uppercase tracking-wider text-slate-500">Modalidades de Pago</h3>
+          <div class="space-y-1.5 text-[11px]">
+            <div class="flex justify-between items-center">
+              <span class="text-slate-600 font-medium">Cuenta Corriente:</span>
+              <span class="font-bold text-slate-900">{{ formatCurrency(kpis.total_cuenta_corriente || 0) }}</span>
+            </div>
+            <div class="flex justify-between items-center">
+              <span class="text-slate-600 font-medium">Rendiciones:</span>
+              <span class="font-bold text-slate-900">{{ formatCurrency(kpis.total_rendicion || 0) }}</span>
+            </div>
+            <div class="flex justify-between items-center">
+              <span class="text-slate-600 font-medium">Caja Chica:</span>
+              <span class="font-bold text-slate-900">{{ formatCurrency(kpis.total_caja_chica || 0) }}</span>
+            </div>
           </div>
         </div>
-        <div class="mt-5 grid grid-cols-1 gap-4 md:grid-cols-4">
-          <div class="cupo-metric"><span>Cupo mensual</span><strong>{{ formatCurrency(cupo.cupo_mensual || 0) }}</strong></div>
-          <div class="cupo-metric"><span>Consumido</span><strong>{{ formatCurrency(cupo.consumido || 0) }}</strong></div>
-          <div class="cupo-metric"><span>Disponible</span><strong>{{ formatCurrency(cupo.disponible || 0) }}</strong></div>
-          <div class="cupo-metric"><span>% consumido</span><strong>{{ porcentajeCupo.toFixed(1) }}%</strong></div>
-        </div>
-        <div class="mt-5">
-          <div class="h-3 w-full overflow-hidden rounded-full bg-slate-200">
-            <div class="h-full rounded-full transition-all" :class="progressBarClass" :style="{ width: `${porcentajeCupo}%` }" />
+
+        <!-- Bloque 3: Límite y Cupo -->
+        <div class="flex flex-col justify-between space-y-2 pt-4 lg:pt-0 lg:pl-6">
+          <div class="flex justify-between items-center">
+            <h3 class="text-xs font-bold uppercase tracking-wider text-slate-500">Cupo Mensual</h3>
+            <button type="button" class="text-xs font-semibold text-indigo-600 hover:text-indigo-800 transition-colors" @click="openCupoModal">Ajustar Cupo</button>
+          </div>
+          <div v-if="!isCupoConfigurado" class="text-xs font-semibold text-amber-800 bg-amber-50 px-2.5 py-1 rounded-md w-fit">Cupo no configurado</div>
+          <div v-else class="space-y-1 text-xs">
+            <div class="flex justify-between font-medium">
+              <span class="text-slate-500 text-[11px]">Consumido: <span class="font-bold text-slate-800">{{ formatCurrency(cupo.consumido || 0) }}</span></span>
+              <span class="text-slate-500 text-[11px]">Límite: <span class="font-bold text-slate-800">{{ formatCurrency(cupo.cupo_mensual || 0) }}</span></span>
+            </div>
+            <div class="h-2 w-full overflow-hidden rounded-full bg-slate-100">
+              <div class="h-full rounded-full transition-all" :class="progressBarClass" :style="{ width: `${porcentajeCupo}%` }" />
+            </div>
+            <div class="flex justify-between text-[11px] mt-0.5">
+              <span class="text-slate-600 font-medium">Disponible: <span class="font-bold" :class="cupo.disponible < 0 ? 'text-red-600':'text-emerald-600'">{{ formatCurrency(cupo.disponible || 0) }}</span></span>
+              <span class="font-semibold text-slate-800">{{ porcentajeCupo.toFixed(1) }}%</span>
+            </div>
           </div>
         </div>
       </section>
@@ -861,10 +1049,6 @@ onMounted(async () => {
             <thead>
               <tr>
                 <th class="table-header">Proveedor</th>
-                <th v-for="week in weekColumns" :key="week.semana_numero" class="table-header text-right">
-                  <div>Semana {{ week.semana_numero }}</div>
-                  <div class="text-[10px] font-semibold normal-case tracking-normal text-slate-500">{{ formatDate(week.semana_inicio, { day: '2-digit', month: '2-digit' }) }} - {{ formatDate(week.semana_fin, { day: '2-digit', month: '2-digit' }) }}</div>
-                </th>
                 <th class="table-header text-right">Total mes</th>
                 <th class="table-header text-right">Despachos del mes</th>
                 <th class="table-header text-right">Promedio</th>
@@ -875,28 +1059,72 @@ onMounted(async () => {
               </tr>
             </thead>
             <tbody>
-              <tr v-for="item in controlProviderRows" :key="getValue(item, ['proveedor_id', 'proveedor', 'proveedor_nombre'])" class="data-row">
-                <td class="table-cell" :class="textToneClass(getValue(item, ['proveedor_nombre', 'proveedor', 'nombre_proveedor'], 'Sin proveedor'))">{{ getValue(item, ['proveedor_nombre', 'proveedor', 'nombre_proveedor'], 'Sin proveedor') }}</td>
-                <td v-for="week in weekColumns" :key="week.semana_numero" class="table-cell money-cell">
-                  {{ formatCurrency(getWeekAmount(item, week)) }}
-                </td>
-                <td class="table-cell money-cell">{{ formatCurrency(item.gasto_total_periodo) }}</td>
-                <td class="table-cell numeric-cell">{{ numberValue(item.despachos_periodo).toLocaleString('es-AR') }}</td>
-                <td class="table-cell money-cell">{{ formatCurrency(item.promedio_por_despacho) }}</td>
-                <td class="table-cell text-right">{{ formatNullableCurrency(item.cupo_mensual) }}</td>
-                <td class="table-cell text-right" :class="differenceClass(item.disponible_diferencia)">{{ formatNullableCurrency(item.disponible_diferencia) }}</td>
-                <td class="table-cell min-w-32">
-                  <div v-if="item.porcentaje_consumido !== null && item.porcentaje_consumido !== undefined" class="space-y-1">
-                    <div class="text-right font-semibold text-slate-800">{{ numberValue(item.porcentaje_consumido).toFixed(2) }}%</div>
-                    <div class="h-1.5 rounded-full bg-slate-200"><div class="h-full rounded-full" :class="percentBarClass(item.estado)" :style="{ width: percentWidth(item.porcentaje_consumido) }"></div></div>
-                  </div>
-                  <span v-else class="block text-right text-slate-500">—</span>
-                </td>
-                <td class="table-cell"><span class="status-pill" :class="statusClass(item.estado)">{{ item.estado || '—' }}</span></td>
-              </tr>
+              <template v-for="item in controlProviderRows" :key="getRowKey(item)">
+                <tr class="data-row">
+                  <td class="table-cell">
+                    <div class="flex items-center gap-2 cursor-pointer select-none" @click="toggleRow(getRowKey(item))">
+                      <svg class="h-4 w-4 transform transition-transform text-slate-400" :class="{'rotate-90': expandedRows[getRowKey(item)]}" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7" />
+                      </svg>
+                      <span :class="textToneClass(getValue(item, ['proveedor_nombre', 'proveedor', 'nombre_proveedor'], 'Sin proveedor'))">
+                        {{ getValue(item, ['proveedor_nombre', 'proveedor', 'nombre_proveedor'], 'Sin proveedor') }}
+                      </span>
+                    </div>
+                  </td>
+                  <td class="table-cell money-cell">{{ formatCurrency(item.gasto_total_periodo) }}</td>
+                  <td class="table-cell numeric-cell">{{ numberValue(item.despachos_periodo).toLocaleString('es-AR') }}</td>
+                  <td class="table-cell money-cell">{{ formatCurrency(item.promedio_por_despacho) }}</td>
+                  <td class="table-cell text-right">{{ formatNullableCurrency(item.cupo_mensual) }}</td>
+                  <td class="table-cell text-right" :class="differenceClass(item.disponible_diferencia)">{{ formatNullableCurrency(item.disponible_diferencia) }}</td>
+                  <td class="table-cell min-w-32">
+                    <div v-if="item.porcentaje_consumido !== null && item.porcentaje_consumido !== undefined" class="space-y-1">
+                      <div class="text-right font-semibold text-slate-800">{{ numberValue(item.porcentaje_consumido).toFixed(2) }}%</div>
+                      <div class="h-1.5 rounded-full bg-slate-200"><div class="h-full rounded-full" :class="percentBarClass(item.estado)" :style="{ width: percentWidth(item.porcentaje_consumido) }"></div></div>
+                    </div>
+                    <span v-else class="block text-right text-slate-500">—</span>
+                  </td>
+                  <td class="table-cell"><span class="status-pill" :class="statusClass(item.estado)">{{ item.estado || '—' }}</span></td>
+                </tr>
+                <!-- Detalle semanal expandido por proveedor -->
+                <tr v-if="expandedRows[getRowKey(item)]">
+                  <td colspan="8" class="bg-slate-50/50 p-4 border-b border-slate-200 shadow-inner">
+                    <div class="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-5">
+                      <div 
+                        v-for="week in weekColumns" 
+                        :key="week.semana_numero" 
+                        class="bg-white p-3 rounded-lg border border-slate-200 shadow-sm flex flex-col justify-between hover:border-indigo-400 hover:shadow transition-all cursor-pointer active:scale-95 group"
+                        @click="drillDownToWeek(item, week)"
+                        title="Ver detalles de esta semana"
+                      >
+                        <div>
+                          <div class="flex justify-between items-start">
+                            <span class="block text-[10px] font-bold text-slate-500 uppercase">Semana {{ week.semana_numero }}</span>
+                            <span class="text-[9px] font-semibold text-indigo-500 opacity-0 group-hover:opacity-100 transition-opacity">Ver →</span>
+                          </div>
+                          <span class="block text-[10px] text-slate-400 mt-0.5">
+                            {{ formatDate(week.semana_inicio, { day: '2-digit', month: '2-digit' }) }} - {{ formatDate(week.semana_fin, { day: '2-digit', month: '2-digit' }) }}
+                          </span>
+                        </div>
+                        <div class="mt-2 flex justify-between items-baseline">
+                          <span class="text-sm font-bold text-slate-900">{{ formatCurrency(getWeekAmount(item, week)) }}</span>
+                          <span class="text-[10px] font-medium text-slate-500">({{ getWeekDispatches(item, week) }} desp.)</span>
+                        </div>
+                      </div>
+                    </div>
+                  </td>
+                </tr>
+              </template>
+
+              <!-- Fila de Totales -->
               <tr v-if="controlProviderRows.length > 0 || weeklyTotals" class="total-row">
-                <td class="table-cell font-bold text-slate-900">TOTAL</td>
-                <td v-for="week in weekColumns" :key="week.semana_numero" class="table-cell money-cell">{{ formatCurrency(getTotalWeekAmount(week)) }}</td>
+                <td class="table-cell">
+                  <div class="flex items-center gap-2 cursor-pointer select-none" @click="isTotalExpanded = !isTotalExpanded">
+                    <svg class="h-4 w-4 transform transition-transform text-slate-600" :class="{'rotate-90': isTotalExpanded}" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7" />
+                    </svg>
+                    <span class="font-bold text-slate-900">TOTAL</span>
+                  </div>
+                </td>
                 <td class="table-cell money-cell">{{ formatCurrency(displayWeeklyTotals.gasto_total_periodo) }}</td>
                 <td class="table-cell numeric-cell">{{ numberValue(displayWeeklyTotals.despachos_periodo).toLocaleString('es-AR') }}</td>
                 <td class="table-cell money-cell">{{ formatCurrency(displayWeeklyTotals.promedio_por_despacho) }}</td>
@@ -911,7 +1139,38 @@ onMounted(async () => {
                 </td>
                 <td class="table-cell text-center text-slate-500">—</td>
               </tr>
-              <tr v-if="controlProviderRows.length === 0"><td :colspan="weekColumns.length + 8" class="empty-cell">Sin datos por proveedor para el período seleccionado.</td></tr>
+              <!-- Detalle semanal expandido de Totales -->
+              <tr v-if="isTotalExpanded && (controlProviderRows.length > 0 || weeklyTotals)">
+                <td colspan="8" class="bg-slate-100/50 p-4 border-b-2 border-slate-300 shadow-inner">
+                  <div class="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-5">
+                    <div 
+                      v-for="week in weekColumns" 
+                      :key="week.semana_numero" 
+                      class="bg-white p-3 rounded-lg border border-slate-200 shadow-sm flex flex-col justify-between hover:border-indigo-400 hover:shadow transition-all cursor-pointer active:scale-95 group"
+                      @click="drillDownToWeek(null, week)"
+                      title="Ver detalles consolidados de esta semana"
+                    >
+                      <div>
+                        <div class="flex justify-between items-start">
+                          <span class="block text-[10px] font-bold text-slate-600 uppercase">Total Semana {{ week.semana_numero }}</span>
+                          <span class="text-[9px] font-semibold text-indigo-500 opacity-0 group-hover:opacity-100 transition-opacity">Ver →</span>
+                        </div>
+                        <span class="block text-[10px] text-slate-400 mt-0.5">
+                          {{ formatDate(week.semana_inicio, { day: '2-digit', month: '2-digit' }) }} - {{ formatDate(week.semana_fin, { day: '2-digit', month: '2-digit' }) }}
+                        </span>
+                      </div>
+                      <div class="mt-2 flex justify-between items-baseline">
+                        <span class="text-sm font-bold text-slate-900">{{ formatCurrency(getTotalWeekAmount(week)) }}</span>
+                        <span class="text-[10px] font-semibold text-slate-500">
+                          ({{ controlProviderRows.reduce((total, item) => total + getWeekDispatches(item, week), 0) }} desp.)
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+                </td>
+              </tr>
+
+              <tr v-if="controlProviderRows.length === 0"><td colspan="8" class="empty-cell">Sin datos por proveedor para el período seleccionado.</td></tr>
             </tbody>
           </table>
         </div>
@@ -929,37 +1188,83 @@ onMounted(async () => {
           </div>
         </div>
 
-        <div class="mt-6 grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-5">
-          <div><label class="form-label">Fecha desde</label><input v-model="filters.fechaDesde" type="date" class="form-input mt-1" @change="clearSelectedWeek" /></div>
-          <div><label class="form-label">Fecha hasta</label><input v-model="filters.fechaHasta" type="date" class="form-input mt-1" @change="clearSelectedWeek" /></div>
-          <div>
-            <label class="form-label">Semana</label>
-            <select v-model="selectedWeek" class="form-input mt-1" @change="handleWeekChange">
-              <option v-for="option in weekOptions" :key="option.code || 'all-weeks'" :value="option.code">{{ option.label }}</option>
-            </select>
+        <!-- Banner de Filtro Activo de Drill-Down -->
+        <div v-if="drillDownFilter.startDate && drillDownFilter.endDate" class="mt-4 flex items-center justify-between bg-indigo-50 border border-indigo-200 rounded-xl p-3.5 shadow-sm">
+          <div class="flex items-center gap-3">
+            <span class="bg-indigo-600 text-white rounded-lg p-1.5 flex items-center justify-center">
+              <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 4a1 1 0 011-1h16a1 1 0 011 1v2.586a1 1 0 01-.293.707l-6.414 6.414a1 1 0 00-.293.707V17l-4 4v-6.586a1 1 0 00-.293-.707L3.293 7.293A1 1 0 013 6.586V4z" />
+              </svg>
+            </span>
+            <div>
+              <h4 class="text-xs font-bold text-indigo-900 uppercase tracking-wider">Filtro de Selección Activo</h4>
+              <p class="text-xs text-indigo-700 font-semibold mt-0.5">
+                Mostrando detalles de: 
+                <span class="font-extrabold underline">{{ drillDownFilter.providerName || 'Todos los proveedores' }}</span> 
+                — Semana {{ drillDownFilter.weekNumber }} 
+                ({{ formatDate(drillDownFilter.startDate, { day: '2-digit', month: '2-digit' }) }} al {{ formatDate(drillDownFilter.endDate, { day: '2-digit', month: '2-digit' }) }})
+              </p>
+            </div>
           </div>
-          <div><label class="form-label">Proveedor / Empresa vinculada</label><v-select v-model="filters.proveedorId" :options="proveedorOptions" :loading="loadingFilterOptions" :reduce="option => option.code" placeholder="Todos" class="v-select-filter bg-white" /></div>
-          <div><label class="form-label">Operador logístico</label><v-select v-model="filters.transporteId" :options="transporteOptions" :loading="loadingFilterOptions" :reduce="option => option.code" placeholder="Todos" class="v-select-filter bg-white" /></div>
-          <div><label class="form-label">Tipo de movimiento</label><v-select v-model="filters.tipoMovimiento" :options="tipoMovimientoOptions" :reduce="option => option.code" :clearable="false" class="v-select-filter bg-white" /></div>
-          <div><label class="form-label">Modalidad de imputación</label><v-select v-model="filters.modalidad" :options="modalidadOptions" :reduce="option => option.code" :clearable="false" class="v-select-filter bg-white" /></div>
-          <div><label class="form-label">Responsable</label><v-select v-model="filters.responsableId" :options="props.perfilesOptions" :loading="props.loadingOptions" :reduce="option => option.code" placeholder="Todos" class="v-select-filter bg-white" /></div>
-          <div class="xl:col-span-2"><label class="form-label">Paciente / texto de búsqueda</label><input v-model="filters.paciente" type="text" class="form-input mt-1" placeholder="Buscar en paciente o detalle" @keyup.enter="applyFilters" /></div>
+          <button 
+            type="button" 
+            class="text-xs font-bold text-indigo-700 bg-white border border-indigo-200 rounded-lg px-3 py-1.5 hover:bg-indigo-100 transition-colors shadow-sm"
+            @click="clearDrillDown"
+          >
+            Quitar Filtro Masivo
+          </button>
         </div>
 
-        <div class="mt-4 grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-4">
-          <div><label class="form-label">Cliente</label><input v-model="localDetailFilters.cliente" type="text" class="form-input mt-1" placeholder="Filtrar cliente" @input="handleLocalFilterInput" /></div>
-          <div><label class="form-label">Destino</label><input v-model="localDetailFilters.destino" type="text" class="form-input mt-1" placeholder="Filtrar destino" @input="handleLocalFilterInput" /></div>
-          <div><label class="form-label">N° guía</label><input v-model="localDetailFilters.numeroGuia" type="text" class="form-input mt-1" placeholder="Filtrar guía" @input="handleLocalFilterInput" /></div>
-          <div><label class="form-label">Proveedor en detalle</label><input v-model="localDetailFilters.proveedor" type="text" class="form-input mt-1" placeholder="Filtrar proveedor" @input="handleLocalFilterInput" /></div>
+        <!-- Panel de Filtros Colapsables -->
+        <div class="mt-4 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 bg-slate-50 border border-slate-200 rounded-xl p-3 shadow-sm">
+          <button 
+            type="button" 
+            class="flex items-center gap-2 px-3 py-1.5 text-xs font-bold text-slate-700 bg-white border border-slate-300 rounded-lg hover:bg-slate-50 transition-colors shadow-sm"
+            @click="showFilters = !showFilters"
+          >
+            <FunnelIcon class="h-4 w-4 text-slate-500" />
+            {{ showFilters ? 'Ocultar Filtros' : 'Mostrar Filtros de Búsqueda' }}
+            <span v-if="activeFiltersCount > 0" class="ml-1 px-1.5 py-0.5 rounded-full text-[10px] font-extrabold bg-indigo-100 text-indigo-700">
+              {{ activeFiltersCount }}
+            </span>
+          </button>
+          
+          <div class="flex gap-2">
+            <button type="button" class="px-3 py-1.5 text-xs font-semibold text-slate-600 hover:text-slate-800 transition-colors" @click="handleClearFilters">Limpiar Filtros</button>
+            <button type="button" class="px-4 py-1.5 text-xs font-bold text-white bg-indigo-600 rounded-lg hover:bg-indigo-700 transition-colors flex items-center gap-1.5 shadow-sm" @click="applyFilters">
+              Aplicar filtros
+            </button>
+          </div>
         </div>
 
-        <div v-if="selectedWeekOption" class="mt-3 text-sm font-semibold text-slate-600">
-          Semana seleccionada: {{ formatDate(selectedWeekOption.start, { day: '2-digit', month: '2-digit' }) }}-{{ formatDate(selectedWeekOption.end, { day: '2-digit', month: '2-digit' }) }}
-        </div>
+        <div v-show="showFilters" class="mt-4 border border-slate-200 rounded-xl p-4 bg-slate-50/50 space-y-4 shadow-inner">
+          <div class="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-5">
+            <div><label class="form-label text-[11px]">Fecha desde</label><input v-model="filters.fechaDesde" type="date" class="form-input mt-1" @change="clearSelectedWeek" /></div>
+            <div><label class="form-label text-[11px]">Fecha hasta</label><input v-model="filters.fechaHasta" type="date" class="form-input mt-1" @change="clearSelectedWeek" /></div>
+            <div>
+              <label class="form-label text-[11px]">Semana</label>
+              <select v-model="selectedWeek" class="form-input mt-1" @change="handleWeekChange">
+                <option v-for="option in weekOptions" :key="option.code || 'all-weeks'" :value="option.code">{{ option.label }}</option>
+              </select>
+            </div>
+            <div><label class="form-label text-[11px]">Proveedor / Empresa vinculada</label><v-select v-model="filters.proveedorId" :options="proveedorOptions" :loading="loadingFilterOptions" :reduce="option => option.code" placeholder="Todos" class="v-select-filter bg-white mt-1" /></div>
+            <div><label class="form-label text-[11px]">Operador logístico</label><v-select v-model="filters.transporteId" :options="transporteOptions" :loading="loadingFilterOptions" :reduce="option => option.code" placeholder="Todos" class="v-select-filter bg-white mt-1" /></div>
+            <div><label class="form-label text-[11px]">Tipo de movimiento</label><v-select v-model="filters.tipoMovimiento" :options="tipoMovimientoOptions" :reduce="option => option.code" :clearable="false" class="v-select-filter bg-white mt-1" /></div>
+            <div><label class="form-label text-[11px]">Modalidad de imputación</label><v-select v-model="filters.modalidad" :options="modalidadOptions" :reduce="option => option.code" :clearable="false" class="v-select-filter bg-white mt-1" /></div>
+            <div><label class="form-label text-[11px]">Responsable</label><v-select v-model="filters.responsableId" :options="props.perfilesOptions" :loading="props.loadingOptions" :reduce="option => option.code" placeholder="Todos" class="v-select-filter bg-white mt-1" /></div>
+            <div class="xl:col-span-2"><label class="form-label text-[11px]">Paciente / texto de búsqueda</label><input v-model="filters.paciente" type="text" class="form-input mt-1" placeholder="Buscar en paciente o detalle" @keyup.enter="applyFilters" /></div>
+          </div>
 
-        <div class="mt-5 flex flex-col gap-3 sm:flex-row sm:justify-end">
-          <button type="button" class="btn-secondary inline-flex items-center justify-center gap-2" @click="handleClearFilters">Limpiar filtros</button>
-          <button type="button" class="btn-primary inline-flex items-center justify-center gap-2" @click="applyFilters"><FunnelIcon class="h-5 w-5" />Aplicar filtros</button>
+          <div class="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-4 border-t border-slate-200/60 pt-4">
+            <div><label class="form-label text-[11px]">Cliente (Filtro local)</label><input v-model="localDetailFilters.cliente" type="text" class="form-input mt-1" placeholder="Filtrar cliente" @input="handleLocalFilterInput" /></div>
+            <div><label class="form-label text-[11px]">Destino (Filtro local)</label><input v-model="localDetailFilters.destino" type="text" class="form-input mt-1" placeholder="Filtrar destino" @input="handleLocalFilterInput" /></div>
+            <div><label class="form-label text-[11px]">N° guía (Filtro local)</label><input v-model="localDetailFilters.numeroGuia" type="text" class="form-input mt-1" placeholder="Filtrar guía" @input="handleLocalFilterInput" /></div>
+            <div><label class="form-label text-[11px]">Proveedor en detalle (Filtro local)</label><input v-model="localDetailFilters.proveedor" type="text" class="form-input mt-1" placeholder="Filtrar proveedor" @input="handleLocalFilterInput" /></div>
+          </div>
+          
+          <div v-if="selectedWeekOption" class="mt-2 text-xs font-semibold text-slate-600 bg-slate-100/50 p-2 rounded-lg w-fit">
+            Semana seleccionada: {{ formatDate(selectedWeekOption.start, { day: '2-digit', month: '2-digit' }) }}-{{ formatDate(selectedWeekOption.end, { day: '2-digit', month: '2-digit' }) }}
+          </div>
         </div>
 
         <div class="mt-6 grid grid-cols-1 gap-3 md:grid-cols-4">
@@ -976,6 +1281,9 @@ onMounted(async () => {
           <table class="data-table min-w-full">
             <thead>
               <tr>
+                <th v-if="isAdmin" class="table-header w-10 text-center">
+                  <input type="checkbox" :checked="isAllSelected" @change="toggleSelectAll" class="rounded text-indigo-600 focus:ring-indigo-500 border-slate-300" />
+                </th>
                 <th class="table-header">Fecha</th>
                 <th v-if="detailViewMode === 'detailed'" class="table-header">Cliente</th>
                 <th v-if="detailViewMode === 'detailed'" class="table-header">Proveedor</th>
@@ -990,6 +1298,9 @@ onMounted(async () => {
             </thead>
             <tbody>
               <tr v-for="item in paginatedDetailRows" :key="getValue(item, ['gasto_id', 'id', 'fecha'])" class="data-row detail-row">
+                <td v-if="isAdmin" class="table-cell text-center">
+                  <input type="checkbox" :value="getGastoId(item)" v-model="selectedGastoIds" class="rounded text-indigo-600 focus:ring-indigo-500 border-slate-300" />
+                </td>
                 <td class="table-cell font-medium text-slate-800">{{ formatDate(getValue(item, ['fecha', 'fecha_gasto', 'created_at'])) }}</td>
                 <td v-if="detailViewMode === 'detailed'" class="table-cell" :class="textToneClass(getClienteValue(item) || 'N/A')">{{ getClienteValue(item) || 'N/A' }}</td>
                 <td v-if="detailViewMode === 'detailed'" class="table-cell" :class="textToneClass(getProveedorValue(item) || 'N/A')">{{ getProveedorValue(item) || 'N/A' }}</td>
@@ -1009,7 +1320,11 @@ onMounted(async () => {
                   </div>
                 </td>
               </tr>
-              <tr v-if="paginatedDetailRows.length === 0"><td :colspan="isAdmin ? (detailViewMode === 'simple' ? 6 : 9) : (detailViewMode === 'simple' ? 5 : 8)" class="empty-cell">Sin operaciones para mostrar.</td></tr>
+              <tr v-if="paginatedDetailRows.length === 0">
+                <td :colspan="isAdmin ? (detailViewMode === 'simple' ? 7 : 10) : (detailViewMode === 'simple' ? 5 : 8)" class="empty-cell">
+                  Sin operaciones para mostrar.
+                </td>
+              </tr>
             </tbody>
           </table>
         </div>
@@ -1107,6 +1422,89 @@ onMounted(async () => {
       </div>
     </Transition>
 
+    <!-- Barra flotante de acciones en lote (Bulk Actions) -->
+    <Transition name="slide-up">
+      <div v-if="selectedGastoIds.length > 0" 
+           class="fixed bottom-6 left-1/2 z-50 bg-slate-900 text-white px-6 py-3 rounded-xl shadow-2xl flex flex-col md:flex-row items-center gap-4 border border-slate-700 max-w-5xl w-[92%] md:w-auto transform -translate-x-1/2">
+        <div class="flex items-center gap-2 flex-shrink-0">
+          <span class="bg-indigo-600 text-white text-xs px-2.5 py-0.5 rounded-full font-bold">
+            {{ selectedGastoIds.length }}
+          </span>
+          <span class="text-xs font-bold uppercase tracking-wider text-slate-300">Seleccionados</span>
+        </div>
+        
+        <div class="h-6 w-px bg-slate-700 hidden md:block"></div>
+        
+        <div class="flex flex-wrap items-center gap-3 w-full md:w-auto justify-center">
+          <!-- Cambiar Proveedor -->
+          <div class="w-44 text-slate-900 text-xs">
+            <v-select 
+              v-model="bulkFields.proveedorId" 
+              :options="proveedorOptions" 
+              :reduce="option => option.code" 
+              placeholder="Cambiar Proveedor" 
+              class="v-select-filter bg-white rounded-md"
+            />
+          </div>
+
+          <!-- Cambiar Operador Logístico -->
+          <div class="w-44 text-slate-900 text-xs">
+            <v-select 
+              v-model="bulkFields.transporteId" 
+              :options="transporteOptions" 
+              :reduce="option => option.code" 
+              placeholder="Cambiar Operador" 
+              class="v-select-filter bg-white rounded-md"
+            />
+          </div>
+
+          <!-- Tipo Movimiento -->
+          <div class="w-32 text-slate-900 text-xs">
+            <v-select 
+              v-model="bulkFields.tipoMovimiento" 
+              :options="[
+                { label: 'Envío', code: 'Envío' },
+                { label: 'Recepción', code: 'Recepción' }
+              ]" 
+              :reduce="option => option.code" 
+              placeholder="Movimiento" 
+              class="v-select-filter bg-white rounded-md"
+            />
+          </div>
+
+          <!-- Marcar como Cirugía -->
+          <label class="flex items-center gap-2 text-xs font-semibold text-slate-300 cursor-pointer select-none">
+            <input 
+              type="checkbox" 
+              v-model="bulkFields.isSurgeryLogistics" 
+              class="rounded text-indigo-500 focus:ring-indigo-400 focus:ring-offset-slate-900 border-slate-600 bg-slate-800" 
+            />
+            ¿Es Cirugía?
+          </label>
+        </div>
+
+        <div class="h-6 w-px bg-slate-700 hidden md:block"></div>
+
+        <div class="flex items-center gap-2 flex-shrink-0">
+          <button 
+            type="button" 
+            class="text-xs text-slate-400 hover:text-white font-bold px-3 py-1.5 transition-colors" 
+            @click="selectedGastoIds = []"
+          >
+            Cancelar
+          </button>
+          <button 
+            type="button" 
+            class="bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold px-4 py-2 rounded-lg transition-colors shadow-md flex items-center gap-1.5 disabled:opacity-50"
+            :disabled="savingBulk || (!bulkFields.proveedorId && !bulkFields.transporteId && !bulkFields.tipoMovimiento && !bulkFields.isSurgeryLogistics)"
+            @click="applyBulkUpdates"
+          >
+            {{ savingBulk ? 'Aplicando...' : 'Aplicar' }}
+          </button>
+        </div>
+      </div>
+    </Transition>
+
     <AdminEditarGastoCuentaCorrienteModal
       v-model="isEditModalOpen"
       :gasto="gastoEnEdicion"
@@ -1120,6 +1518,11 @@ onMounted(async () => {
       v-model="isBulkModalOpen"
       :seed-payment="seedPayment"
       @saved="handleBulkPaymentsSaved"
+      @show-notification="(...args) => emit('show-notification', ...args)"
+    />
+
+    <AdminCtaCteVencimientosModal
+      v-model="isCtaCteModalOpen"
       @show-notification="(...args) => emit('show-notification', ...args)"
     />
   </div>
@@ -1160,4 +1563,17 @@ onMounted(async () => {
 .modal-fade-leave-active { transition: opacity 0.2s ease; }
 .modal-fade-enter-from,
 .modal-fade-leave-to { opacity: 0; }
+
+.btn-primary { @apply inline-flex items-center justify-center rounded-md bg-indigo-600 px-4 py-2 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-indigo-700 disabled:cursor-not-allowed disabled:opacity-50; }
+.btn-secondary { @apply inline-flex items-center justify-center rounded-md border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-slate-700 shadow-sm transition-colors hover:bg-slate-50 disabled:opacity-50; }
+
+.slide-up-enter-active,
+.slide-up-leave-active {
+  transition: all 0.25s ease-out;
+}
+.slide-up-enter-from,
+.slide-up-leave-to {
+  opacity: 0;
+  transform: translate(-50%, 50px);
+}
 </style>

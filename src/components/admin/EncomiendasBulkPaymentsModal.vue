@@ -372,10 +372,22 @@ watch(() => props.seedPayment, (seed) => {
                   <input v-model="entry.row.descripcion" type="text" class="form-input" placeholder="Pago de encomienda" />
                 </label>
 
-                <label class="field-group">
+                <div class="field-group">
                   <span class="field-label">Proveedor</span>
                   <v-select v-model="entry.row.proveedor_id" :options="proveedoresOptions" :reduce="option => option.code" :loading="loadingOptions" placeholder="Proveedor" class="v-select-filter" />
-                </label>
+                  <div class="mt-1 flex items-center">
+                    <input
+                      :id="'es_cirugia_bulk_' + index"
+                      type="checkbox"
+                      :checked="entry.row.proveedor_id === 14"
+                      @change="(e) => entry.row.proveedor_id = e.target.checked ? 14 : null"
+                      class="h-3.5 w-3.5 rounded border-slate-300 text-indigo-600 focus:ring-indigo-500"
+                    />
+                    <label :for="'es_cirugia_bulk_' + index" class="ml-1.5 text-[11px] font-semibold text-slate-700 cursor-pointer">
+                      Es Logística de Cirugía
+                    </label>
+                  </div>
+                </div>
 
                 <label class="field-group">
                   <span class="field-label">N° guia</span>

@@ -88,9 +88,23 @@ export function useEncomiendasDashboard() {
   const resultFrom = computed(() => totalCount.value === 0 ? 0 : offset.value + 1);
   const resultTo = computed(() => Math.min(offset.value + pageSize.value, totalCount.value));
 
+  const LOGISTICA_CIRUGIA_ID = 14;
+
+  const isSurgeryDescription = (desc) => {
+    if (!desc) return false;
+    const normalized = String(desc)
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '')
+      .trim()
+      .toLowerCase();
+    return normalized.includes('cirugia') || normalized.includes('cirugía');
+  };
+
   const buildRpcParams = ({ limit = pageSize.value, pageOffset = offset.value } = {}) => {
     const isSinProveedor = filters.proveedorId && sinProveedorId.value === filters.proveedorId;
-    const provId = isSinProveedor ? null : filters.proveedorId;
+    const isLogisticaCirugia = filters.proveedorId && filters.proveedorId === LOGISTICA_CIRUGIA_ID;
+    const provId = (isSinProveedor || isLogisticaCirugia) ? null : filters.proveedorId;
+    const clientSidePaging = isSinProveedor || isLogisticaCirugia;
     return {
       p_fecha_desde: filters.fechaDesde || null,
       p_fecha_hasta: filters.fechaHasta || null,
@@ -100,32 +114,14 @@ export function useEncomiendasDashboard() {
       p_modalidad: filters.modalidad || null,
       p_responsable_id: filters.responsableId || null,
       p_paciente: filters.paciente?.trim() || null,
-      p_limit: isSinProveedor ? null : limit,
-      p_offset: isSinProveedor ? 0 : pageOffset,
+      p_limit: clientSidePaging ? null : limit,
+      p_offset: clientSidePaging ? 0 : pageOffset,
     };
   };
 
   const postProcessDashboard = (data) => {
     const normalized = normalizeDashboard(data);
-    const isSinProveedorFilter = filters.proveedorId && sinProveedorId.value === filters.proveedorId;
-    if (!isSinProveedorFilter) return normalized;
 
-    // Filtrar detalles: proveedor_id es null o coincide con sinProveedorId
-    const filteredDetalle = (normalized.detalle || []).filter(
-      item => item.proveedor_id === null || item.proveedor_id === undefined || item.proveedor_id === sinProveedorId.value
-    );
-
-    // Filtrar resumen de proveedor
-    const filteredPorProveedor = (normalized.por_proveedor || []).filter(
-      item => item.proveedor_id === null || item.proveedor_id === undefined || item.proveedor_id === sinProveedorId.value
-    );
-
-    // Filtrar control semanal
-    const filteredControlSemanal = (normalized.control_semanal_por_proveedor || []).filter(
-      item => item.proveedor_id === null || item.proveedor_id === undefined || item.proveedor_id === sinProveedorId.value
-    );
-
-    // Recalcular KPIs
     const getVal = (item, keys, fallback = 0) => {
       for (const key of keys) {
         if (item?.[key] !== null && item?.[key] !== undefined && item?.[key] !== '') return Number(item[key]);
@@ -138,28 +134,163 @@ export function useEncomiendasDashboard() {
       return String(val).trim().toLowerCase();
     };
 
-    const totalGasto = filteredDetalle.reduce((sum, item) => sum + getVal(item, ['monto', 'monto_total', 'total']), 0);
-    const countDespachos = filteredDetalle.length;
-    const totalCC = filteredDetalle.filter(item => getModalidad(item) === 'cuenta_corriente_empresa').reduce((sum, item) => sum + getVal(item, ['monto', 'monto_total', 'total']), 0);
-    const totalRend = filteredDetalle.filter(item => getModalidad(item) === 'rendicion').reduce((sum, item) => sum + getVal(item, ['monto', 'monto_total', 'total']), 0);
-    const totalCaja = filteredDetalle.filter(item => getModalidad(item) === 'caja_chica').reduce((sum, item) => sum + getVal(item, ['monto', 'monto_total', 'total']), 0);
+    // 1. RECLASIFICACIÓN DE CIRUGÍA
+    // Si un registro es "SIN PROVEEDOR" pero su descripción contiene "CIRUGIA", le asignamos LOGISTICA CIRUGIA (14).
+    let rowCirugia = (normalized.por_proveedor || []).find(r => Number(r.proveedor_id) === LOGISTICA_CIRUGIA_ID);
+    if (!rowCirugia && normalized.por_proveedor) {
+      rowCirugia = {
+        proveedor_id: LOGISTICA_CIRUGIA_ID,
+        proveedor_nombre: 'LOGISTICA CIRUGIA',
+        gasto_total: 0,
+        despachos_periodo: 0,
+        promedio_por_despacho: 0
+      };
+      normalized.por_proveedor.push(rowCirugia);
+    }
 
-    return {
-      ...normalized,
-      detalle: filteredDetalle,
-      por_proveedor: filteredPorProveedor,
-      control_semanal_por_proveedor: filteredControlSemanal,
-      total_count: countDespachos,
-      kpis: {
-        ...normalized.kpis,
-        gasto_total_periodo: totalGasto,
-        cantidad_despachos: countDespachos,
-        gasto_promedio_despacho: countDespachos > 0 ? totalGasto / countDespachos : null,
-        total_cuenta_corriente: totalCC,
-        total_rendicion: totalRend,
-        total_caja_chica: totalCaja
+    let weeklyCirugia = (normalized.control_semanal_por_proveedor || []).find(r => Number(r.proveedor_id) === LOGISTICA_CIRUGIA_ID);
+    if (!weeklyCirugia && normalized.control_semanal_por_proveedor) {
+      weeklyCirugia = {
+        proveedor_id: LOGISTICA_CIRUGIA_ID,
+        proveedor_nombre: 'LOGISTICA CIRUGIA',
+        gasto_total_periodo: 0,
+        despachos_periodo: 0,
+        promedio_por_despacho: 0,
+        semanas: (normalized.semanas_catalogo || []).map(w => ({
+          semana_numero: w.semana_numero,
+          semana_inicio: w.semana_inicio,
+          semana_fin: w.semana_fin,
+          gasto_total: 0,
+          despachos: 0
+        })),
+        cupo_mensual: null,
+        disponible_diferencia: null,
+        porcentaje_consumido: null,
+        estado: 'OK'
+      };
+      normalized.control_semanal_por_proveedor.push(weeklyCirugia);
+    }
+
+    if (normalized.detalle && normalized.detalle.length > 0) {
+      normalized.detalle = normalized.detalle.map(item => {
+        const isSinProv = item.proveedor_id === null || item.proveedor_id === undefined || item.proveedor_id === sinProveedorId.value;
+        const desc = item.descripcion || item.descripcion_general || item.detalle || '';
+        if (isSinProv && isSurgeryDescription(desc)) {
+          const montoVal = getVal(item, ['monto', 'monto_total', 'total']);
+
+          // Sumar al proveedor LOGISTICA CIRUGIA
+          if (rowCirugia) {
+            rowCirugia.gasto_total += montoVal;
+            rowCirugia.despachos_periodo += 1;
+          }
+          if (weeklyCirugia) {
+            weeklyCirugia.gasto_total_periodo += montoVal;
+            weeklyCirugia.despachos_periodo += 1;
+          }
+
+          // Restar del proveedor SIN PROVEEDOR
+          let rowSinProv = (normalized.por_proveedor || []).find(r => r.proveedor_id === null || r.proveedor_id === undefined || r.proveedor_id === sinProveedorId.value);
+          if (rowSinProv) {
+            rowSinProv.gasto_total = Math.max(0, rowSinProv.gasto_total - montoVal);
+            rowSinProv.despachos_periodo = Math.max(0, rowSinProv.despachos_periodo - 1);
+          }
+          let weeklySinProv = (normalized.control_semanal_por_proveedor || []).find(r => r.proveedor_id === null || r.proveedor_id === undefined || r.proveedor_id === sinProveedorId.value);
+          if (weeklySinProv) {
+            weeklySinProv.gasto_total_periodo = Math.max(0, weeklySinProv.gasto_total_periodo - montoVal);
+            weeklySinProv.despachos_periodo = Math.max(0, weeklySinProv.despachos_periodo - 1);
+          }
+
+          // Buscar semana y transferir
+          const fecha = item.fecha_gasto ? String(item.fecha_gasto).slice(0, 10) : '';
+          if (fecha) {
+            const transferWeek = (weeklyRow, add) => {
+              if (!weeklyRow) return;
+              const week = (weeklyRow.semanas || []).find(w => fecha >= w.semana_inicio && fecha <= w.semana_fin);
+              if (week) {
+                if (add) {
+                  week.gasto_total = (week.gasto_total || 0) + montoVal;
+                  week.despachos = (week.despachos || 0) + 1;
+                } else {
+                  week.gasto_total = Math.max(0, (week.gasto_total || 0) - montoVal);
+                  week.despachos = Math.max(0, (week.despachos || 0) - 1);
+                }
+              }
+            };
+            transferWeek(weeklyCirugia, true);
+            transferWeek(weeklySinProv, false);
+          }
+
+          return {
+            ...item,
+            proveedor_id: LOGISTICA_CIRUGIA_ID,
+            proveedor_nombre: 'LOGISTICA CIRUGIA'
+          };
+        }
+        return item;
+      });
+    }
+
+    // Recalcular métricas de promedios y cupos
+    const recalculateRowMetrics = (row) => {
+      if (!row) return;
+      row.promedio_por_despacho = row.despachos_periodo > 0 ? row.gasto_total_periodo / row.despachos_periodo : 0;
+      if (row.cupo_mensual) {
+        row.disponible_diferencia = Number(row.cupo_mensual) - row.gasto_total_periodo;
+        row.porcentaje_consumido = (row.gasto_total_periodo / Number(row.cupo_mensual)) * 100;
+        row.estado = row.gasto_total_periodo > Number(row.cupo_mensual) ? 'Excedido' : 'OK';
       }
     };
+
+    if (weeklyCirugia) recalculateRowMetrics(weeklyCirugia);
+    if (rowCirugia) rowCirugia.promedio_por_despacho = rowCirugia.despachos_periodo > 0 ? rowCirugia.gasto_total / rowCirugia.despachos_periodo : 0;
+
+    let weeklySinProv = (normalized.control_semanal_por_proveedor || []).find(r => r.proveedor_id === null || r.proveedor_id === undefined || r.proveedor_id === sinProveedorId.value);
+    if (weeklySinProv) recalculateRowMetrics(weeklySinProv);
+
+    let rowSinProv = (normalized.por_proveedor || []).find(r => r.proveedor_id === null || r.proveedor_id === undefined || r.proveedor_id === sinProveedorId.value);
+    if (rowSinProv) rowSinProv.promedio_por_despacho = rowSinProv.despachos_periodo > 0 ? rowSinProv.gasto_total / rowSinProv.despachos_periodo : 0;
+
+    // 2. FILTRAR POR PROVEEDOR (si hay filtro activo)
+    const isSinProveedorFilter = filters.proveedorId && sinProveedorId.value === filters.proveedorId;
+    const isLogisticaCirugiaFilter = filters.proveedorId && filters.proveedorId === LOGISTICA_CIRUGIA_ID;
+
+    if (isSinProveedorFilter || isLogisticaCirugiaFilter) {
+      const matchProvider = (pId) => {
+        if (isSinProveedorFilter) {
+          return pId === null || pId === undefined || pId === sinProveedorId.value;
+        }
+        return Number(pId) === LOGISTICA_CIRUGIA_ID;
+      };
+
+      const filteredDetalle = (normalized.detalle || []).filter(item => matchProvider(item.proveedor_id));
+      const filteredPorProveedor = (normalized.por_proveedor || []).filter(item => matchProvider(item.proveedor_id));
+      const filteredControlSemanal = (normalized.control_semanal_por_proveedor || []).filter(item => matchProvider(item.proveedor_id));
+
+      const totalGasto = filteredDetalle.reduce((sum, item) => sum + getVal(item, ['monto', 'monto_total', 'total']), 0);
+      const countDespachos = filteredDetalle.length;
+      const totalCC = filteredDetalle.filter(item => getModalidad(item) === 'cuenta_corriente_empresa').reduce((sum, item) => sum + getVal(item, ['monto', 'monto_total', 'total']), 0);
+      const totalRend = filteredDetalle.filter(item => getModalidad(item) === 'rendicion').reduce((sum, item) => sum + getVal(item, ['monto', 'monto_total', 'total']), 0);
+      const totalCaja = filteredDetalle.filter(item => getModalidad(item) === 'caja_chica').reduce((sum, item) => sum + getVal(item, ['monto', 'monto_total', 'total']), 0);
+
+      return {
+        ...normalized,
+        detalle: filteredDetalle,
+        por_proveedor: filteredPorProveedor,
+        control_semanal_por_proveedor: filteredControlSemanal,
+        total_count: countDespachos,
+        kpis: {
+          ...normalized.kpis,
+          gasto_total_periodo: totalGasto,
+          cantidad_despachos: countDespachos,
+          gasto_promedio_despacho: countDespachos > 0 ? totalGasto / countDespachos : null,
+          total_cuenta_corriente: totalCC,
+          total_rendicion: totalRend,
+          total_caja_chica: totalCaja
+        }
+      };
+    }
+
+    return normalized;
   };
 
   const fetchDashboard = async () => {

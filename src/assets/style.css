@@ -7,6 +7,10 @@
 
 /* 2. ESTILOS BASE (para elementos HTML puros) */
 @layer base {
+  html {
+    font-size: 70%;
+  }
+
   body {
     @apply font-sans text-districorr-text-primary bg-districorr-background-alt antialiased;
   }

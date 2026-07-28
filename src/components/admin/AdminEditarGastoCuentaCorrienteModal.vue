@@ -283,6 +283,18 @@ watch(() => props.proveedores, (items) => {
                   </div>
                 </template>
               </v-select>
+              <div class="mt-2 flex items-center">
+                <input
+                  id="es_cirugia_modal"
+                  type="checkbox"
+                  :checked="form.proveedor_id === 14"
+                  @change="(e) => form.proveedor_id = e.target.checked ? 14 : null"
+                  class="h-4 w-4 rounded border-slate-300 text-indigo-600 focus:ring-indigo-500"
+                />
+                <label for="es_cirugia_modal" class="ml-2 text-xs font-semibold text-slate-700 cursor-pointer">
+                  Es Logística de Cirugía
+                </label>
+              </div>
             </div>
             <div v-if="showCreateProveedorForm" class="md:col-span-2 rounded-lg border border-slate-200 bg-slate-50 p-3">
               <p class="mb-2 text-xs font-semibold text-slate-700">Crear proveedor</p>
