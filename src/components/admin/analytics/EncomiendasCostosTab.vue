@@ -2,7 +2,7 @@
 import { computed, inject, onMounted, ref } from 'vue';
 import vSelect from 'vue-select';
 import 'vue-select/dist/vue-select.css';
-import { ArrowDownTrayIcon, BanknotesIcon, ClipboardDocumentListIcon, CurrencyDollarIcon, FunnelIcon } from '@heroicons/vue/24/outline';
+import { ArrowDownTrayIcon, BanknotesIcon, ClipboardDocumentListIcon, CurrencyDollarIcon, FunnelIcon, TruckIcon, ArrowRightIcon } from '@heroicons/vue/24/outline';
 
 import StatCard from '../StatCard.vue';
 import AdminEditarGastoCuentaCorrienteModal from '../AdminEditarGastoCuentaCorrienteModal.vue';
@@ -976,6 +976,23 @@ onMounted(async () => {
           </button>
         </div>
       </section>
+
+      <!-- Banner de Redirección a la Nueva Ventana Operativa -->
+      <div class="rounded-xl border border-indigo-200 bg-indigo-50 p-4 shadow-sm flex flex-col md:flex-row md:items-center justify-between gap-4">
+        <div class="flex items-start gap-3">
+          <TruckIcon class="h-6 w-6 text-indigo-600 shrink-0 mt-0.5" />
+          <div>
+            <h4 class="text-sm font-bold text-indigo-900">Módulo Operativo de Transportes y Movimientos Activo</h4>
+            <p class="text-xs text-indigo-700 mt-0.5">
+              Se ha habilitado la nueva ventana operativa completa con paginación, control semanal por acordeón y libro mayor de cuentas corrientes.
+            </p>
+          </div>
+        </div>
+        <router-link to="/admin/movimientos-transporte" class="inline-flex items-center gap-1.5 rounded-lg bg-indigo-600 px-4 py-2 text-xs font-bold text-white shadow-sm hover:bg-indigo-700 shrink-0">
+          <span>Ir a Transportes y Movimientos</span>
+          <ArrowRightIcon class="h-4 w-4" />
+        </router-link>
+      </div>
 
       <section class="bg-white border border-slate-200 rounded-xl p-4 shadow-sm grid grid-cols-1 gap-6 lg:grid-cols-3 divide-y lg:divide-y-0 lg:divide-x divide-slate-200">
         <!-- Bloque 1: Resumen de Operación -->

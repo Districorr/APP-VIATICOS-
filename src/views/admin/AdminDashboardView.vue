@@ -32,6 +32,7 @@ const dashboardSections = reactive([
     modules: [
       // AÑADIDO: Nueva tarjeta para Pagos Directos
       { name: 'Pagos Directos', description: 'Registrar transferencias y otros pagos de gerencia.', to: { name: 'AdminPagosDirectos' }, icon: CreditCardIcon, color: 'bg-green-100 text-green-600' },
+      { name: 'Transportes y Movimientos', description: 'Seguimiento operativo de envíos, encomiendas y transportes.', to: { name: 'AdminMovimientosTransporte' }, icon: TruckIcon, color: 'bg-indigo-100 text-indigo-600' },
       { name: 'Análisis Estratégico', description: 'Análisis visual de todos los datos.', to: { name: 'AdminAnalytics' }, icon: ChartBarIcon, color: 'bg-teal-100 text-teal-600' },
       { name: 'Análisis por Cliente', description: 'Desglose de gastos por cliente.', to: { name: 'AdminAnalisisClientes' }, icon: PresentationChartLineIcon, color: 'bg-sky-100 text-sky-600' },
     ]

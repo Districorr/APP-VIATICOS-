@@ -124,30 +124,7 @@ console.log("App.vue (V-Final-Restaurado): Script setup FINALIZADO");
 </script>
 
 <template>
-  <!-- TU TEMPLATE ORIGINAL COMPLETO (SIN CAMBIOS) -->
-  <div id="app-container-v371"> 
-    <div v-if="isDevelopmentMode" 
-         class="fixed bottom-0 left-0 bg-black bg-opacity-85 text-white p-2.5 text-xs z-[9999] max-w-xs overflow-auto max-h-60" 
-         style="font-size: 10px; line-height: 1.35; border: 1px solid dimgray;">
-      <h4 class="font-bold mb-1 text-yellow-400 border-b border-gray-700 pb-0.5">--- DEBUG (App.vue Final) ---</h4>
-      <p>AuthLoad: <span :class="loadingAuthSession ? 'text-orange-400' : 'text-green-400 font-semibold'">{{ loadingAuthSession }}</span></p>
-      <p>ProfileLoad: <span :class="loadingUserProfile ? 'text-orange-400' : 'text-green-400 font-semibold'">{{ loadingUserProfile }}</span></p>
-      <p>InitialAuthDone: <span :class="initialAuthCheckDone ? 'text-green-400 font-semibold' : 'text-yellow-400'">{{ initialAuthCheckDone }}</span></p>
-      <p>ShowAppLoader: <span :class="showAppLoader ? 'text-orange-400 font-semibold' : 'text-green-400'">{{ showAppLoader }}</span></p>
-      <hr class="my-0.5 border-gray-700">
-      <p>User ID (Auth): <span class="font-mono text-gray-300">{{ userSession?.user?.id || 'null' }}</span></p>
-      <p>Email (Auth): <span class="font-mono text-gray-300">{{ userSession?.user?.email || 'null' }}</span></p>
-      <hr class="my-0.5 border-gray-700">
-      <p>Profile ID: <span class="font-mono text-gray-300">{{ userProfile?.id || 'null' }}</span></p>
-      <p>Profile Rol: <span class="font-mono text-gray-300">{{ userProfile?.rol || 'null' }}</span></p>
-      <p>Profile Nombre: <span class="font-mono text-gray-300">{{ userProfile?.nombre_completo || 'null' }}</span></p>
-      <p v-if="errorUserProfile" class="text-red-400">Error Perfil: {{ errorUserProfile }}</p>
-      <hr class="my-1 border-gray-700">
-      <p>Route Path: <span class="font-mono text-cyan-400">{{ route.fullPath }}</span></p>
-      <p>Route Name: <span class="font-mono text-cyan-400">{{ String(route.name) }}</span> (AuthRoute: {{isAuthRoute}})</p>
-      <p class="text-gray-400">Meta: Auth=<span class="font-mono">{{ route.meta.requiresAuth }}</span>, Guest=<span class="font-mono">{{ route.meta.requiresGuest }}</span>, Admin=<span class="font-mono">{{ route.meta.requiresAdmin }}</span></p>
-    </div>
-
+  <div id="app-container-v371" class="min-h-screen flex flex-col font-sans text-gray-800 antialiased selection:bg-districorr-primary selection:text-white">
     <AppHeader 
       v-if="!isAuthRoute" 
       :user="userSession?.user" 

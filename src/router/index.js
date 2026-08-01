@@ -150,6 +150,12 @@ const routes = [
       { path: 'formatos-gasto/:formatoId/asignar-usuarios', name: 'AdminAsignarUsuariosFormato', component: () => import('../views/admin/AdminAsignarUsuariosFormatoView.vue'), props: true, meta: { title: 'Admin: Asignar Formatos' } },
       { path: 'clientes', name: 'AdminClientes', component: () => import('../views/admin/AdminClientesView.vue'), meta: { title: 'Admin: Clientes' } },
       { path: 'transportes', name: 'AdminTransportes', component: () => import('../views/admin/AdminTransportesView.vue'), meta: { title: 'Admin: Transportes' } },
+      { 
+        path: 'movimientos-transporte', 
+        name: 'AdminMovimientosTransporte', 
+        component: () => import('../views/admin/AdminMovimientosTransporteView.vue'), 
+        meta: { title: 'Admin: Movimientos de Transporte' } 
+      },
       
       { 
         path: 'vehiculos', 

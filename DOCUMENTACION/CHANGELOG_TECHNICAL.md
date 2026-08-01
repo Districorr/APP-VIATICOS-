@@ -4,6 +4,35 @@ Este documento registra los cambios técnicos significativos realizados en el pr
 
 ---
 
+### 2026-08-01
+
+- **Feature:** Rediseño Completo del Módulo "Transportes y Movimientos" (Etapa 1 & Etapa 2).
+- **Archivos Afectados (Frontend):**
+    - `src/views/admin/AdminMovimientosTransporteView.vue` (Nuevo / Rediseñado)
+    - `src/components/admin/logistica/MovimientoLogisticoForm.vue` (Nuevo / Dual Standalone & Embedded)
+    - `src/composables/useLogisticaDescriptionParser.js` (Nuevo)
+    - `src/components/admin/EncomiendasBulkPaymentsModal.vue` (Modificado)
+    - `src/components/GastoForm.vue` (Modificado)
+    - `src/components/admin/analytics/EncomiendasCostosTab.vue` (Modificado con Banner de Redirección)
+    - `src/App.vue` (Panel DEBUG removido)
+- **Documentación & Propuesta de Backend en Supabase (Offline):**
+    - `SUPABASE_CHANGES/001_inspeccion_previa.sql`
+    - `SUPABASE_CHANGES/002_cambio_propuesto.sql` (Actualización de RPC `crear_pagos_encomiendas_batch`)
+    - `SUPABASE_CHANGES/003_verificacion_posterior.sql`
+    - `SUPABASE_CHANGES/004_rollback.sql`
+    - `SUPABASE_CHANGES/README.md`
+- **Comportamiento & Mejoras Implementadas:**
+    - Ventana operativa con 4 pestañas: Movimientos, Transportes, Control semanal y Cuenta corriente.
+    - Paginación local configurable (10, 20, 50), filtros colapsables completos y respuestas textuales de volumen.
+    - Acción de eliminación por fila (`TrashIcon`) con modal de confirmación.
+    - Tarjetas de transporte clickeables con proyecciones mensuales dinámicas.
+    - Acordeón semanal con rangos reales de fechas calendario y nombres de meses en español.
+    - Exportaciones contextuales a Excel y PDF.
+- **Validaciones Realizadas:**
+    - `npm run build` verificado exitosamente (22.01s).
+
+---
+
 ### 2026-05-13
 
 - **Feature:** F-LOG-001 - Gastos a Cuenta Corriente de la Empresa.
@@ -121,5 +150,59 @@ Este documento registra los cambios técnicos significativos realizados en el pr
    - **UI Compacta y Filtros Colapsables:** Consolidación de los KPIs y datos de cupo mensual en un panel de métricas horizontal unificado. Filtros colapsables con badge indicador de filtros activos.
    - **Tabla Semanal de Control Optimizada:** Reemplazo de las 5 columnas semanales horizontales por filas colapsables individuales (acordeón con chevron) por proveedor y totales. Los desgloses semanales se muestran dentro de una rejilla de tarjetas compactas de fondo gris claro para evitar desplazamientos horizontales en la pantalla.
    - **Drill-Down Interactivo por Semana:** Implementación de tarjetas semanales clicables que filtran instantáneamente los Pagos Asociados en el lado del cliente (sin latencia de red) por el rango de fechas de la semana y el proveedor seleccionado, acompañadas de un banner indicador y scroll automático suave.
+- **Validaciones:**
+   - Compilación de producción exitosa mediante `npm run build`.
+
+---
+
+### 2026-07-31
+
+- **Feature:** Carga al vuelo en formulario de pagos masivos de encomiendas.
+- **Archivos Afectados (Frontend):**
+   - `src/components/admin/EncomiendasBulkPaymentsModal.vue`
+- **Backend Afectado:**
+   - No aplica (utiliza las funciones RPC de Supabase existentes).
+- **Comportamiento:**
+   - **Taggable Inputs:** Habilitación de la propiedad `taggable` en los selectores `v-select` para Cliente, Transporte, Localidad destino y Proveedor.
+   - **Creación en Tiempo Real:** Al escribir y presionar Enter sobre una opción inexistente, se dispara el helper `handleCreateEntity` que ejecuta las funciones de la base de datos `crear_entidad_al_vuelo` y `crear_localidad_al_vuelo` (vinculada con el `provincia_id` seleccionado en la fila actual).
+   - **Sincronización Reactiva:** Las opciones locales reactivas correspondientes se actualizan en el acto para reflejar el ID real de base de datos retornado, permitiendo que otras filas seleccionen el nuevo valor inmediatamente.
+- **Validaciones:**
+   - Compilación de producción exitosa mediante `npm run build`.
+
+---
+
+### 2026-08-01
+
+- **Feature:** Reestructuración de la máscara del input de monto en GastoForm.vue.
+- **Archivos Afectados (Frontend):**
+   - `src/components/GastoForm.vue`
+- **Backend Afectado:**
+   - No aplica.
+- **Comportamiento:**
+   - **Corrección de comportamiento decimal forzado (calculator-style):** Se reemplazó la lógica de entrada que dividía el número por 100 de forma predeterminada (lo que hacía que al ingresar números enteros como `150` quedaran detrás de la coma como `1,50`).
+   - **Ingreso natural:** Ahora los números se digitan de manera normal como enteros (con separadores de miles insertados dinámicamente) y se puede ingresar la coma `,` o el punto `.` de forma explícita para digitar centavos/decimales.
+   - **Estabilidad ante borrado y pegado:** El cursor conserva la posición correcta al borrar dígitos de forma intermedia y se soporta el pegado (paste) de montos tanto en formato con punto decimal como con coma.
+- **Validaciones:**
+   - Compilación de producción exitosa mediante `npm run build`.
+
+---
+
+### 2026-08-01 (Parte 2)
+
+- **Feature:** Rediseño completo del Módulo de Transportes y Movimientos (Logística).
+- **Archivos Afectados (Frontend):**
+   - `src/views/admin/AdminMovimientosTransporteView.vue` [NUEVO]
+   - `src/components/admin/logistica/MovimientoLogisticoForm.vue` [NUEVO]
+   - `src/composables/useLogisticaDescriptionParser.js` [NUEVO]
+   - `src/components/GastoForm.vue`
+   - `src/views/admin/AdminDashboardView.vue`
+   - `src/router/index.js`
+- **Backend Afectado (Propuesta Técnica Explicita):**
+   - Carpeta `SUPABASE_CHANGES/` generada con scripts `001_inspeccion_previa.sql`, `002_cambio_propuesto.sql`, `003_verificacion_posterior.sql`, `004_rollback.sql` y `README.md`.
+- **Comportamiento:**
+   - **Navegación Operativa (3 Pestañas):** Pestañas `Movimientos` (Para Franco - ¿Para qué se movió?), `Transportes` (Para Antonio - ¿Quién movió?) y `Cuenta corriente`. Acciones de carga rápida independientes.
+   - **Respuestas Textuales Claras:** Reemplazo de gráficos abstractos por banners con explicaciones en lenguaje natural.
+   - **Parser Inteligente No Invasivo:** Detección de patrones en descripciones (`PTE`, `CIRUGIA`, `DEVOLUCION`, Clientes, Proveedores) que sugiere valores en chips cliqueables sin sobrescribir campos automáticamente.
+   - **Formulario Reusable:** `MovimientoLogisticoForm.vue` para carga de logística de cirugía vs. proveedor/otros.
 - **Validaciones:**
    - Compilación de producción exitosa mediante `npm run build`.

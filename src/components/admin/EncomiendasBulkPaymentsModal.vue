@@ -178,6 +178,59 @@ async function handleProvinciaChange(row) {
   }
 }
 
+async function handleCreateEntity(option, tableName, row) {
+  errorMessage.value = '';
+  successMessage.value = '';
+  try {
+    const label = (option.label || '').trim();
+    if (!label) return;
+
+    let rpcName = 'crear_entidad_al_vuelo';
+    let params = { p_nombre_entidad: label, p_nombre_tabla: tableName };
+
+    if (tableName === 'localidades') {
+      if (!row.provincia_id) {
+        throw new Error('Debe seleccionar una provincia antes de crear una localidad.');
+      }
+      rpcName = 'crear_localidad_al_vuelo';
+      params = { p_nombre_localidad: label, p_provincia_id: row.provincia_id };
+    }
+
+    const { data, error } = await supabase.rpc(rpcName, params);
+    if (error) throw error;
+
+    const newId = Number(data);
+
+    if (tableName === 'clientes') {
+      clientesOptions.value = [...clientesOptions.value.filter(o => o.code !== option.code), { label, code: newId }];
+      row.cliente_id = newId;
+    } else if (tableName === 'transportes') {
+      transportesOptions.value = [...transportesOptions.value.filter(o => o.code !== option.code), { label, code: newId }];
+      row.transporte_id = newId;
+    } else if (tableName === 'proveedores') {
+      proveedoresOptions.value = [...proveedoresOptions.value.filter(o => o.code !== option.code), { label, code: newId }];
+      row.proveedor_id = newId;
+    } else if (tableName === 'localidades') {
+      const provinciaKey = String(row.provincia_id);
+      const currentLocs = localidadesCache.value[provinciaKey] || [];
+      localidadesCache.value = {
+        ...localidadesCache.value,
+        [provinciaKey]: [...currentLocs.filter(o => o.code !== option.code), { label, code: newId }]
+      };
+      row.localidad_destino_id = newId;
+    }
+
+    emit('show-notification', 'Creado con éxito', `Se creó "${label}" correctamente.`, 'success');
+  } catch (e) {
+    if (tableName === 'clientes') row.cliente_id = null;
+    else if (tableName === 'transportes') row.transporte_id = null;
+    else if (tableName === 'proveedores') row.proveedor_id = null;
+    else if (tableName === 'localidades') row.localidad_destino_id = null;
+
+    errorMessage.value = `Error al crear: ${e.message || 'Error desconocido'}`;
+  }
+}
+
 async function loadOptions() {
   loadingOptions.value = true;
   try {
@@ -231,35 +284,39 @@ async function saveRows() {
       localidad_destino_id: row.localidad_destino_id || null,
       numero_guia: row.numero_guia?.trim() || null,
       destino_texto: row.destino_texto?.trim() || null,
-      tipo_movimiento_encomienda: row.tipo_movimiento_encomienda?.trim() || null,
+      tipo_movimiento_encomienda: row.tipo_movimiento_encomienda?.trim() || 'Envío',
       observacion_logistica: row.observacion?.trim() || null,
       encomienda_id: row.encomienda_id || null,
+      origen_carga: 'encomiendas_carga_multiple',
+      modulo: 'logistica',
+      tipo_logistica: row.cliente_id ? 'cirugia' : 'proveedor_otros',
+      cantidad_bultos: 1,
+      sentido_movimiento: 'ida',
+      tipo_gasto_id: 22,
     }));
+
+    console.log('PAYLOAD BATCH', payload);
 
     const { data, error } = await supabase.rpc('crear_pagos_encomiendas_batch', {
       p_pagos: payload,
     });
-    if (error) throw error;
 
-    // Verificar si la respuesta del RPC indica error interno (ej: problemas de permisos)
+    console.log('RPC RESULT', data);
+    if (error) {
+      console.error('RPC ERROR', error);
+      throw error;
+    }
+
+    // Verificar si la respuesta del RPC indica error interno
     if (data && typeof data === 'object' && data.ok === false) {
       const msgs = (data.errores || []).map((e) => e.mensaje).join(', ');
       throw new Error(msgs || 'Error al registrar los pagos.');
     }
 
-    // Obtener los IDs insertados para asignarle tipo_gasto_id = 22 (Logística : Envíos | Devoluciones)
-    // Esto es crítico porque el RPC los crea con tipo_gasto_id null, lo que hace que no se filtren en la tabla de analíticas
+    // Extraer IDs insertados devueltos por el RPC
     const insertedIds = Array.isArray(data)
       ? data.map(item => item.id).filter(Boolean)
       : (data && data.ids ? data.ids : []);
-
-    if (insertedIds.length > 0) {
-      const { error: updateError } = await supabase
-        .from('gastos')
-        .update({ tipo_gasto_id: 22 })
-        .in('id', insertedIds);
-      if (updateError) throw updateError;
-    }
 
     const count = insertedIds.length || payload.length;
     successMessage.value = `${count} pago(s) registrados correctamente.`;
@@ -344,12 +401,32 @@ watch(() => props.seedPayment, (seed) => {
 
                 <label class="field-group">
                   <span class="field-label">Cliente</span>
-                  <v-select v-model="entry.row.cliente_id" :options="clientesOptions" :reduce="option => option.code" :loading="loadingOptions" placeholder="Cliente" class="v-select-filter" />
+                  <v-select
+                    v-model="entry.row.cliente_id"
+                    :options="clientesOptions"
+                    :reduce="option => option.code"
+                    :loading="loadingOptions"
+                    taggable
+                    :create-option="option => ({ label: option, code: option })"
+                    @option:created="(option) => handleCreateEntity(option, 'clientes', entry.row)"
+                    placeholder="Cliente"
+                    class="v-select-filter"
+                  />
                 </label>
 
                 <label class="field-group">
                   <span class="field-label">Transporte</span>
-                  <v-select v-model="entry.row.transporte_id" :options="transportesOptions" :reduce="option => option.code" :loading="loadingOptions" placeholder="Transporte" class="v-select-filter" />
+                  <v-select
+                    v-model="entry.row.transporte_id"
+                    :options="transportesOptions"
+                    :reduce="option => option.code"
+                    :loading="loadingOptions"
+                    taggable
+                    :create-option="option => ({ label: option, code: option })"
+                    @option:created="(option) => handleCreateEntity(option, 'transportes', entry.row)"
+                    placeholder="Transporte"
+                    class="v-select-filter"
+                  />
                 </label>
 
                 <label class="field-group">
@@ -359,7 +436,18 @@ watch(() => props.seedPayment, (seed) => {
 
                 <label class="field-group">
                   <span class="field-label">Localidad destino</span>
-                  <v-select v-model="entry.row.localidad_destino_id" :options="getLocalidadOptions(entry.row.provincia_id)" :reduce="option => option.code" :loading="loadingOptions" :disabled="!entry.row.provincia_id" placeholder="Localidad" class="v-select-filter" />
+                  <v-select
+                    v-model="entry.row.localidad_destino_id"
+                    :options="getLocalidadOptions(entry.row.provincia_id)"
+                    :reduce="option => option.code"
+                    :loading="loadingOptions"
+                    :disabled="!entry.row.provincia_id"
+                    taggable
+                    :create-option="option => ({ label: option, code: option })"
+                    @option:created="(option) => handleCreateEntity(option, 'localidades', entry.row)"
+                    placeholder="Localidad"
+                    class="v-select-filter"
+                  />
                 </label>
 
                 <label class="field-group">
@@ -374,7 +462,17 @@ watch(() => props.seedPayment, (seed) => {
 
                 <div class="field-group">
                   <span class="field-label">Proveedor</span>
-                  <v-select v-model="entry.row.proveedor_id" :options="proveedoresOptions" :reduce="option => option.code" :loading="loadingOptions" placeholder="Proveedor" class="v-select-filter" />
+                  <v-select
+                    v-model="entry.row.proveedor_id"
+                    :options="proveedoresOptions"
+                    :reduce="option => option.code"
+                    :loading="loadingOptions"
+                    taggable
+                    :create-option="option => ({ label: option, code: option })"
+                    @option:created="(option) => handleCreateEntity(option, 'proveedores', entry.row)"
+                    placeholder="Proveedor"
+                    class="v-select-filter"
+                  />
                   <div class="mt-1 flex items-center">
                     <input
                       :id="'es_cirugia_bulk_' + index"

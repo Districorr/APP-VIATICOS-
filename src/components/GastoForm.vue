@@ -6,6 +6,7 @@ import vSelect from 'vue-select';
 import 'vue-select/dist/vue-select.css';
 import TipoGastoSelector from './TipoGastoSelector.vue';
 import { useRouter } from 'vue-router';
+import MovimientoLogisticoForm from './admin/logistica/MovimientoLogisticoForm.vue';
 
 const props = defineProps({
   formatoId: { type: [Number, String], required: true },
@@ -74,6 +75,13 @@ const showTransporteFields = computed(() => {
   );
   return tipoGastoSeleccionado?.es_tipo_transporte === true;
 });
+const isLogisticaType = computed(() => {
+  if (!formState.tipo_gasto_id) return false;
+  const tipo = opcionesSelect.value.tipos_gasto.find((t) => t.id === formState.tipo_gasto_id);
+  if (!tipo) return false;
+  const name = (tipo.nombre_tipo_gasto || '').toLowerCase();
+  return tipo.es_tipo_transporte === true || name.includes('despacho') || name.includes('envío') || name.includes('envio');
+});
 
 const ORIGEN_GASTO = Object.freeze({
   rendicion: 'rendicion',
@@ -85,17 +93,99 @@ const ORIGEN_GASTO = Object.freeze({
 const handleMontoInput = (event) => {
   const input = event.target;
   let value = input.value;
-  const digits = value.replace(/\D/g, '');
-  const numericValue = digits ? parseInt(digits, 10) / 100 : 0;
+  const oldVal = formattedMontoTotal.value || '';
+
+  // Si el valor está vacío
+  if (!value) {
+    formState.monto_total = 0;
+    formattedMontoTotal.value = '';
+    return;
+  }
+
+  // Determinar si hay decimales activos
+  let hasDecimal = oldVal.includes(',');
+
+  // Si el usuario acaba de escribir un punto o coma decimal
+  const lastChar = event.data;
+  if (lastChar === '.' || lastChar === ',') {
+    hasDecimal = true;
+  }
+
+  // Si el usuario borró la coma decimal
+  if (oldVal.includes(',') && !value.includes(',')) {
+    hasDecimal = false;
+  }
+
+  // Si es un pegado o autocompletado (event.data es nulo) y no tiene comas,
+  // pero tiene un punto seguido de 1 o 2 dígitos al final (ej: "1234.56"),
+  // lo convertimos a coma para que se detecte como decimal.
+  if (!lastChar && !value.includes(',')) {
+    const decimalPointMatch = value.match(/\.(\d{1,2})$/);
+    if (decimalPointMatch) {
+      value = value.replace(/\.(\d{1,2})$/, ',$1');
+      hasDecimal = true;
+    }
+  }
+
+  // Limpiar el valor para obtener la parte entera y decimal
+  let integerStr = '';
+  let decimalStr = '';
+
+  if (hasDecimal) {
+    // Si hay decimales, separamos por la coma
+    // Reemplazamos el punto decimal recién escrito por una coma si es necesario
+    let normalized = value;
+    if (lastChar === '.') {
+      const pos = input.selectionStart;
+      normalized = value.slice(0, pos - 1) + ',' + value.slice(pos);
+    }
+
+    const parts = normalized.split(',');
+    // La parte entera son todos los dígitos del primer bloque, quitando los puntos de miles
+    integerStr = parts[0].replace(/\D/g, '');
+    // La parte decimal son los dígitos del segundo bloque (máximo 2)
+    decimalStr = parts.length > 1 ? parts[1].replace(/\D/g, '').slice(0, 2) : '';
+  } else {
+    // Si no hay decimales, todo el string son dígitos de la parte entera (limpiando puntos de miles)
+    integerStr = value.replace(/\D/g, '');
+  }
+
+  // Evitar ceros a la izquierda múltiples en la parte entera (ej: "05" -> "5")
+  if (integerStr.length > 1 && integerStr.startsWith('0')) {
+    integerStr = integerStr.replace(/^0+/, '');
+    if (integerStr === '') integerStr = '0';
+  }
+
+  const displayInteger = integerStr || '0';
+
+  // Formatear la parte entera con puntos de miles de es-AR
+  const formattedInteger = Number(displayInteger).toLocaleString('es-AR');
+
+  // Construir el valor formateado final
+  let formattedValue = formattedInteger;
+  if (hasDecimal) {
+    formattedValue += ',' + decimalStr;
+  }
+
+  // Guardar el valor numérico real
+  const finalDecimal = decimalStr || '0';
+  const numericValue = parseFloat(displayInteger + '.' + finalDecimal) || 0;
   formState.monto_total = numericValue;
-  const formattedValue = formatCurrencyForInput(numericValue);
+
+  // Actualizar el ref
+  formattedMontoTotal.value = formattedValue;
+
+  // Ajustar posición del cursor
   const cursorPos = input.selectionStart;
   const oldLength = value.length;
-  formattedMontoTotal.value = formattedValue;
   nextTick(() => {
     const newLength = formattedValue.length;
     let newCursorPos = cursorPos + (newLength - oldLength);
-    if (newLength > oldLength && formattedValue[cursorPos] === '.') newCursorPos = cursorPos + 1;
+
+    // Ajustar si el cursor queda justo sobre un punto de miles
+    if (newLength > oldLength && formattedValue[newCursorPos - 1] === '.') {
+      newCursorPos++;
+    }
     input.setSelectionRange(newCursorPos, newCursorPos);
   });
 };
@@ -529,6 +619,17 @@ async function handleSubmit() {
     if (formState.kilometraje_actual) datosAdicionales.kilometraje_actual = formState.kilometraje_actual;
     if (formState.numero_remito_vehiculo) datosAdicionales.numero_remito_vehiculo = formState.numero_remito_vehiculo;
 
+    if (isLogisticaType.value) {
+      datosAdicionales.modulo = 'logistica';
+      datosAdicionales.tipo_logistica = formState.tipo_logistica || 'cirugia';
+      datosAdicionales.tipo_movimiento_encomienda = formState.tipo_movimiento_encomienda || 'Envío';
+      datosAdicionales.cantidad_bultos = Number(formState.cantidad_bultos) || 1;
+      datosAdicionales.sentido_movimiento = formState.sentido_movimiento || 'ida';
+      datosAdicionales.destino_texto = formState.destino_texto || null;
+      datosAdicionales.observacion_logistica = formState.observacion_logistica || null;
+      datosAdicionales.origen_carga = 'formulario_logistico';
+    }
+
     const payload = {
       formato_id: props.formatoId,
       fecha_gasto: formState.fecha_gasto ? `${formState.fecha_gasto}T12:00:00Z` : null,
@@ -729,22 +830,59 @@ async function handleSubmit() {
         <div v-show="currentStep === 2">
           <fieldset>
             <div class="grid grid-cols-1 sm:grid-cols-2 gap-6">
-              <div class="input-wrapper"><label for="fecha_gasto" class="form-label">Fecha del Gasto <span class="text-red-500">*</span></label><input type="date" id="fecha_gasto" v-model="formState.fecha_gasto" required class="form-input mt-1" /></div>
-              <div class="sm:col-span-2"><label class="form-label">Tipo de Gasto <span class="text-red-500">*</span></label><TipoGastoSelector v-model="formState.tipo_gasto_id" :options="opcionesSelect.tipos_gasto" class="mt-2"/></div>
-              <div class="sm:col-span-2 input-wrapper"><label for="descripcion_general" class="form-label">Descripción General</label><input type="text" id="descripcion_general" v-model="formState.descripcion_general" class="form-input mt-1" placeholder="Ej: Nafta YPF, Almuerzo en..." /></div>
-              <div class="input-wrapper">
-                <label for="provincia_id" class="form-label">Provincia del Gasto</label>
-                <v-select 
-                  id="provincia_id" 
-                  v-model="formState.provincia_id" 
-                  :options="opcionesSelect.provincias"
-                  :reduce="option => option.value"
-                  placeholder="Seleccione una provincia..."
-                  class="mt-1">
-                </v-select>
+              <div class="input-wrapper mb-4">
+                <label for="fecha_gasto" class="form-label">Fecha del Gasto <span class="text-red-500">*</span></label>
+                <input type="date" id="fecha_gasto" v-model="formState.fecha_gasto" required class="form-input mt-1" />
               </div>
             </div>
           </fieldset>
+
+          <!-- Si se selecciona específicamente Despacho / Envíos -->
+          <div v-if="isLogisticaType" class="mt-2 space-y-4">
+            <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 rounded-lg border border-slate-200 bg-slate-50/90 p-3 shadow-2xs">
+              <div class="flex items-center gap-2.5">
+                <div class="flex h-7 w-7 items-center justify-center rounded-md bg-indigo-100 text-indigo-700 text-xs font-bold shrink-0">
+                  🚚
+                </div>
+                <div>
+                  <span class="block text-[10px] font-bold uppercase tracking-wider text-slate-500">Tipo de Gasto</span>
+                  <h4 class="text-xs font-bold text-slate-900">Despacho / Envíos</h4>
+                </div>
+              </div>
+              <button
+                type="button"
+                class="self-start sm:self-auto inline-flex items-center gap-1 rounded-md border border-slate-300 bg-white px-2.5 py-1 text-[11px] font-semibold text-slate-700 shadow-2xs hover:bg-slate-100 transition-colors cursor-pointer"
+                @click="formState.tipo_gasto_id = null"
+              >
+                <span>Seleccionar otro tipo de gasto</span>
+              </button>
+            </div>
+
+            <MovimientoLogisticoForm mode="embedded" :initial-data="formState" />
+          </div>
+
+          <!-- Para todos los demás tipos de gasto -->
+          <div v-else class="mt-4">
+            <div class="sm:col-span-2 mb-6">
+              <label class="form-label">Tipo de Gasto <span class="text-red-500">*</span></label>
+              <TipoGastoSelector v-model="formState.tipo_gasto_id" :options="opcionesSelect.tipos_gasto" class="mt-2"/>
+            </div>
+            <fieldset>
+              <div class="grid grid-cols-1 sm:grid-cols-2 gap-6">
+                <div class="sm:col-span-2 input-wrapper"><label for="descripcion_general" class="form-label">Descripción General</label><input type="text" id="descripcion_general" v-model="formState.descripcion_general" class="form-input mt-1" placeholder="Ej: Nafta YPF, Almuerzo en..." /></div>
+                <div class="input-wrapper">
+                  <label for="provincia_id" class="form-label">Provincia del Gasto</label>
+                  <v-select 
+                    id="provincia_id" 
+                    v-model="formState.provincia_id" 
+                    :options="opcionesSelect.provincias"
+                    :reduce="option => option.value"
+                    placeholder="Seleccione una provincia..."
+                    class="mt-1">
+                  </v-select>
+                </div>
+              </div>
+            </fieldset>
           
           <fieldset v-if="camposObligatoriosVisibles.length > 0" class="mt-8"><legend class="form-legend">Detalles Específicos del Formato</legend><div class="grid grid-cols-1 sm:grid-cols-2 gap-6"><div v-for="campo in camposObligatoriosVisibles" :key="campo.id" class="input-wrapper"><label :for="campo.nombre_campo_tecnico" class="form-label">{{ campo.etiqueta_visible }} <span v-if="campo.es_obligatorio" class="text-red-500">*</span></label><v-select v-if="isProveedorField(campo)" :id="campo.nombre_campo_tecnico" v-model="formState.proveedor_id" :options="opcionesSelect.proveedores" :loading="loadingSelects.proveedores" taggable :create-option="createEntityOption" placeholder="-- Buscar o crear proveedor --" class="mt-1" :class="{ 'v-select-required': campo.es_obligatorio && !formState.proveedor_id }"></v-select><v-select v-else-if="campo.tipo_input === 'selector_simple'" :id="campo.nombre_campo_tecnico" v-model="formState[campo.nombre_campo_tecnico]" :options="getSelectorSimpleOptions(campo)" :reduce="option => option.value" placeholder="Seleccione..." class="mt-1" :class="{ 'v-select-required': campo.es_obligatorio && !formState[campo.nombre_campo_tecnico] }"></v-select><input v-else-if="campo.tipo_input === 'texto'" type="text" :id="campo.nombre_campo_tecnico" v-model="formState[campo.nombre_campo_tecnico]" :required="campo.es_obligatorio" class="form-input mt-1" />
                 <v-select v-else-if="campo.tipo_input === 'select_cliente'" :id="campo.nombre_campo_tecnico" v-model="formState.cliente_id" :options="opcionesSelect.clientes" taggable :create-option="(newOption) => newOption" placeholder="-- Buscar o crear cliente --" class="mt-1" :class="{ 'v-select-required': campo.es_obligatorio && !formState.cliente_id }"></v-select>
@@ -829,7 +967,8 @@ async function handleSubmit() {
           </div>
         </div>
       </div>
-    </div>
+      </div>
+      </div>
 
     <div class="fixed bottom-0 left-0 right-0 bg-white/80 backdrop-blur-sm border-t border-gray-200 shadow-lg-top z-10">
       <div class="max-w-3xl mx-auto px-6 sm:px-8 py-4">
