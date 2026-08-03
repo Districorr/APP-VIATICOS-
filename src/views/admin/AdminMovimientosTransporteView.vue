@@ -1162,26 +1162,6 @@ onMounted(fetchDatosLogistica);
         <button
           type="button"
           class="tab-button"
-          :class="activeTab === 'gestion' ? 'tab-active' : 'tab-inactive'"
-          @click="activeTab = 'gestion'"
-        >
-          <BuildingOffice2Icon class="h-5 w-5" />
-          <span>Empresas (ABM)</span>
-        </button>
-
-        <button
-          type="button"
-          class="tab-button"
-          :class="activeTab === 'analisis' ? 'tab-active' : 'tab-inactive'"
-          @click="activeTab = 'analisis'"
-        >
-          <ChartBarIcon class="h-5 w-5" />
-          <span>Análisis Geográfico</span>
-        </button>
-
-        <button
-          type="button"
-          class="tab-button"
           :class="activeTab === 'control_semanal' ? 'tab-active' : 'tab-inactive'"
           @click="activeTab = 'control_semanal'"
         >
@@ -1197,6 +1177,26 @@ onMounted(fetchDatosLogistica);
         >
           <BanknotesIcon class="h-5 w-5" />
           <span>Cuenta corriente</span>
+        </button>
+
+        <button
+          type="button"
+          class="tab-button"
+          :class="activeTab === 'gestion' ? 'tab-active' : 'tab-inactive'"
+          @click="activeTab = 'gestion'"
+        >
+          <BuildingOffice2Icon class="h-5 w-5" />
+          <span>Empresas (ABM)</span>
+        </button>
+
+        <button
+          type="button"
+          class="tab-button"
+          :class="activeTab === 'analisis' ? 'tab-active' : 'tab-inactive'"
+          @click="activeTab = 'analisis'"
+        >
+          <ChartBarIcon class="h-5 w-5" />
+          <span>Análisis Geográfico</span>
         </button>
       </nav>
     </div>
