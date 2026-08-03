@@ -300,8 +300,18 @@ async function handleGuardar() {
 
     let tipoGastoId = 22; // Fallback Estándar (Despacho / Envíos)
     const matchTipo = tiposGastoOptions.value.find(t => {
-      const name = (t.nombre_tipo_gasto || '').toLowerCase();
-      return name.includes('despacho') || name.includes('envío') || name.includes('envio');
+      if (t.es_tipo_transporte === true) return true;
+      const name = (t.nombre_tipo_gasto || '')
+        .toLowerCase()
+        .normalize("NFD")
+        .replace(/[\u0300-\u036f]/g, "");
+      return (
+        name.includes('despacho') ||
+        name.includes('envio') ||
+        name.includes('logistica') ||
+        name.includes('devolucion') ||
+        name.includes('encomienda')
+      );
     });
     if (matchTipo) tipoGastoId = matchTipo.id;
 

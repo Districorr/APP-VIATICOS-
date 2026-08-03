@@ -78,8 +78,18 @@ const showTransporteFields = computed(() => {
 });
 const isLogisticaType = computed(() => {
   if (!tipoGastoSeleccionado.value) return false;
-  const name = (tipoGastoSeleccionado.value.nombre_tipo_gasto || '').toLowerCase();
-  return tipoGastoSeleccionado.value.es_tipo_transporte === true || name.includes('despacho') || name.includes('envío') || name.includes('envio');
+  if (tipoGastoSeleccionado.value.es_tipo_transporte === true) return true;
+  const name = (tipoGastoSeleccionado.value.nombre_tipo_gasto || '')
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "");
+  return (
+    name.includes('despacho') ||
+    name.includes('envio') ||
+    name.includes('logistica') ||
+    name.includes('devolucion') ||
+    name.includes('encomienda')
+  );
 });
 
 const ORIGEN_GASTO = Object.freeze({
