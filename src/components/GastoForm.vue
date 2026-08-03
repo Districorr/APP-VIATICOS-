@@ -68,19 +68,18 @@ const camposOpcionalesVisibles = ref(new Set());
 const formattedMontoTotal = ref('');
 const duplicationWarning = ref('');
 const duplicationCheckTimeout = ref(null);
+const tipoGastoSeleccionado = computed(() => {
+  if (!formState.tipo_gasto_id) return null;
+  return opcionesSelect.value.tipos_gasto.find((t) => t.id === formState.tipo_gasto_id) || null;
+});
 const showTransporteFields = computed(() => {
   if (!formState.tipo_gasto_id) return false;
-  const tipoGastoSeleccionado = opcionesSelect.value.tipos_gasto.find(
-    (t) => t.id === formState.tipo_gasto_id
-  );
-  return tipoGastoSeleccionado?.es_tipo_transporte === true;
+  return tipoGastoSeleccionado.value?.es_tipo_transporte === true;
 });
 const isLogisticaType = computed(() => {
-  if (!formState.tipo_gasto_id) return false;
-  const tipo = opcionesSelect.value.tipos_gasto.find((t) => t.id === formState.tipo_gasto_id);
-  if (!tipo) return false;
-  const name = (tipo.nombre_tipo_gasto || '').toLowerCase();
-  return tipo.es_tipo_transporte === true || name.includes('despacho') || name.includes('envío') || name.includes('envio');
+  if (!tipoGastoSeleccionado.value) return false;
+  const name = (tipoGastoSeleccionado.value.nombre_tipo_gasto || '').toLowerCase();
+  return tipoGastoSeleccionado.value.es_tipo_transporte === true || name.includes('despacho') || name.includes('envío') || name.includes('envio');
 });
 
 const ORIGEN_GASTO = Object.freeze({
@@ -837,16 +836,23 @@ async function handleSubmit() {
             </div>
           </fieldset>
 
-          <!-- Si se selecciona específicamente Despacho / Envíos -->
-          <div v-if="isLogisticaType" class="mt-2 space-y-4">
+          <!-- Si NO hay tipo de gasto seleccionado: Mostrar cuadrícula de selección -->
+          <div v-if="!formState.tipo_gasto_id" class="mt-4 sm:col-span-2 mb-6">
+            <label class="form-label">Tipo de Gasto <span class="text-red-500">*</span></label>
+            <TipoGastoSelector v-model="formState.tipo_gasto_id" :options="opcionesSelect.tipos_gasto" class="mt-2"/>
+          </div>
+
+          <!-- Si YA se seleccionó un tipo de gasto: Mostrar banner minimizado y campos correspondientes -->
+          <div v-else class="mt-4 space-y-4">
             <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 rounded-lg border border-slate-200 bg-slate-50/90 p-3 shadow-2xs">
               <div class="flex items-center gap-2.5">
-                <div class="flex h-7 w-7 items-center justify-center rounded-md bg-indigo-100 text-indigo-700 text-xs font-bold shrink-0">
-                  🚚
+                <div v-if="tipoGastoSeleccionado?.icono_svg" class="flex h-7 w-7 items-center justify-center rounded-md bg-indigo-100 text-indigo-700 text-xs shrink-0 [&>svg]:w-5 [&>svg]:h-5" v-html="tipoGastoSeleccionado.icono_svg"></div>
+                <div v-else class="flex h-7 w-7 items-center justify-center rounded-md bg-indigo-100 text-indigo-700 text-xs font-bold shrink-0">
+                  🏷️
                 </div>
                 <div>
                   <span class="block text-[10px] font-bold uppercase tracking-wider text-slate-500">Tipo de Gasto</span>
-                  <h4 class="text-xs font-bold text-slate-900">Despacho / Envíos</h4>
+                  <h4 class="text-xs font-bold text-slate-900">{{ tipoGastoSeleccionado?.nombre_tipo_gasto || 'Tipo Seleccionado' }}</h4>
                 </div>
               </div>
               <button
@@ -858,117 +864,114 @@ async function handleSubmit() {
               </button>
             </div>
 
-            <MovimientoLogisticoForm mode="embedded" :initial-data="formState" />
-          </div>
+            <!-- Si es Despacho / Envíos (Logística) -->
+            <MovimientoLogisticoForm v-if="isLogisticaType" mode="embedded" :initial-data="formState" />
 
-          <!-- Para todos los demás tipos de gasto -->
-          <div v-else class="mt-4">
-            <div class="sm:col-span-2 mb-6">
-              <label class="form-label">Tipo de Gasto <span class="text-red-500">*</span></label>
-              <TipoGastoSelector v-model="formState.tipo_gasto_id" :options="opcionesSelect.tipos_gasto" class="mt-2"/>
-            </div>
-            <fieldset>
-              <div class="grid grid-cols-1 sm:grid-cols-2 gap-6">
-                <div class="sm:col-span-2 input-wrapper"><label for="descripcion_general" class="form-label">Descripción General</label><input type="text" id="descripcion_general" v-model="formState.descripcion_general" class="form-input mt-1" placeholder="Ej: Nafta YPF, Almuerzo en..." /></div>
-                <div class="input-wrapper">
-                  <label for="provincia_id" class="form-label">Provincia del Gasto</label>
-                  <v-select 
-                    id="provincia_id" 
-                    v-model="formState.provincia_id" 
-                    :options="opcionesSelect.provincias"
-                    :reduce="option => option.value"
-                    placeholder="Seleccione una provincia..."
-                    class="mt-1">
-                  </v-select>
-                </div>
-              </div>
-            </fieldset>
-          
-          <fieldset v-if="camposObligatoriosVisibles.length > 0" class="mt-8"><legend class="form-legend">Detalles Específicos del Formato</legend><div class="grid grid-cols-1 sm:grid-cols-2 gap-6"><div v-for="campo in camposObligatoriosVisibles" :key="campo.id" class="input-wrapper"><label :for="campo.nombre_campo_tecnico" class="form-label">{{ campo.etiqueta_visible }} <span v-if="campo.es_obligatorio" class="text-red-500">*</span></label><v-select v-if="isProveedorField(campo)" :id="campo.nombre_campo_tecnico" v-model="formState.proveedor_id" :options="opcionesSelect.proveedores" :loading="loadingSelects.proveedores" taggable :create-option="createEntityOption" placeholder="-- Buscar o crear proveedor --" class="mt-1" :class="{ 'v-select-required': campo.es_obligatorio && !formState.proveedor_id }"></v-select><v-select v-else-if="campo.tipo_input === 'selector_simple'" :id="campo.nombre_campo_tecnico" v-model="formState[campo.nombre_campo_tecnico]" :options="getSelectorSimpleOptions(campo)" :reduce="option => option.value" placeholder="Seleccione..." class="mt-1" :class="{ 'v-select-required': campo.es_obligatorio && !formState[campo.nombre_campo_tecnico] }"></v-select><input v-else-if="campo.tipo_input === 'texto'" type="text" :id="campo.nombre_campo_tecnico" v-model="formState[campo.nombre_campo_tecnico]" :required="campo.es_obligatorio" class="form-input mt-1" />
-                <v-select v-else-if="campo.tipo_input === 'select_cliente'" :id="campo.nombre_campo_tecnico" v-model="formState.cliente_id" :options="opcionesSelect.clientes" taggable :create-option="(newOption) => newOption" placeholder="-- Buscar o crear cliente --" class="mt-1" :class="{ 'v-select-required': campo.es_obligatorio && !formState.cliente_id }"></v-select>
-                <v-select v-else-if="campo.tipo_input === 'select_transporte'" :id="campo.nombre_campo_tecnico" v-model="formState.transporte_id" :options="opcionesSelect.transportes" taggable :create-option="(newOption) => newOption" placeholder="-- Buscar o crear transporte --" class="mt-1" :class="{ 'v-select-required': campo.es_obligatorio && !formState.transporte_id }"></v-select>
-            </div></div></fieldset>
-          
-          <transition enter-active-class="transition ease-out duration-300" enter-from-class="opacity-0 -translate-y-2" enter-to-class="opacity-100 translate-y-0" leave-active-class="transition ease-in duration-200" leave-from-class="opacity-100 translate-y-0" leave-to-class="opacity-0 -translate-y-2">
-            <fieldset v-if="showTransporteFields" class="mt-8">
-              <legend class="form-legend">Detalles del Trayecto</legend>
-              <div class="grid grid-cols-1 sm:grid-cols-2 gap-6 mt-4">
-                <div class="space-y-4">
+            <!-- Para todos los demás tipos de gasto -->
+            <div v-else class="space-y-6">
+              <fieldset>
+                <div class="grid grid-cols-1 sm:grid-cols-2 gap-6">
+                  <div class="sm:col-span-2 input-wrapper"><label for="descripcion_general" class="form-label">Descripción General</label><input type="text" id="descripcion_general" v-model="formState.descripcion_general" class="form-input mt-1" placeholder="Ej: Nafta YPF, Almuerzo en..." /></div>
                   <div class="input-wrapper">
-                    <label for="provincia_origen" class="form-label">Provincia Origen</label>
-                    <v-select id="provincia_origen" v-model="formState.provincia_origen_id" :options="opcionesSelect.provincias" :loading="loadingSelects.provincias" :reduce="option => option.value" placeholder="Seleccione..." class="mt-1"></v-select>
-                  </div>
-                  <div class="input-wrapper">
-                    <label for="localidad_origen" class="form-label">Localidad Origen</label>
-                    <!-- INICIO CORRECCIÓN: Se elimina la propiedad :reduce -->
-                    <v-select id="localidad_origen" v-model="formState.localidad_origen_id" :options="opcionesSelect.localidadesOrigen" :loading="loadingSelects.localidadesOrigen" :disabled="!formState.provincia_origen_id || loadingSelects.localidadesOrigen" taggable :create-option="newOption => newOption" placeholder="Seleccione o escriba..." class="mt-1"></v-select>
-                    <!-- FIN CORRECCIÓN -->
+                    <label for="provincia_id" class="form-label">Provincia del Gasto</label>
+                    <v-select 
+                      id="provincia_id" 
+                      v-model="formState.provincia_id" 
+                      :options="opcionesSelect.provincias"
+                      :reduce="option => option.value"
+                      placeholder="Seleccione una provincia..."
+                      class="mt-1">
+                    </v-select>
                   </div>
                 </div>
-                <div class="space-y-4">
-                  <div class="input-wrapper">
-                    <label for="provincia_destino" class="form-label">Provincia Destino</label>
-                    <v-select id="provincia_destino" v-model="formState.provincia_destino_id" :options="opcionesSelect.provincias" :loading="loadingSelects.provincias" :reduce="option => option.value" placeholder="Seleccione..." class="mt-1"></v-select>
-                  </div>
-                  <div class="input-wrapper">
-                    <label for="localidad_destino" class="form-label">Localidad Destino</label>
-                    <!-- INICIO CORRECCIÓN: Se elimina la propiedad :reduce -->
-                    <v-select id="localidad_destino" v-model="formState.localidad_destino_id" :options="opcionesSelect.localidadesDestino" :loading="loadingSelects.localidadesDestino" :disabled="!formState.provincia_destino_id || loadingSelects.localidadesDestino" taggable :create-option="newOption => newOption" placeholder="Seleccione o escriba..." class="mt-1"></v-select>
-                    <!-- FIN CORRECCIÓN -->
-                  </div>
-                </div>
-              </div>
-            </fieldset>
-          </transition>
-
-          <div class="border-t border-gray-200 pt-6 mt-8">
-            <h3 class="text-base font-semibold leading-7 text-gray-900">¿Necesitas más detalles?</h3>
-            <p class="mt-1 text-sm leading-6 text-gray-600">Añade solo los campos que necesites para este gasto.</p>
-            <div class="mt-4 flex flex-wrap gap-3">
-              <template v-for="campo in camposOpcionalesVisiblesPorTipo" :key="`btn-${campo.id}`">
-                <button v-if="!camposOpcionalesVisibles.has(campo.nombre_campo_tecnico)" type="button" @click="agregarCampoOpcional(campo)" class="btn-add-optional">+ {{ campo.etiqueta_visible }}</button>
-              </template>
-              <button v-if="!isCuentaCorrienteEmpresa && !camposOpcionalesVisibles.has('vehiculo_id')" type="button" @click="agregarCampoOpcional({nombre_campo_tecnico: 'vehiculo_id'})" class="btn-add-optional">+ Vehículo</button>
-            </div>
+              </fieldset>
             
-            <fieldset v-if="hasCamposOpcionalesRenderizados" class="mt-6">
-              <div class="grid grid-cols-1 sm:grid-cols-2 gap-6">
-                <template v-for="campo in camposOpcionalesSeleccionadosVisibles" :key="campo.id">
-                  <div class="relative group input-wrapper">
-                    <label :for="`opcional-${campo.nombre_campo_tecnico}`" class="form-label">{{ campo.etiqueta_visible }}</label>
-                    <v-select v-if="isProveedorField(campo)" :id="`opcional-${campo.nombre_campo_tecnico}`" v-model="formState.proveedor_id" :options="opcionesSelect.proveedores" :loading="loadingSelects.proveedores" taggable :create-option="createEntityOption" placeholder="-- Buscar o crear proveedor --" class="mt-1"></v-select>
-                    <v-select v-else-if="campo.tipo_input === 'selector_simple'" :id="`opcional-${campo.nombre_campo_tecnico}`" v-model="formState[campo.nombre_campo_tecnico]" :options="getSelectorSimpleOptions(campo)" :reduce="option => option.value" placeholder="Seleccione..." class="mt-1"></v-select>
-                    <input v-else-if="campo.tipo_input === 'texto'" type="text" :id="`opcional-${campo.nombre_campo_tecnico}`" v-model="formState[campo.nombre_campo_tecnico]" class="form-input mt-1" />
-                    <v-select v-else-if="campo.tipo_input === 'select_cliente'" :id="`opcional-${campo.nombre_campo_tecnico}`" v-model="formState.cliente_id" :options="opcionesSelect.clientes" taggable :create-option="(newOption) => newOption" placeholder="-- Buscar o crear cliente --" class="mt-1"></v-select>
-                    <v-select v-else-if="campo.tipo_input === 'select_transporte'" :id="`opcional-${campo.nombre_campo_tecnico}`" v-model="formState.transporte_id" :options="opcionesSelect.transportes" taggable :create-option="(newOption) => newOption" placeholder="-- Buscar o crear transporte --" class="mt-1"></v-select>
-                    <button type="button" @click="quitarCampoOpcional(campo)" class="btn-remove-optional" aria-label="Quitar campo"><svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z" clip-rule="evenodd" /></svg></button>
+              <fieldset v-if="camposObligatoriosVisibles.length > 0" class="mt-8"><legend class="form-legend">Detalles Específicos del Formato</legend><div class="grid grid-cols-1 sm:grid-cols-2 gap-6"><div v-for="campo in camposObligatoriosVisibles" :key="campo.id" class="input-wrapper"><label :for="campo.nombre_campo_tecnico" class="form-label">{{ campo.etiqueta_visible }} <span v-if="campo.es_obligatorio" class="text-red-500">*</span></label><v-select v-if="isProveedorField(campo)" :id="campo.nombre_campo_tecnico" v-model="formState.proveedor_id" :options="opcionesSelect.proveedores" :loading="loadingSelects.proveedores" taggable :create-option="createEntityOption" placeholder="-- Buscar o crear proveedor --" class="mt-1" :class="{ 'v-select-required': campo.es_obligatorio && !formState.proveedor_id }"></v-select><v-select v-else-if="campo.tipo_input === 'selector_simple'" :id="campo.nombre_campo_tecnico" v-model="formState[campo.nombre_campo_tecnico]" :options="getSelectorSimpleOptions(campo)" :reduce="option => option.value" placeholder="Seleccione..." class="mt-1" :class="{ 'v-select-required': campo.es_obligatorio && !formState[campo.nombre_campo_tecnico] }"></v-select><input v-else-if="campo.tipo_input === 'texto'" type="text" :id="campo.nombre_campo_tecnico" v-model="formState[campo.nombre_campo_tecnico]" :required="campo.es_obligatorio" class="form-input mt-1" />
+                  <v-select v-else-if="campo.tipo_input === 'select_cliente'" :id="campo.nombre_campo_tecnico" v-model="formState.cliente_id" :options="opcionesSelect.clientes" taggable :create-option="(newOption) => newOption" placeholder="-- Buscar o crear cliente --" class="mt-1" :class="{ 'v-select-required': campo.es_obligatorio && !formState.cliente_id }"></v-select>
+                  <v-select v-else-if="campo.tipo_input === 'select_transporte'" :id="campo.nombre_campo_tecnico" v-model="formState.transporte_id" :options="opcionesSelect.transportes" taggable :create-option="(newOption) => newOption" placeholder="-- Buscar o crear transporte --" class="mt-1" :class="{ 'v-select-required': campo.es_obligatorio && !formState.transporte_id }"></v-select>
+              </div></div></fieldset>
+            
+              <transition enter-active-class="transition ease-out duration-300" enter-from-class="opacity-0 -translate-y-2" enter-to-class="opacity-100 translate-y-0" leave-active-class="transition ease-in duration-200" leave-from-class="opacity-100 translate-y-0" leave-to-class="opacity-0 -translate-y-2">
+                <fieldset v-if="showTransporteFields" class="mt-8">
+                  <legend class="form-legend">Detalles del Trayecto</legend>
+                  <div class="grid grid-cols-1 sm:grid-cols-2 gap-6 mt-4">
+                    <div class="space-y-4">
+                      <div class="input-wrapper">
+                        <label for="provincia_origen" class="form-label">Provincia Origen</label>
+                        <v-select id="provincia_origen" v-model="formState.provincia_origen_id" :options="opcionesSelect.provincias" :loading="loadingSelects.provincias" :reduce="option => option.value" placeholder="Seleccione..." class="mt-1"></v-select>
+                      </div>
+                      <div class="input-wrapper">
+                        <label for="localidad_origen" class="form-label">Localidad Origen</label>
+                        <!-- INICIO CORRECCIÓN: Se elimina la propiedad :reduce -->
+                        <v-select id="localidad_origen" v-model="formState.localidad_origen_id" :options="opcionesSelect.localidadesOrigen" :loading="loadingSelects.localidadesOrigen" :disabled="!formState.provincia_origen_id || loadingSelects.localidadesOrigen" taggable :create-option="newOption => newOption" placeholder="Seleccione o escriba..." class="mt-1"></v-select>
+                        <!-- FIN CORRECCIÓN -->
+                      </div>
+                    </div>
+                    <div class="space-y-4">
+                      <div class="input-wrapper">
+                        <label for="provincia_destino" class="form-label">Provincia Destino</label>
+                        <v-select id="provincia_destino" v-model="formState.provincia_destino_id" :options="opcionesSelect.provincias" :loading="loadingSelects.provincias" :reduce="option => option.value" placeholder="Seleccione..." class="mt-1"></v-select>
+                      </div>
+                      <div class="input-wrapper">
+                        <label for="localidad_destino" class="form-label">Localidad Destino</label>
+                        <!-- INICIO CORRECCIÓN: Se elimina la propiedad :reduce -->
+                        <v-select id="localidad_destino" v-model="formState.localidad_destino_id" :options="opcionesSelect.localidadesDestino" :loading="loadingSelects.localidadesDestino" :disabled="!formState.provincia_destino_id || loadingSelects.localidadesDestino" taggable :create-option="newOption => newOption" placeholder="Seleccione o escriba..." class="mt-1"></v-select>
+                        <!-- FIN CORRECCIÓN -->
+                      </div>
+                    </div>
                   </div>
-                </template>
-                
-                <div v-if="showVehiculoOpcional" class="relative group input-wrapper sm:col-span-2 p-4 border border-gray-200 rounded-lg bg-gray-50">
-                   <button type="button" @click="quitarCampoOpcional({nombre_campo_tecnico: 'vehiculo_id'})" class="btn-remove-optional" aria-label="Quitar sección de vehículo"><svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z" clip-rule="evenodd" /></svg></button>
-                   <div class="grid grid-cols-1 sm:grid-cols-3 gap-4">
-                      <div class="relative z-20">
-                        <label for="vehiculo_id" class="form-label">Unidad</label>
-                        <v-select id="vehiculo_id" v-model="formState.vehiculo_id" :options="opcionesSelect.vehiculos" :loading="loadingSelects.vehiculos" placeholder="-- Seleccionar --" class="mt-1 bg-white"></v-select>
-                      </div>
-                      <div class="relative z-10">
-                        <label for="kilometraje_actual" class="form-label">KM Actual</label>
-                        <input type="number" id="kilometraje_actual" v-model="formState.kilometraje_actual" class="form-input mt-1" placeholder="Ej: 150000" />
-                      </div>
-                      <div class="relative z-10">
-                        <label for="numero_remito_vehiculo" class="form-label">N° Remito</label>
-                        <input type="text" id="numero_remito_vehiculo" v-model="formState.numero_remito_vehiculo" class="form-input mt-1" />
-                      </div>
-                   </div>
+                </fieldset>
+              </transition>
+
+              <div class="border-t border-gray-200 pt-6 mt-8">
+                <h3 class="text-base font-semibold leading-7 text-gray-900">¿Necesitas más detalles?</h3>
+                <p class="mt-1 text-sm leading-6 text-gray-600">Añade solo los campos que necesites para este gasto.</p>
+                <div class="mt-4 flex flex-wrap gap-3">
+                  <template v-for="campo in camposOpcionalesVisiblesPorTipo" :key="`btn-${campo.id}`">
+                    <button v-if="!camposOpcionalesVisibles.has(campo.nombre_campo_tecnico)" type="button" @click="agregarCampoOpcional(campo)" class="btn-add-optional">+ {{ campo.etiqueta_visible }}</button>
+                  </template>
+                  <button v-if="!isCuentaCorrienteEmpresa && !camposOpcionalesVisibles.has('vehiculo_id')" type="button" @click="agregarCampoOpcional({nombre_campo_tecnico: 'vehiculo_id'})" class="btn-add-optional">+ Vehículo</button>
                 </div>
+                
+                <fieldset v-if="hasCamposOpcionalesRenderizados" class="mt-6">
+                  <div class="grid grid-cols-1 sm:grid-cols-2 gap-6">
+                    <template v-for="campo in camposOpcionalesSeleccionadosVisibles" :key="campo.id">
+                      <div class="relative group input-wrapper">
+                        <label :for="`opcional-${campo.nombre_campo_tecnico}`" class="form-label">{{ campo.etiqueta_visible }}</label>
+                        <v-select v-if="isProveedorField(campo)" :id="`opcional-${campo.nombre_campo_tecnico}`" v-model="formState.proveedor_id" :options="opcionesSelect.proveedores" :loading="loadingSelects.proveedores" taggable :create-option="createEntityOption" placeholder="-- Buscar o crear proveedor --" class="mt-1"></v-select>
+                        <v-select v-else-if="campo.tipo_input === 'selector_simple'" :id="`opcional-${campo.nombre_campo_tecnico}`" v-model="formState[campo.nombre_campo_tecnico]" :options="getSelectorSimpleOptions(campo)" :reduce="option => option.value" placeholder="Seleccione..." class="mt-1"></v-select>
+                        <input v-else-if="campo.tipo_input === 'texto'" type="text" :id="`opcional-${campo.nombre_campo_tecnico}`" v-model="formState[campo.nombre_campo_tecnico]" class="form-input mt-1" />
+                        <v-select v-else-if="campo.tipo_input === 'select_cliente'" :id="`opcional-${campo.nombre_campo_tecnico}`" v-model="formState.cliente_id" :options="opcionesSelect.clientes" taggable :create-option="(newOption) => newOption" placeholder="-- Buscar o crear cliente --" class="mt-1"></v-select>
+                        <v-select v-else-if="campo.tipo_input === 'select_transporte'" :id="`opcional-${campo.nombre_campo_tecnico}`" v-model="formState.transporte_id" :options="opcionesSelect.transportes" taggable :create-option="(newOption) => newOption" placeholder="-- Buscar o crear transporte --" class="mt-1"></v-select>
+                        <button type="button" @click="quitarCampoOpcional(campo)" class="btn-remove-optional" aria-label="Quitar campo"><svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z" clip-rule="evenodd" /></svg></button>
+                      </div>
+                    </template>
+                    
+                    <div v-if="showVehiculoOpcional" class="relative group input-wrapper sm:col-span-2 p-4 border border-gray-200 rounded-lg bg-gray-50">
+                       <button type="button" @click="quitarCampoOpcional({nombre_campo_tecnico: 'vehiculo_id'})" class="btn-remove-optional" aria-label="Quitar sección de vehículo"><svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z" clip-rule="evenodd" /></svg></button>
+                       <div class="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                          <div class="relative z-20">
+                            <label for="vehiculo_id" class="form-label">Unidad</label>
+                            <v-select id="vehiculo_id" v-model="formState.vehiculo_id" :options="opcionesSelect.vehiculos" :loading="loadingSelects.vehiculos" placeholder="-- Seleccionar --" class="mt-1 bg-white"></v-select>
+                          </div>
+                          <div class="relative z-10">
+                            <label for="kilometraje_actual" class="form-label">KM Actual</label>
+                            <input type="number" id="kilometraje_actual" v-model="formState.kilometraje_actual" class="form-input mt-1" placeholder="Ej: 150000" />
+                          </div>
+                          <div class="relative z-10">
+                            <label for="numero_remito_vehiculo" class="form-label">N° Remito</label>
+                            <input type="text" id="numero_remito_vehiculo" v-model="formState.numero_remito_vehiculo" class="form-input mt-1" />
+                          </div>
+                       </div>
+                    </div>
+                  </div>
+                </fieldset>
               </div>
-            </fieldset>
+            </div>
           </div>
         </div>
       </div>
-      </div>
-      </div>
+    </div>
 
     <div class="fixed bottom-0 left-0 right-0 bg-white/80 backdrop-blur-sm border-t border-gray-200 shadow-lg-top z-10">
       <div class="max-w-3xl mx-auto px-6 sm:px-8 py-4">

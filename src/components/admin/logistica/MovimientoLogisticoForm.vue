@@ -587,11 +587,6 @@ watch(formState, (newVal) => {
               <span class="field-label">N° de Guía / Remito</span>
               <input v-model="formState.numero_guia" type="text" class="form-input" placeholder="Ej: 123456" />
             </label>
-
-            <label class="field-group md:col-span-2">
-              <span class="field-label">Observación Logística</span>
-              <input v-model="formState.observacion_logistica" type="text" class="form-input" placeholder="Notas internas de la operación" />
-            </label>
           </div>
         </div>
       </div>
@@ -771,11 +766,6 @@ watch(formState, (newVal) => {
       <label class="field-group">
         <span class="field-label">N° de Guía / Remito</span>
         <input v-model="formState.numero_guia" type="text" class="form-input" placeholder="Ej: 123456" />
-      </label>
-
-      <label class="field-group md:col-span-2">
-        <span class="field-label">Observación Logística</span>
-        <input v-model="formState.observacion_logistica" type="text" class="form-input" placeholder="Notas internas de la operación" />
       </label>
     </div>
   </div>
