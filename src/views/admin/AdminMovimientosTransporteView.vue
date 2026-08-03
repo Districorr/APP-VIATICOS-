@@ -525,7 +525,7 @@ const movimientosFiltrados = computed(() => {
     const transporteName = g.transportes?.nombre || '';
     const proveedorName = g.proveedores?.nombre || '';
     const provinciaName = g.provincias?.nombre || '';
-    const destinoText = extra.destino_texto || g.localidad_destino?.nombre || '';
+    const destinoText = extra.destino_texto || g.localidad_destino?.nombre || g.provincias?.nombre || g.provincia?.nombre || '';
     const descText = g.descripcion_general || '';
     const obsText = extra.observacion_logistica || '';
     const guiaText = g.numero_factura || extra.numero_guia || '';
@@ -962,7 +962,7 @@ function exportarExcelActivo() {
       Bultos: g.datos_adicionales?.cantidad_bultos ?? 'Sin datos',
       Sentido: g.datos_adicionales?.sentido_movimiento || 'ida',
       Provincia: g.provincias?.nombre || 'N/A',
-      Destino: g.datos_adicionales?.destino_texto || g.localidad_destino?.nombre || 'N/A',
+      Destino: g.datos_adicionales?.destino_texto || g.localidad_destino?.nombre || g.provincias?.nombre || g.provincia?.nombre || 'N/A',
       Importe: Number(g.monto_total) || 0,
       Guia_Remito: g.numero_factura || 'N/A',
       Observaciones: g.datos_adicionales?.observacion_logistica || ''
@@ -1387,7 +1387,7 @@ onMounted(fetchDatosLogistica);
                   <span v-else class="text-slate-400 font-normal">-</span>
                 </td>
                 <td class="px-4 py-3 capitalize text-slate-600">{{ g.datos_adicionales?.sentido_movimiento || 'ida' }}</td>
-                <td class="px-4 py-3 text-slate-600">{{ g.datos_adicionales?.destino_texto || g.localidad_destino?.nombre || 'Sin destino' }}</td>
+                <td class="px-4 py-3 text-slate-600">{{ g.datos_adicionales?.destino_texto || g.localidad_destino?.nombre || g.provincias?.nombre || g.provincia?.nombre || 'Sin destino' }}</td>
                 <td class="whitespace-nowrap px-4 py-3 text-right font-bold text-slate-900">{{ formatCurrency(g.monto_total) }}</td>
                 <td class="whitespace-nowrap px-4 py-3 text-center">
                   <div class="flex items-center justify-center gap-1.5">
@@ -1455,7 +1455,7 @@ onMounted(fetchDatosLogistica);
 
               <div class="flex justify-between text-slate-600">
                 <span>Destino:</span>
-                <strong class="text-slate-800 truncate max-w-[150px]">{{ g.datos_adicionales?.destino_texto || g.localidad_destino?.nombre || 'Sin destino' }}</strong>
+                <strong class="text-slate-800 truncate max-w-[150px]">{{ g.datos_adicionales?.destino_texto || g.localidad_destino?.nombre || g.provincias?.nombre || g.provincia?.nombre || 'Sin destino' }}</strong>
               </div>
             </div>
           </div>
@@ -1719,7 +1719,7 @@ onMounted(fetchDatosLogistica);
                 <td class="whitespace-nowrap px-4 py-2.5 text-slate-600">{{ formatDate(g.fecha_gasto) }}</td>
                 <td class="px-4 py-2.5 text-slate-700">{{ g.proveedores?.nombre || 'Sin proveedor' }}</td>
                 <td class="px-4 py-2.5 font-semibold text-slate-900">{{ getClientePacienteDisplay(g).principal }}</td>
-                <td class="px-4 py-2.5 text-slate-600">{{ g.datos_adicionales?.destino_texto || g.localidad_destino?.nombre || 'Sin destino' }}</td>
+                <td class="px-4 py-2.5 text-slate-600">{{ g.datos_adicionales?.destino_texto || g.localidad_destino?.nombre || g.provincias?.nombre || g.provincia?.nombre || 'Sin destino' }}</td>
                 <td class="px-4 py-2.5 text-center font-bold text-indigo-700">
                   <span v-if="g.datos_adicionales?.cantidad_bultos !== undefined && g.datos_adicionales?.cantidad_bultos !== null && g.datos_adicionales?.cantidad_bultos !== ''">
                     {{ g.datos_adicionales.cantidad_bultos }}
@@ -1915,7 +1915,7 @@ onMounted(fetchDatosLogistica);
             <div><span class="text-slate-500 font-semibold block">Bultos:</span><strong class="text-slate-900 font-bold text-indigo-600">{{ gastoSeleccionadoDetalle.datos_adicionales?.cantidad_bultos ?? 'Sin datos' }}</strong></div>
             <div><span class="text-slate-500 font-semibold block">Guía / Remito:</span><strong class="text-slate-900">{{ gastoSeleccionadoDetalle.numero_factura || 'N/A' }}</strong></div>
             <div><span class="text-slate-500 font-semibold block">Provincia:</span><strong class="text-slate-900">{{ gastoSeleccionadoDetalle.provincias?.nombre || 'N/A' }}</strong></div>
-            <div><span class="text-slate-500 font-semibold block">Destino:</span><strong class="text-slate-900">{{ gastoSeleccionadoDetalle.datos_adicionales?.destino_texto || gastoSeleccionadoDetalle.localidad_destino?.nombre || 'N/A' }}</strong></div>
+            <div><span class="text-slate-500 font-semibold block">Destino:</span><strong class="text-slate-900">{{ gastoSeleccionadoDetalle.datos_adicionales?.destino_texto || gastoSeleccionadoDetalle.localidad_destino?.nombre || gastoSeleccionadoDetalle.provincias?.nombre || gastoSeleccionadoDetalle.provincia?.nombre || 'N/A' }}</strong></div>
           </div>
           <div><span class="text-slate-500 font-semibold block">Descripción General:</span><p class="text-slate-800 bg-slate-50 p-2 rounded mt-1">{{ gastoSeleccionadoDetalle.descripcion_general || 'Sin descripción' }}</p></div>
           <div v-if="gastoSeleccionadoDetalle.datos_adicionales?.observacion_logistica"><span class="text-slate-500 font-semibold block">Observación Logística:</span><p class="text-slate-800 bg-slate-50 p-2 rounded mt-1">{{ gastoSeleccionadoDetalle.datos_adicionales.observacion_logistica }}</p></div>

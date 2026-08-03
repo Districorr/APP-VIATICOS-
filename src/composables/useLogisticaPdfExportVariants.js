@@ -76,8 +76,12 @@ export function useLogisticaPdfExportVariants() {
   function getDestinoLimpio(g) {
     const extra = g.datos_adicionales || {};
     const dest = (extra.destino_texto || g.localidad_destino?.nombre || '').trim();
-    if (!dest || dest.toLowerCase().includes('sin destino')) return '—';
-    return dest;
+    if (dest && !dest.toLowerCase().includes('sin destino')) return dest;
+
+    const prov = (g.provincias?.nombre || g.provincia?.nombre || g.provincia_destino?.nombre || g.provincia_nombre || '').trim();
+    if (prov && !prov.toLowerCase().includes('sin provincia')) return prov;
+
+    return '—';
   }
 
   /**
