@@ -106,101 +106,35 @@ const closeModal = () => {
   emit('update:modelValue', false);
 };
 
+import { useLogisticaPdfExportVariants } from '../../composables/useLogisticaPdfExportVariants.js';
+
+const { exportarPdfCtaCteVencimientos } = useLogisticaPdfExportVariants();
+
+const mayorProveedorInfo = computed(() => {
+  if (items.value.length === 0) return { nombre: '—', total: 0, pct: '0%' };
+  const provMap = {};
+  items.value.forEach(item => {
+    const name = item.proveedor?.nombre || 'SIN PROVEEDOR';
+    provMap[name] = (provMap[name] || 0) + Number(item.monto_total || 0);
+  });
+  let topName = '—';
+  let maxVal = 0;
+  Object.entries(provMap).forEach(([name, val]) => {
+    if (val > maxVal) { maxVal = val; topName = name; }
+  });
+  const pct = totalAmount.value > 0 ? ((maxVal / totalAmount.value) * 100).toFixed(1) + '%' : '0%';
+  return { nombre: `${topName} (${pct})`, total: maxVal, pct };
+});
+
 const downloadPDF = () => {
   if (items.value.length === 0) return;
   
   try {
-    const doc = new jsPDF();
-    const margin = 12;
-    let y = 14;
-
-    // Cabecera plana tipo ERP
-    doc.setFont('helvetica', 'bold');
-    doc.setFontSize(11);
-    doc.setTextColor(0, 0, 0);
-    doc.text('INFO-GASTOS DISTRICORR - LIBRO MAYOR DE CUENTA CORRIENTE', margin, y);
-    
-    y += 5;
-    doc.setFont('helvetica', 'normal');
-    doc.setFontSize(8.5);
-    doc.setTextColor(0, 0, 0);
-    const infoText = `Mes Vencimiento: ${originPeriod.value.vencimientoLabel.toUpperCase()} | Origen: ${originPeriod.value.label} | Total: ${formatCurrency(totalAmount.value)} | Operaciones: ${items.value.length} despachos | Generado: ${new Date().toLocaleDateString('es-AR')} ${new Date().toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit' })} hs`;
-    doc.text(infoText, margin, y);
-    
-    y += 3;
-    doc.setDrawColor(0, 0, 0);
-    doc.setLineWidth(0.3);
-    doc.line(margin, y, doc.internal.pageSize.width - margin, y);
-    
-    y += 6;
-    doc.setFont('helvetica', 'bold');
-    doc.setFontSize(9);
-    doc.setTextColor(0, 0, 0);
-    doc.text('RESUMEN DE VENCIMIENTOS POR PROVEEDOR', margin, y);
-
-    // Agrupación por proveedor para mostrar un resumen ejecutivo
-    const provGroups = items.value.reduce((acc, item) => {
-      const name = item.proveedor?.nombre || 'SIN PROVEEDOR';
-      acc[name] = (acc[name] || 0) + Number(item.monto_total || 0);
-      return acc;
-    }, {});
-
-    const provTableRows = Object.entries(provGroups).map(([name, total]) => [
-      name,
-      formatCurrency(total)
-    ]);
-
-    y += 3;
-    doc.autoTable({
-      startY: y,
-      head: [['Proveedor', 'Total Vencimiento']],
-      body: provTableRows,
-      theme: 'grid',
-      styles: { fontSize: 7.5, cellPadding: 1, textColor: [0, 0, 0], lineColor: [200, 200, 200] },
-      headStyles: { fillColor: [60, 60, 60], fontSize: 8, fontStyle: 'bold', cellPadding: 1.2, textColor: [255, 255, 255] },
-      columnStyles: {
-        0: { cellWidth: 'auto' },
-        1: { halign: 'right', fontStyle: 'bold', cellWidth: 35 }
-      },
-      margin: { left: margin, right: margin }
+    exportarPdfCtaCteVencimientos(items.value, {
+      vencimientoLabel: originPeriod.value?.vencimientoLabel,
+      originLabel: originPeriod.value?.label,
+      selectedMonth: selectedMonth.value
     });
-
-    // Detalle de operaciones
-    y = doc.lastAutoTable.finalY + 8;
-    doc.setFont('helvetica', 'bold');
-    doc.setFontSize(9);
-    doc.setTextColor(0, 0, 0);
-    doc.text('DETALLE DE OPERACIONES EN CUENTA CORRIENTE', margin, y);
-
-    const detailRows = items.value.map(item => [
-      formatDate(item.fecha_gasto),
-      item.proveedor?.nombre || 'SIN PROVEEDOR',
-      item.transporte?.nombre || 'N/A',
-      item.descripcion_general || 'Pago de encomienda',
-      item.numero_factura || '—',
-      formatCurrency(item.monto_total)
-    ]);
-
-    y += 3;
-    doc.autoTable({
-      startY: y,
-      head: [['Fecha', 'Proveedor', 'Operador Log.', 'Detalle / Concepto', 'N° Factura', 'Importe']],
-      body: detailRows,
-      theme: 'striped',
-      styles: { fontSize: 7, cellPadding: 1, textColor: [0, 0, 0], lineColor: [220, 220, 220] },
-      headStyles: { fillColor: [60, 60, 60], fontSize: 7.5, fontStyle: 'bold', cellPadding: 1.2, textColor: [255, 255, 255] },
-      columnStyles: {
-        0: { cellWidth: 16 }, // Fecha
-        1: { cellWidth: 30 }, // Proveedor
-        2: { cellWidth: 26 }, // Operador Log.
-        3: { cellWidth: 'auto' }, // Detalle / Concepto
-        4: { cellWidth: 25 }, // N° Factura
-        5: { cellWidth: 23, halign: 'right', fontStyle: 'bold' } // Importe
-      },
-      margin: { left: margin, right: margin }
-    });
-
-    doc.save(`vencimientos_cta_cte_${selectedMonth.value}.pdf`);
     emit('show-notification', 'PDF descargado', 'El Libro Mayor de vencimientos fue descargado.', 'success');
   } catch (e) {
     console.error('Error generando PDF de vencimientos:', e);
@@ -269,18 +203,22 @@ watch(selectedMonth, () => {
           <div v-else class="space-y-4">
             
             <!-- Resumen de tarjetas -->
-            <div class="grid grid-cols-1 gap-4 sm:grid-cols-3">
-              <div class="rounded-xl border border-slate-200 p-4 bg-slate-50">
-                <span class="block text-xs font-bold uppercase tracking-wider text-slate-500">Monto total a vencer</span>
-                <strong class="mt-1 block text-2xl font-bold text-slate-900">{{ formatCurrency(totalAmount) }}</strong>
+            <div class="grid grid-cols-1 gap-3 sm:grid-cols-4">
+              <div class="rounded-xl border border-slate-200 p-3 bg-slate-50">
+                <span class="block text-[10px] font-bold uppercase tracking-wider text-slate-500">Monto total a vencer</span>
+                <strong class="mt-0.5 block text-lg font-bold text-slate-900">{{ formatCurrency(totalAmount) }}</strong>
               </div>
-              <div class="rounded-xl border border-slate-200 p-4 bg-slate-50">
-                <span class="block text-xs font-bold uppercase tracking-wider text-slate-500">Cantidad operaciones</span>
-                <strong class="mt-1 block text-2xl font-bold text-slate-900">{{ items.length }} despachos</strong>
+              <div class="rounded-xl border border-slate-200 p-3 bg-slate-50">
+                <span class="block text-[10px] font-bold uppercase tracking-wider text-slate-500">Cantidad operaciones</span>
+                <strong class="mt-0.5 block text-lg font-bold text-slate-900">{{ items.length }} despachos</strong>
               </div>
-              <div class="rounded-xl border border-slate-200 p-4 bg-slate-50">
-                <span class="block text-xs font-bold uppercase tracking-wider text-slate-500">Promedio por despacho</span>
-                <strong class="mt-1 block text-2xl font-bold text-slate-900">{{ formatCurrency(totalAmount / items.length) }}</strong>
+              <div class="rounded-xl border border-slate-200 p-3 bg-slate-50">
+                <span class="block text-[10px] font-bold uppercase tracking-wider text-slate-500">Promedio por despacho</span>
+                <strong class="mt-0.5 block text-lg font-bold text-slate-900">{{ formatCurrency(totalAmount / (items.length || 1)) }}</strong>
+              </div>
+              <div class="rounded-xl border border-slate-200 p-3 bg-slate-50">
+                <span class="block text-[10px] font-bold uppercase tracking-wider text-slate-500">Mayor Proveedor</span>
+                <strong class="mt-0.5 block text-lg font-bold text-indigo-600 truncate" :title="mayorProveedorInfo.nombre">{{ mayorProveedorInfo.nombre }}</strong>
               </div>
             </div>
 
@@ -290,22 +228,33 @@ watch(selectedMonth, () => {
                 <table class="min-w-full divide-y divide-slate-200">
                   <thead class="bg-slate-50 sticky top-0">
                     <tr>
+                      <th class="px-3 py-2 text-center text-xs font-bold uppercase tracking-wider text-slate-500 w-10">N°</th>
                       <th class="px-4 py-2 text-left text-xs font-bold uppercase tracking-wider text-slate-500">Fecha</th>
                       <th class="px-4 py-2 text-left text-xs font-bold uppercase tracking-wider text-slate-500">Proveedor</th>
                       <th class="px-4 py-2 text-left text-xs font-bold uppercase tracking-wider text-slate-500">Operador Log.</th>
                       <th class="px-4 py-2 text-left text-xs font-bold uppercase tracking-wider text-slate-500">Detalle</th>
+                      <th class="px-4 py-2 text-center text-xs font-bold uppercase tracking-wider text-slate-500">N° Factura</th>
                       <th class="px-4 py-2 text-right text-xs font-bold uppercase tracking-wider text-slate-500">Monto</th>
                     </tr>
                   </thead>
                   <tbody class="bg-white divide-y divide-slate-100 text-xs">
-                    <tr v-for="item in items" :key="item.id" class="hover:bg-slate-50">
+                    <tr v-for="(item, idx) in items" :key="item.id" class="hover:bg-slate-50">
+                      <td class="px-3 py-2.5 text-center font-bold text-slate-400 w-10">{{ idx + 1 }}</td>
                       <td class="px-4 py-2.5 whitespace-nowrap text-slate-600">{{ formatDate(item.fecha_gasto) }}</td>
                       <td class="px-4 py-2.5 font-semibold text-slate-800">{{ item.proveedor?.nombre || 'SIN PROVEEDOR' }}</td>
                       <td class="px-4 py-2.5 text-slate-600">{{ item.transporte?.nombre || 'N/A' }}</td>
                       <td class="px-4 py-2.5 text-slate-500 truncate max-w-xs">{{ item.descripcion_general || 'Pago de encomienda' }}</td>
+                      <td class="px-4 py-2.5 text-center text-slate-600 font-mono">{{ item.numero_factura || '—' }}</td>
                       <td class="px-4 py-2.5 text-right font-bold text-slate-900">{{ formatCurrency(item.monto_total) }}</td>
                     </tr>
                   </tbody>
+                  <tfoot v-if="items.length > 0" class="bg-slate-100 font-bold text-xs text-slate-900 border-t-2 border-slate-300">
+                    <tr>
+                      <td class="px-4 py-3" colspan="2">TOTAL ({{ items.length }} registros)</td>
+                      <td class="px-4 py-3" colspan="4"></td>
+                      <td class="px-4 py-3 text-right text-indigo-700 text-sm font-extrabold">{{ formatCurrency(totalAmount) }}</td>
+                    </tr>
+                  </tfoot>
                 </table>
               </div>
             </div>

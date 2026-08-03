@@ -265,6 +265,7 @@ export function useLogisticaPdfExportVariants() {
   }
 
   // =========================================================================
+  // =========================================================================
   // EXPORTACIÓN 2: RESUMEN POR TRANSPORTE — TONY (ESTRICTO MÁXIMO 1 PÁGINA)
   // =========================================================================
   function exportarPdfResumenTransportes(resumenTransportes, todosMovimientos, context = {}) {
@@ -278,39 +279,87 @@ export function useLogisticaPdfExportVariants() {
     const totalGasto = resumenTransportes.reduce((acc, t) => acc + (t.montoTotal || 0), 0);
     const totalMovs = resumenTransportes.reduce((acc, t) => acc + (t.movimientos || 0), 0);
     const cantTransportes = resumenTransportes.length;
-    const topTrans = resumenTransportes.length > 0 ? resumenTransportes[0].nombre : '—';
+    const topTransObj = resumenTransportes.length > 0 ? resumenTransportes[0] : null;
+    const topTrans = topTransObj ? topTransObj.nombre : '—';
+    const topTransPct = (topTransObj && totalGasto > 0) ? ((topTransObj.montoTotal / totalGasto) * 100).toFixed(1) + '%' : '0%';
+    const globalPromedio = totalMovs > 0 ? totalGasto / totalMovs : 0;
 
-    doc.setFillColor(248, 250, 252);
-    doc.setDrawColor(226, 232, 240);
-    doc.roundedRect(10, currentY, 277, 7, 1, 1, 'FD');
+    // KPI Cards dibujados con estética ejecutiva elegante (4 tarjetas)
+    const kpiCards = [
+      { label: 'TOTAL LOGÍSTICA', val: formatCurrency(totalGasto) },
+      { label: 'MOVIMIENTOS TOTALES', val: `${totalMovs} envíos` },
+      { label: 'TRANSPORTES ACTIVOS', val: `${cantTransportes} empresas` },
+      { label: 'MAYOR PARTICIPACIÓN', val: `${topTrans} (${topTransPct})` }
+    ];
 
-    doc.setFontSize(7.5);
-    doc.setFont('helvetica', 'bold');
-    doc.setTextColor(30, 41, 59);
+    const cardMargin = 10;
+    const cardGap = 3;
+    const totalCardWidth = 277; // 297 - 20
+    const cardWidth = (totalCardWidth - (kpiCards.length - 1) * cardGap) / kpiCards.length;
+    const cardHeight = 10.5;
 
-    const kpiStr = `TOTAL LOGISTICA: ${formatCurrency(totalGasto)}    |    MOVIMIENTOS: ${totalMovs}    |    TRANSPORTES ACTIVOS: ${cantTransportes}    |    PRINCIPAL TRANSPORTE: ${topTrans}`;
-    doc.text(kpiStr, 13, currentY + 4.8);
+    kpiCards.forEach((c, idx) => {
+      const x = cardMargin + idx * (cardWidth + cardGap);
+      
+      // Fondo y borde suave
+      doc.setFillColor(248, 250, 252);
+      doc.setDrawColor(226, 232, 240);
+      doc.setLineWidth(0.3);
+      doc.roundedRect(x, currentY, cardWidth, cardHeight, 1, 1, 'FD');
 
-    currentY += 9.5;
+      // Línea superior de acento
+      doc.setFillColor(51, 65, 85);
+      doc.rect(x, currentY, cardWidth, 0.8, 'F');
 
+      // Label mini
+      doc.setFontSize(6);
+      doc.setFont('helvetica', 'bold');
+      doc.setTextColor(100, 116, 139);
+      doc.text(c.label, x + 3, currentY + 4);
+
+      // Valor grande
+      doc.setFontSize(8.5);
+      doc.setFont('helvetica', 'bold');
+      doc.setTextColor(15, 23, 42);
+      doc.text(c.val, x + 3, currentY + 8.5);
+    });
+
+    currentY += cardHeight + 4;
+
+    // Cálculo de rango de días y proyección / gasto diario
     const now = new Date();
-    const isCurrentMonthQuery = context.fechaDesde && context.fechaDesde.includes(String(now.getMonth() + 1).padStart(2, '0'));
-
-    const mainHeaders = isCurrentMonthQuery
-      ? [['Transporte', 'Movimientos', 'Zonas Cubiertas', 'Total ($)', 'Promedio', 'Participacion', 'Proyeccion Mes']]
-      : [['Transporte', 'Movimientos', 'Zonas Cubiertas', 'Total ($)', 'Promedio', 'Participacion', 'Variacion']];
-
     const currentDay = now.getDate();
     const daysInMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0).getDate();
+
+    let numDays = 0;
+    if (context.fechaDesde && context.fechaHasta) {
+      const partsD = context.fechaDesde.split('/');
+      const partsH = context.fechaHasta.split('/');
+      if (partsD.length === 3 && partsH.length === 3) {
+        const d1 = new Date(partsD[2], partsD[1] - 1, partsD[0]);
+        const d2 = new Date(partsH[2], partsH[1] - 1, partsH[0]);
+        const diffMs = d2 - d1;
+        if (!isNaN(diffMs)) {
+          numDays = Math.max(1, Math.round(diffMs / (1000 * 60 * 60 * 24)) + 1);
+        }
+      }
+    }
+
+    const isCurrentMonthQuery = context.fechaDesde && context.fechaDesde.includes(String(now.getMonth() + 1).padStart(2, '0'));
+    const colHeader7 = isCurrentMonthQuery ? 'Proyección Mes' : (numDays > 0 ? 'Gasto / Día' : 'Variación');
+
+    const mainHeaders = [['Transporte', 'Movimientos', 'Zonas Cubiertas', 'Total ($)', 'Promedio', 'Participación', colHeader7]];
 
     const mainRows = resumenTransportes.map(t => {
       const part = totalGasto > 0 ? ((t.montoTotal / totalGasto) * 100).toFixed(1) + '%' : '0%';
       const zonasStr = t.zonas && t.zonas !== 'Sin zona especificada' ? t.zonas : '—';
 
-      let varCol = '—';
+      let valCol7 = '—';
       if (isCurrentMonthQuery && currentDay > 0) {
         const proj = (t.montoTotal / currentDay) * daysInMonth;
-        varCol = formatCurrency(proj);
+        valCol7 = formatCurrency(proj);
+      } else if (numDays > 0) {
+        valCol7 = formatCurrency(t.montoTotal / numDays);
       }
 
       return [
@@ -320,24 +369,42 @@ export function useLogisticaPdfExportVariants() {
         formatCurrency(t.montoTotal || 0),
         formatCurrency(t.promedio || 0),
         part,
-        varCol
+        valCol7
       ];
     });
 
-    // Padding ultra ajustado a 1.0mm para asegurar 1 página independientemente de la cantidad de filas de transporte
+    let footCol7 = '—';
+    if (isCurrentMonthQuery && currentDay > 0) {
+      footCol7 = formatCurrency((totalGasto / currentDay) * daysInMonth);
+    } else if (numDays > 0) {
+      footCol7 = formatCurrency(totalGasto / numDays);
+    }
+
+    const mainFoot = [[
+      `TOTAL LOGÍSTICA (${cantTransportes} empresas)`,
+      String(totalMovs),
+      '—',
+      formatCurrency(totalGasto),
+      formatCurrency(globalPromedio),
+      '100.0%',
+      footCol7
+    ]];
+
     doc.autoTable({
       startY: currentY,
       head: mainHeaders,
       body: mainRows,
-      theme: 'grid',
-      styles: { fontSize: 7, cellPadding: 1.0, textColor: [30, 41, 59] },
+      foot: mainFoot,
+      theme: 'striped',
+      styles: { fontSize: 7, cellPadding: 1.2, textColor: [30, 41, 59] },
       headStyles: { fillColor: [30, 41, 59], textColor: [255, 255, 255], fontStyle: 'bold', fontSize: 7.5 },
+      footStyles: { fillColor: [241, 245, 249], textColor: [15, 23, 42], fontStyle: 'bold', fontSize: 7.5, lineWidth: { top: 0.4 }, lineColor: [51, 65, 85] },
       columnStyles: {
         0: { cellWidth: 65, fontStyle: 'bold' },
-        1: { cellWidth: 25, halign: 'center' },
-        2: { cellWidth: 70 },
+        1: { cellWidth: 22, halign: 'center' },
+        2: { cellWidth: 65 },
         3: { cellWidth: 38, halign: 'right', fontStyle: 'bold' },
-        4: { cellWidth: 34, halign: 'right' },
+        4: { cellWidth: 32, halign: 'right' },
         5: { cellWidth: 25, halign: 'center', fontStyle: 'bold' },
         6: { cellWidth: 30, halign: 'right' }
       },
@@ -517,9 +584,179 @@ export function useLogisticaPdfExportVariants() {
     doc.save(`Movimientos_Cliente_Paciente_Franco_${new Date().toISOString().split('T')[0]}.pdf`);
   }
 
+  // =========================================================================
+  // EXPORTACIÓN 4: LIBRO MAYOR DE CUENTA CORRIENTE — VENCIMIENTOS (CTA CTE)
+  // =========================================================================
+  function exportarPdfCtaCteVencimientos(items = [], context = {}) {
+    const doc = new jsPDF({ orientation: 'landscape', unit: 'mm', format: 'a4' });
+    const vencimientoLabel = context.vencimientoLabel || 'Mes en curso';
+    const originLabel = context.originLabel || 'Período anterior';
+    const periodText = `Mes Vencimiento: ${vencimientoLabel.toUpperCase()}  |  Origen de gastos: ${originLabel}`;
+    const filterText = 'Gastos en Cuenta Corriente de Empresa';
+
+    let currentY = renderHeaderCompact(doc, 'LIBRO MAYOR DE CUENTA CORRIENTE — VENCIMIENTOS', periodText, filterText);
+
+    const totalAmount = items.reduce((sum, item) => sum + Number(item.monto_total || 0), 0);
+    const cantOps = items.length;
+    const promedioOp = cantOps > 0 ? totalAmount / cantOps : 0;
+
+    // Agrupación por proveedor para ranking / KPI
+    const provGroups = items.reduce((acc, item) => {
+      const name = item.proveedor?.nombre || 'SIN PROVEEDOR';
+      if (!acc[name]) acc[name] = { nombre: name, total: 0, cant: 0 };
+      acc[name].total += Number(item.monto_total || 0);
+      acc[name].cant += 1;
+      return acc;
+    }, {});
+
+    const sortedProvs = Object.values(provGroups).sort((a, b) => b.total - a.total);
+    const topProv = sortedProvs.length > 0 ? sortedProvs[0] : null;
+    const topProvName = topProv ? topProv.nombre : '—';
+    const topProvPct = (topProv && totalAmount > 0) ? ((topProv.total / totalAmount) * 100).toFixed(1) + '%' : '0%';
+
+    // 4 KPI Cards Ejecutivos
+    const kpiCards = [
+      { label: 'MONTO TOTAL A VENCER', val: formatCurrency(totalAmount) },
+      { label: 'OPERACIONES EN CTA CTE', val: `${cantOps} despachos` },
+      { label: 'PROMEDIO POR DESPACHO', val: formatCurrency(promedioOp) },
+      { label: 'MAYOR VENCIMIENTO PROVEEDOR', val: `${topProvName} (${topProvPct})` }
+    ];
+
+    const cardMargin = 10;
+    const cardGap = 3;
+    const totalCardWidth = 277; // 297 - 20 mm
+    const cardWidth = (totalCardWidth - (kpiCards.length - 1) * cardGap) / kpiCards.length;
+    const cardHeight = 10.5;
+
+    kpiCards.forEach((c, idx) => {
+      const x = cardMargin + idx * (cardWidth + cardGap);
+      
+      doc.setFillColor(248, 250, 252);
+      doc.setDrawColor(226, 232, 240);
+      doc.setLineWidth(0.3);
+      doc.roundedRect(x, currentY, cardWidth, cardHeight, 1, 1, 'FD');
+
+      doc.setFillColor(79, 70, 229);
+      doc.rect(x, currentY, cardWidth, 0.8, 'F');
+
+      doc.setFontSize(6);
+      doc.setFont('helvetica', 'bold');
+      doc.setTextColor(100, 116, 139);
+      doc.text(c.label, x + 3, currentY + 4);
+
+      doc.setFontSize(8.5);
+      doc.setFont('helvetica', 'bold');
+      doc.setTextColor(15, 23, 42);
+      doc.text(c.val, x + 3, currentY + 8.5);
+    });
+
+    currentY += cardHeight + 4;
+
+    // TABLA 1: RESUMEN DE VENCIMIENTOS POR PROVEEDOR
+    doc.setFontSize(8);
+    doc.setFont('helvetica', 'bold');
+    doc.setTextColor(30, 41, 59);
+    doc.text('1. RESUMEN CONSOLIDADO DE VENCIMIENTOS POR PROVEEDOR', 10, currentY);
+    currentY += 2.5;
+
+    const provHeaders = [['Proveedor / Empresa', 'Operaciones', 'Participación', 'Total Vencimiento ($)']];
+    const provRows = sortedProvs.map(p => [
+      p.nombre,
+      String(p.cant),
+      totalAmount > 0 ? ((p.total / totalAmount) * 100).toFixed(1) + '%' : '0%',
+      formatCurrency(p.total)
+    ]);
+
+    const provFoot = [[
+      `TOTAL VENCIMIENTOS (${sortedProvs.length} proveedores)`,
+      String(cantOps),
+      '100.0%',
+      formatCurrency(totalAmount)
+    ]];
+
+    doc.autoTable({
+      startY: currentY,
+      head: provHeaders,
+      body: provRows,
+      foot: provFoot,
+      theme: 'striped',
+      styles: { fontSize: 7, cellPadding: 1.0, textColor: [30, 41, 59] },
+      headStyles: { fillColor: [79, 70, 229], textColor: [255, 255, 255], fontStyle: 'bold', fontSize: 7.5 },
+      footStyles: { fillColor: [241, 245, 249], textColor: [15, 23, 42], fontStyle: 'bold', fontSize: 7.5, lineWidth: { top: 0.4 }, lineColor: [79, 70, 229] },
+      columnStyles: {
+        0: { cellWidth: 120, fontStyle: 'bold' },
+        1: { cellWidth: 35, halign: 'center' },
+        2: { cellWidth: 40, halign: 'center', fontStyle: 'bold' },
+        3: { cellWidth: 82, halign: 'right', fontStyle: 'bold' }
+      },
+      margin: { left: 10, right: 10 }
+    });
+
+    currentY = doc.lastAutoTable.finalY + 5;
+
+    if (currentY > 170) {
+      doc.addPage();
+      currentY = 15;
+    }
+
+    // TABLA 2: DETALLE CONTINUO DE OPERACIONES
+    doc.setFontSize(8);
+    doc.setFont('helvetica', 'bold');
+    doc.setTextColor(30, 41, 59);
+    doc.text('2. DETALLE DE OPERACIONES EN CUENTA CORRIENTE', 10, currentY);
+    currentY += 2.5;
+
+    const detailHeaders = [['N°', 'Fecha', 'Proveedor', 'Operador Log.', 'Detalle / Concepto', 'N° Factura', 'Importe ($)']];
+    const detailRows = items.map((item, index) => [
+      String(index + 1),
+      formatDate(item.fecha_gasto),
+      item.proveedor?.nombre || 'SIN PROVEEDOR',
+      item.transporte?.nombre || 'N/A',
+      item.descripcion_general || 'Pago de encomienda',
+      item.numero_factura || '—',
+      formatCurrency(item.monto_total)
+    ]);
+
+    const detailFoot = [[
+      '#',
+      `TOTAL DETALLE (${cantOps} registros)`,
+      '—',
+      '—',
+      '—',
+      '—',
+      formatCurrency(totalAmount)
+    ]];
+
+    doc.autoTable({
+      startY: currentY,
+      head: detailHeaders,
+      body: detailRows,
+      foot: detailFoot,
+      theme: 'striped',
+      styles: { fontSize: 6.5, cellPadding: 0.9, textColor: [30, 41, 59] },
+      headStyles: { fillColor: [51, 65, 85], textColor: [255, 255, 255], fontStyle: 'bold', fontSize: 7 },
+      footStyles: { fillColor: [241, 245, 249], textColor: [15, 23, 42], fontStyle: 'bold', fontSize: 7, lineWidth: { top: 0.4 }, lineColor: [51, 65, 85] },
+      columnStyles: {
+        0: { cellWidth: 10, halign: 'center' },
+        1: { cellWidth: 20 },
+        2: { cellWidth: 50, fontStyle: 'bold' },
+        3: { cellWidth: 42 },
+        4: { cellWidth: 95 },
+        5: { cellWidth: 25, halign: 'center' },
+        6: { cellWidth: 35, halign: 'right', fontStyle: 'bold' }
+      },
+      margin: { left: 10, right: 10 }
+    });
+
+    applyFootersCompact(doc);
+    const monthStr = context.selectedMonth || new Date().toISOString().split('T')[0];
+    doc.save(`Vencimientos_CtaCte_${monthStr}.pdf`);
+  }
+
   return {
     exportarPdfMovimientosPeriodo,
     exportarPdfResumenTransportes,
-    exportarPdfMovimientosClientePaciente
+    exportarPdfMovimientosClientePaciente,
+    exportarPdfCtaCteVencimientos
   };
 }

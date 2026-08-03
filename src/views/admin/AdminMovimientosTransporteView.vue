@@ -453,6 +453,21 @@ const fraseDestacadaAntonio = computed(() => {
   return `${top.nombre} representa el ${porcentaje}% del gasto logístico acumulado (${formatCurrency(top.montoTotal)}) en ${top.movimientos} envíos (${bultosStr}).`;
 });
 
+const totalResumenAntonio = computed(() => {
+  const list = resumenTransportesAntonio.value;
+  const totalGasto = list.reduce((acc, t) => acc + t.montoTotal, 0);
+  const totalMovs = list.reduce((acc, t) => acc + t.movimientos, 0);
+  const totalBultos = list.reduce((acc, t) => acc + t.bultosInformados, 0);
+  const promedioGlobal = totalMovs > 0 ? totalGasto / totalMovs : 0;
+  return {
+    cant: list.length,
+    totalGasto,
+    totalMovs,
+    totalBultos,
+    promedioGlobal
+  };
+});
+
 // Tab 3: Control Semanal por Transporte (con rangos reales de fechas y nombres de meses en español)
 const controlSemanalData = computed(() => {
   const selectedM = Number(controlMes.value);
@@ -1305,6 +1320,7 @@ onMounted(fetchDatosLogistica);
                 <th class="px-4 py-3 text-center">Movimientos</th>
                 <th class="px-4 py-3 text-center">Bultos Informados</th>
                 <th class="px-4 py-3 text-right">Promedio por Envío</th>
+                <th class="px-4 py-3 text-center">Participación</th>
                 <th class="px-4 py-3">Zonas Cubiertas</th>
                 <th class="px-4 py-3 text-right">Total Acumulado</th>
                 <th class="px-4 py-3 text-center">Acciones</th>
@@ -1312,7 +1328,7 @@ onMounted(fetchDatosLogistica);
             </thead>
             <tbody class="divide-y divide-slate-100 bg-white font-medium text-slate-700">
               <tr v-if="transportesPaginados.length === 0">
-                <td colspan="7" class="px-4 py-8 text-center text-slate-500">No se encontraron transportes para los criterios ingresados.</td>
+                <td colspan="8" class="px-4 py-8 text-center text-slate-500">No se encontraron transportes para los criterios ingresados.</td>
               </tr>
               <tr v-for="t in transportesPaginados" :key="t.nombre" class="hover:bg-slate-50 transition-colors">
                 <td class="px-4 py-3 font-bold text-slate-900">{{ t.nombre }}</td>
@@ -1325,6 +1341,9 @@ onMounted(fetchDatosLogistica);
                   {{ t.movsConBultos > 0 ? `${t.bultosInformados} bultos` : 'Sin datos' }}
                 </td>
                 <td class="px-4 py-3 text-right font-semibold text-slate-900">{{ formatCurrency(t.promedio) }}</td>
+                <td class="px-4 py-3 text-center font-bold text-indigo-700">
+                  {{ totalResumenAntonio.totalGasto > 0 ? ((t.montoTotal / totalResumenAntonio.totalGasto) * 100).toFixed(1) + '%' : '0%' }}
+                </td>
                 <td class="px-4 py-3 text-slate-600 truncate max-w-[200px]">{{ t.zonas }}</td>
                 <td class="px-4 py-3 text-right font-bold text-indigo-700">{{ formatCurrency(t.montoTotal) }}</td>
                 <td class="px-4 py-3 text-center">
@@ -1339,6 +1358,18 @@ onMounted(fetchDatosLogistica);
                 </td>
               </tr>
             </tbody>
+            <tfoot v-if="resumenTransportesAntonio.length > 0" class="bg-slate-100 font-bold text-slate-900 border-t-2 border-slate-300">
+              <tr>
+                <td class="px-4 py-3.5">TOTAL LOGÍSTICA ({{ totalResumenAntonio.cant }} empresas)</td>
+                <td class="px-4 py-3.5 text-center text-indigo-800">{{ totalResumenAntonio.totalMovs }} mov.</td>
+                <td class="px-4 py-3.5 text-center">{{ totalResumenAntonio.totalBultos > 0 ? `${totalResumenAntonio.totalBultos} bultos` : '—' }}</td>
+                <td class="px-4 py-3.5 text-right">{{ formatCurrency(totalResumenAntonio.promedioGlobal) }}</td>
+                <td class="px-4 py-3.5 text-center text-indigo-700">100.0%</td>
+                <td class="px-4 py-3.5 text-slate-500">—</td>
+                <td class="px-4 py-3.5 text-right text-indigo-900 text-sm font-extrabold">{{ formatCurrency(totalResumenAntonio.totalGasto) }}</td>
+                <td class="px-4 py-3.5"></td>
+              </tr>
+            </tfoot>
           </table>
         </div>
       </div>
