@@ -43,7 +43,7 @@ const dashboardSections = reactive([
       { name: 'Gestión de Usuarios', description: 'Administrar roles y perfiles.', to: { name: 'AdminUsuarios' }, icon: UsersIcon, color: 'bg-pink-100 text-pink-600' },
       { name: 'Clientes', description: 'Administrar la base de clientes.', to: { name: 'AdminClientes' }, icon: BuildingLibraryIcon, color: 'bg-orange-100 text-orange-600' },
       { name: 'Proveedores', description: 'Gestionar estaciones de servicio y otros.', to: { name: 'AdminProveedores' }, icon: ShoppingBagIcon, color: 'bg-red-100 text-red-600' },
-      { name: 'Transportes', description: 'Gestionar medios de transporte.', to: { name: 'AdminTransportes' }, icon: TruckIcon, color: 'bg-amber-100 text-amber-600' },
+      { name: 'Transportes', description: 'Gestionar medios y empresas de transporte.', to: { name: 'AdminMovimientosTransporte' }, icon: TruckIcon, color: 'bg-amber-100 text-amber-600' },
       { name: 'Vehículos', description: 'Gestionar la flota de la empresa.', to: { name: 'AdminVehiculos' }, icon: KeyIcon, color: 'bg-gray-100 text-gray-600' },
       { name: 'Cajas Diarias', description: 'Configurar saldos y responsables.', to: { name: 'AdminGestionCajas' }, icon: Cog6ToothIcon, color: 'bg-green-100 text-green-600' },
       { name: 'Formatos de Gasto', description: 'Configurar plantillas y campos.', to: { name: 'AdminFormatosGasto' }, icon: WrenchScrewdriverIcon, color: 'bg-indigo-100 text-indigo-600' },

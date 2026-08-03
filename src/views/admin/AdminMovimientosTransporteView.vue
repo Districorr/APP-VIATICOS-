@@ -2,6 +2,12 @@
 import { ref, reactive, computed, watch, onMounted } from 'vue';
 import vSelect from 'vue-select';
 import 'vue-select/dist/vue-select.css';
+import VueMultiselect from 'vue-multiselect';
+import 'vue-multiselect/dist/vue-multiselect.css';
+import { LMap, LTileLayer, LMarker, LTooltip } from "@vue-leaflet/vue-leaflet";
+import L from 'leaflet';
+import { Bar } from 'vue-chartjs';
+import { Chart as ChartJS, Title, Tooltip as ChartTooltip, Legend, BarElement, CategoryScale, LinearScale } from 'chart.js';
 import { supabase } from '../../supabaseClient.js';
 import { formatCurrency, formatDate } from '../../utils/formatters.js';
 import { useExcelExporter } from '../../composables/useExcelExporter.js';
@@ -33,8 +39,20 @@ import {
   InformationCircleIcon,
   TrashIcon,
   UserIcon,
+  BuildingOffice2Icon,
+  ChartBarIcon,
+  MapPinIcon,
 } from '@heroicons/vue/24/outline';
 import { useLogisticaPdfExportVariants } from '../../composables/useLogisticaPdfExportVariants.js';
+
+ChartJS.register(Title, ChartTooltip, Legend, BarElement, CategoryScale, LinearScale);
+
+delete L.Icon.Default.prototype._getIconUrl;
+L.Icon.Default.mergeOptions({
+  iconRetinaUrl: 'leaflet/dist/images/marker-icon-2x.png',
+  iconUrl: 'leaflet/dist/images/marker-icon.png',
+  shadowUrl: 'leaflet/dist/images/marker-shadow.png',
+});
 
 const activeTab = ref('movimientos'); // 'movimientos' | 'transportes' | 'control_semanal' | 'ctacte'
 const loading = ref(true);
@@ -142,14 +160,14 @@ async function fetchDatosLogistica() {
     const [gastosRes, clientesRes, transportesRes, proveedoresRes, provinciasRes, localidadesRes] = await Promise.all([
       supabase.from('gastos').select('*').order('fecha_gasto', { ascending: false }),
       supabase.from('clientes').select('id, nombre_cliente').order('nombre_cliente'),
-      supabase.from('transportes').select('id, nombre').order('nombre'),
+      supabase.from('transportes').select('id, nombre, created_at').order('nombre'),
       supabase.from('proveedores').select('id, nombre').eq('activo', true).order('nombre'),
       supabase.from('provincias').select('id, nombre').order('nombre'),
       supabase.from('localidades').select('id, nombre').order('nombre'),
     ]);
 
     if (clientesRes.data) clientesOptions.value = clientesRes.data.map(c => ({ id: c.id, label: c.nombre_cliente }));
-    if (transportesRes.data) transportesOptions.value = transportesRes.data.map(t => ({ id: t.id, label: t.nombre }));
+    if (transportesRes.data) transportesOptions.value = transportesRes.data.map(t => ({ id: t.id, label: t.nombre, created_at: t.created_at }));
     if (proveedoresRes.data) proveedoresOptions.value = proveedoresRes.data.map(p => ({ id: p.id, label: p.nombre }));
     if (provinciasRes.data) provinciasOptions.value = provinciasRes.data.map(p => ({ id: p.id, label: p.nombre }));
     if (localidadesRes.data) localidadesOptions.value = localidadesRes.data.map(l => ({ id: l.id, label: l.nombre }));
@@ -184,6 +202,276 @@ async function fetchDatosLogistica() {
     gastosLogistica.value = [];
   } finally {
     loading.value = false;
+  }
+}
+
+// --- ESTADO Y MÉTODOS PARA GESTIÓN DE EMPRESAS DE TRANSPORTE (CRUD) ---
+const searchEmpresaTransporte = ref('');
+const isEmpresaModalOpen = ref(false);
+const isEmpresaEdicion = ref(false);
+const empresaForm = reactive({ id: null, nombre: '' });
+const savingEmpresa = ref(false);
+
+function abrirCrearEmpresa() {
+  isEmpresaEdicion.value = false;
+  empresaForm.id = null;
+  empresaForm.nombre = '';
+  isEmpresaModalOpen.value = true;
+}
+
+function abrirEditarEmpresa(transporte) {
+  isEmpresaEdicion.value = true;
+  empresaForm.id = transporte.id;
+  empresaForm.nombre = transporte.label || transporte.nombre || '';
+  isEmpresaModalOpen.value = true;
+}
+
+async function guardarEmpresaTransporte() {
+  if (!empresaForm.nombre?.trim()) {
+    showNotification('Campo requerido', 'Debe ingresar el nombre del transporte.', 'error');
+    return;
+  }
+  savingEmpresa.value = true;
+  try {
+    const payload = { nombre: empresaForm.nombre.trim() };
+    const { error } = isEmpresaEdicion.value
+      ? await supabase.from('transportes').update(payload).eq('id', empresaForm.id)
+      : await supabase.from('transportes').insert([payload]);
+
+    if (error) throw error;
+
+    showNotification('Empresa guardada', `Se ${isEmpresaEdicion.value ? 'actualizó' : 'creó'} la empresa de transporte.`, 'success');
+    isEmpresaModalOpen.value = false;
+    await fetchDatosLogistica();
+  } catch (e) {
+    console.error('Error guardando empresa de transporte:', e);
+    showNotification('Error', e.message || 'No se pudo guardar la empresa.', 'error');
+  } finally {
+    savingEmpresa.value = false;
+  }
+}
+
+async function eliminarEmpresaTransporte(transporte) {
+  const nombreT = transporte.label || transporte.nombre;
+  if (!confirm(`¿Estás seguro de eliminar la empresa de transporte "${nombreT}"?\nEsta acción no se puede deshacer.`)) return;
+  try {
+    const { error } = await supabase.from('transportes').delete().eq('id', transporte.id);
+    if (error) {
+      if (error.code === '23503') {
+        throw new Error('No se puede eliminar la empresa porque tiene movimientos o gastos vinculados.');
+      }
+      throw error;
+    }
+    showNotification('Empresa eliminada', 'La empresa de transporte fue eliminada.', 'success');
+    await fetchDatosLogistica();
+  } catch (e) {
+    console.error('Error al eliminar empresa de transporte:', e);
+    showNotification('Error', e.message, 'error');
+  }
+}
+
+const empresasTransporteFiltradas = computed(() => {
+  if (!searchEmpresaTransporte.value.trim()) return transportesOptions.value;
+  const q = searchEmpresaTransporte.value.toLowerCase().trim();
+  return transportesOptions.value.filter(t => (t.label || t.nombre || '').toLowerCase().includes(q));
+});
+
+// --- ESTADO Y MÉTODOS PARA ANÁLISIS GEOGRÁFICO DE TRANSPORTES ---
+const analisisLoading = ref(false);
+const analisisError = ref('');
+const analisisData = ref(null);
+const selectedAnalisisTransportes = ref([]);
+const selectedAnalisisProvinciaId = ref(null);
+const selectedAnalisisLocalidades = ref([]);
+const isComparisonMode = ref(false);
+const fechaInicioA = ref(firstDayMonthStr);
+const fechaFinA = ref(todayStr);
+const fechaInicioB = ref(null);
+const fechaFinB = ref(null);
+const isExportingAnalisis = ref(false);
+const mapKey = ref(0);
+
+async function fetchAnalisisData() {
+  if (!fechaInicioA.value || !fechaFinA.value) return;
+  if (isComparisonMode.value && (!fechaInicioB.value || !fechaFinB.value)) return;
+
+  analisisLoading.value = true;
+  analisisError.value = '';
+  try {
+    const transporteIds = selectedAnalisisTransportes.value.map(t => t.id || t.code);
+    const localidadIds = selectedAnalisisLocalidades.value.map(l => l.id || l.code);
+
+    const { data, error } = await supabase.rpc('get_transporte_analisis_geografico', {
+      p_transporte_ids: transporteIds,
+      p_provincia_id: selectedAnalisisProvinciaId.value,
+      p_localidad_ids: localidadIds,
+      p_fecha_inicio_a: fechaInicioA.value,
+      p_fecha_fin_a: fechaFinA.value,
+      p_fecha_inicio_b: isComparisonMode.value ? fechaInicioB.value : null,
+      p_fecha_fin_b: isComparisonMode.value ? fechaFinB.value : null
+    });
+
+    if (error) throw error;
+    analisisData.value = data;
+  } catch (e) {
+    analisisError.value = `Error al cargar el análisis: ${e.message}.`;
+    analisisData.value = null;
+  } finally {
+    analisisLoading.value = false;
+  }
+}
+
+watch(
+  [selectedAnalisisTransportes, selectedAnalisisProvinciaId, selectedAnalisisLocalidades, fechaInicioA, fechaFinA, isComparisonMode, fechaInicioB, fechaFinB],
+  fetchAnalisisData,
+  { deep: true }
+);
+
+watch(isComparisonMode, (newValue) => {
+  if (!newValue) {
+    fechaInicioB.value = null;
+    fechaFinB.value = null;
+  }
+});
+
+watch(activeTab, (newTab) => {
+  if (newTab === 'analisis' && !analisisData.value) {
+    fetchAnalisisData();
+  }
+});
+
+const kpisPeriodoA = computed(() => analisisData.value?.kpis?.periodo_a || {});
+const kpisPeriodoB = computed(() => analisisData.value?.kpis?.periodo_b || {});
+const localidadesComparativa = computed(() => analisisData.value?.localidades || []);
+
+const maxGastoLocalidad = computed(() => {
+  if (localidadesComparativa.value.length === 0) return 0;
+  return Math.max(...localidadesComparativa.value.map(l => l.gasto_total_a || 0));
+});
+
+watch(analisisData, () => { mapKey.value++; });
+
+function getMarkerIcon(gasto) {
+  const max = maxGastoLocalidad.value;
+  let size = 14;
+  let color = '#4f46e5';
+  if (max > 0 && gasto > 0) {
+    const intensity = gasto / max;
+    size = 14 + (intensity * 26);
+    if (intensity > 0.75) color = '#e11d48';
+    else if (intensity > 0.4) color = '#eab308';
+  }
+  return L.divIcon({
+    html: `<span style="background-color: ${color}; width: ${size}px; height: ${size}px; border-radius: 50%; display: block; border: 2px solid white; box-shadow: 0 0 6px rgba(0,0,0,0.4);"></span>`,
+    className: '',
+    iconSize: [size, size],
+    iconAnchor: [size / 2, size / 2]
+  });
+}
+
+const chartAnalisisOptions = computed(() => ({
+  responsive: true,
+  maintainAspectRatio: false,
+  plugins: { legend: { position: 'top' } },
+  scales: { y: { beginAtZero: true, ticks: { callback: (value) => formatCurrency(value) } } }
+}));
+
+const chartGastosData = computed(() => {
+  const sorted = [...localidadesComparativa.value].sort((a, b) => (b.gasto_total_a || 0) - (a.gasto_total_a || 0));
+  return {
+    labels: sorted.map(loc => loc.localidad_nombre),
+    datasets: [
+      { label: 'Gasto Período A', backgroundColor: '#4f46e5', data: sorted.map(l => l.gasto_total_a) },
+      ...(isComparisonMode.value ? [{ label: 'Gasto Período B', backgroundColor: '#a5b4fc', data: sorted.map(l => l.gasto_total_b) }] : [])
+    ]
+  };
+});
+
+const chartFrecuenciaData = computed(() => {
+  const sorted = [...localidadesComparativa.value].sort((a, b) => (b.frecuencia_a || 0) - (a.frecuencia_a || 0));
+  return {
+    labels: sorted.map(loc => loc.localidad_nombre),
+    datasets: [
+      { label: 'Frecuencia Período A', backgroundColor: '#f59e0b', data: sorted.map(l => l.frecuencia_a) },
+      ...(isComparisonMode.value ? [{ label: 'Frecuencia Período B', backgroundColor: '#fde68a', data: sorted.map(l => l.frecuencia_b) }] : [])
+    ]
+  };
+});
+
+function formatPercentage(value) {
+  if (value === null || value === undefined || isNaN(value)) return 'N/A';
+  const sign = value > 0 ? '+' : '';
+  return `${sign}${value.toFixed(1)}%`;
+}
+
+async function exportarAnalisisExcel() {
+  if (isExportingAnalisis.value) return;
+  if (!analisisData.value || localidadesComparativa.value.length === 0) {
+    showNotification('Sin datos', 'No hay datos de análisis para exportar.', 'error');
+    return;
+  }
+  isExportingAnalisis.value = true;
+  try {
+    const dataToExport = {
+      kpisA: kpisPeriodoA.value,
+      kpisB: kpisPeriodoB.value,
+      localidades: localidadesComparativa.value,
+      filtros: {
+        fechaExportacion: new Date().toLocaleString('es-AR'),
+        modoComparacion: isComparisonMode.value,
+        periodoA: `${fechaInicioA.value} al ${fechaFinA.value}`,
+        periodoB: isComparisonMode.value ? `${fechaInicioB.value} al ${fechaFinB.value}` : 'N/A',
+        transportes: selectedAnalisisTransportes.value.length > 0 ? selectedAnalisisTransportes.value.map(t => t.label || t.nombre).join(', ') : 'Todos',
+        provincia: selectedAnalisisProvinciaId.value ? provinciasOptions.value.find(p => p.id === selectedAnalisisProvinciaId.value)?.label : 'Todas',
+        localidades: selectedAnalisisLocalidades.value.length > 0 ? selectedAnalisisLocalidades.value.map(l => l.label || l.nombre).join(', ') : 'Todas'
+      }
+    };
+    
+    const sheets = [];
+    sheets.push({
+      name: 'Filtros Aplicados',
+      data: [
+        { Filtro: 'Fecha de Exportación', Valor: dataToExport.filtros.fechaExportacion },
+        { Filtro: 'Modo Comparación', Valor: dataToExport.filtros.modoComparacion ? 'Activado' : 'Desactivado' },
+        { Filtro: 'Período A', Valor: dataToExport.filtros.periodoA },
+        { Filtro: 'Período B', Valor: dataToExport.filtros.periodoB },
+        { Filtro: 'Transportes', Valor: dataToExport.filtros.transportes },
+        { Filtro: 'Provincia', Valor: dataToExport.filtros.provincia },
+        { Filtro: 'Localidades', Valor: dataToExport.filtros.localidades },
+      ]
+    });
+    sheets.push({
+      name: 'Resumen Comparativo',
+      data: [
+        { Criterio: 'Gasto Total', 'Período A': dataToExport.kpisA.gasto_total, ...(dataToExport.filtros.modoComparacion && { 'Período B': dataToExport.kpisB.gasto_total }) },
+        { Criterio: 'Nº de Gastos', 'Período A': dataToExport.kpisA.total_gastos, ...(dataToExport.filtros.modoComparacion && { 'Período B': dataToExport.kpisB.total_gastos }) },
+        { Criterio: 'Costo Promedio / Gasto', 'Período A': dataToExport.kpisA.costo_promedio_gasto, ...(dataToExport.filtros.modoComparacion && { 'Período B': dataToExport.kpisB.costo_promedio_gasto }) },
+        { Criterio: 'Localidades Únicas', 'Período A': dataToExport.kpisA.localidades_unicas, ...(dataToExport.filtros.modoComparacion && { 'Período B': dataToExport.kpisB.localidades_unicas }) },
+      ]
+    });
+    sheets.push({
+      name: 'Desglose por Localidad',
+      data: dataToExport.localidades.map(loc => ({
+        'Localidad': loc.localidad_nombre,
+        'Provincia': loc.provincia_nombre,
+        'Gasto Total (A)': loc.gasto_total_a,
+        'Frecuencia (A)': loc.frecuencia_a,
+        ...(dataToExport.filtros.modoComparacion && {
+          'Gasto Total (B)': loc.gasto_total_b,
+          'Frecuencia (B)': loc.frecuencia_b,
+          'Variación Gasto ($)': loc.variacion_gasto,
+          'Variación Gasto (%)': loc.variacion_gasto_porc,
+        })
+      }))
+    });
+    
+    exportToExcel(sheets, `Analisis_Geografico_Transportes_${todayStr}`);
+    showNotification('Exportación Exitosa', 'Se descargó el reporte de análisis geográfico.', 'success');
+  } catch (e) {
+    console.error('Error al exportar análisis:', e);
+    showNotification('Error', 'No se pudo exportar el análisis a Excel.', 'error');
+  } finally {
+    isExportingAnalisis.value = false;
   }
 }
 
@@ -760,6 +1048,11 @@ onMounted(fetchDatosLogistica);
           <span>+ Registrar movimiento</span>
         </button>
 
+        <button type="button" class="btn-action-secondary" @click="abrirCrearEmpresa">
+          <BuildingOffice2Icon class="h-4 w-4 text-indigo-600" />
+          <span>+ Nueva empresa</span>
+        </button>
+
         <button type="button" class="btn-action-secondary" @click="isCargaMasivaOpen = true">
           <DocumentDuplicateIcon class="h-4 w-4 text-slate-600" />
           <span>Carga masiva</span>
@@ -843,9 +1136,9 @@ onMounted(fetchDatosLogistica);
       </div>
     </div>
 
-    <!-- NAVEGACIÓN DE 4 PESTAÑAS PRINCIPALES -->
+    <!-- NAVEGACIÓN DE PESTAÑAS PRINCIPALES -->
     <div class="border-b border-slate-200 bg-white rounded-xl shadow-xs">
-      <nav class="-mb-px flex flex-wrap space-x-2 md:space-x-8 px-4" aria-label="Tabs">
+      <nav class="-mb-px flex flex-wrap space-x-2 md:space-x-6 px-4" aria-label="Tabs">
         <button
           type="button"
           class="tab-button"
@@ -863,7 +1156,27 @@ onMounted(fetchDatosLogistica);
           @click="activeTab = 'transportes'"
         >
           <TruckIcon class="h-5 w-5" />
-          <span>Transportes</span>
+          <span>Resumen por Transporte</span>
+        </button>
+
+        <button
+          type="button"
+          class="tab-button"
+          :class="activeTab === 'gestion' ? 'tab-active' : 'tab-inactive'"
+          @click="activeTab = 'gestion'"
+        >
+          <BuildingOffice2Icon class="h-5 w-5" />
+          <span>Empresas (ABM)</span>
+        </button>
+
+        <button
+          type="button"
+          class="tab-button"
+          :class="activeTab === 'analisis' ? 'tab-active' : 'tab-inactive'"
+          @click="activeTab = 'analisis'"
+        >
+          <ChartBarIcon class="h-5 w-5" />
+          <span>Análisis Geográfico</span>
         </button>
 
         <button
@@ -1632,6 +1945,293 @@ onMounted(fetchDatosLogistica);
       :gasto="gastoEnEdicion"
       @saved="fetchDatosLogistica"
     />
+
+    <AdminCtaCteVencimientosModal
+      v-model="isCtaCteModalOpen"
+      @show-notification="showNotification"
+    />
+
+    <!-- PESTAÑA 5: GESTIÓN DE EMPRESAS DE TRANSPORTE (ABM) -->
+    <div v-if="activeTab === 'gestion'" class="space-y-5">
+      <div class="flex flex-col gap-4 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm sm:flex-row sm:items-center sm:justify-between">
+        <div>
+          <h3 class="text-base font-bold text-slate-900 flex items-center gap-2">
+            <BuildingOffice2Icon class="h-5 w-5 text-indigo-600" />
+            <span>Gestión de Empresas de Transporte</span>
+          </h3>
+          <p class="text-xs text-slate-500">Creá, editá y administrá el catálogo de transportes disponibles.</p>
+        </div>
+
+        <div class="flex flex-col sm:flex-row items-stretch sm:items-center gap-3">
+          <div class="relative w-full sm:w-64">
+            <MagnifyingGlassIcon class="pointer-events-none absolute left-3 top-2.5 h-4 w-4 text-slate-400" />
+            <input v-model="searchEmpresaTransporte" type="text" class="form-input pl-9 text-xs" placeholder="Buscar empresa..." />
+          </div>
+
+          <button type="button" class="btn-action-primary shrink-0" @click="abrirCrearEmpresa">
+            <PlusIcon class="h-4 w-4" />
+            <span>+ Nueva empresa</span>
+          </button>
+        </div>
+      </div>
+
+      <!-- TABLA DE EMPRESAS DE TRANSPORTE -->
+      <div class="rounded-2xl border border-slate-200 bg-white shadow-sm overflow-hidden">
+        <div class="overflow-x-auto">
+          <table class="w-full text-left text-xs">
+            <thead class="bg-slate-50 uppercase text-slate-500 font-bold border-b border-slate-200">
+              <tr>
+                <th class="px-4 py-3"># ID</th>
+                <th class="px-4 py-3">Empresa de Transporte</th>
+                <th class="px-4 py-3 text-center">Registrado en</th>
+                <th class="px-4 py-3 text-right">Acciones</th>
+              </tr>
+            </thead>
+            <tbody class="divide-y divide-slate-100 bg-white font-medium text-slate-700">
+              <tr v-if="empresasTransporteFiltradas.length === 0">
+                <td colspan="4" class="px-4 py-8 text-center text-slate-500">No se encontraron empresas de transporte.</td>
+              </tr>
+              <tr v-for="t in empresasTransporteFiltradas" :key="t.id" class="hover:bg-slate-50 transition-colors">
+                <td class="px-4 py-3 font-mono text-slate-400">#{{ t.id }}</td>
+                <td class="px-4 py-3 font-bold text-slate-900 text-sm">{{ t.label }}</td>
+                <td class="px-4 py-3 text-center text-slate-500">{{ t.created_at ? formatDate(t.created_at) : 'Sin fecha' }}</td>
+                <td class="px-4 py-3 text-right space-x-2">
+                  <button type="button" class="inline-flex items-center gap-1 rounded-md border border-slate-300 bg-white px-2.5 py-1 text-xs font-semibold text-slate-700 shadow-2xs hover:bg-slate-100 transition-colors cursor-pointer" @click="abrirEditarEmpresa(t)">
+                    <PencilSquareIcon class="h-3.5 w-3.5 text-indigo-600" />
+                    <span>Editar</span>
+                  </button>
+                  <button type="button" class="inline-flex items-center gap-1 rounded-md border border-red-200 bg-red-50 px-2.5 py-1 text-xs font-semibold text-red-700 shadow-2xs hover:bg-red-100 transition-colors cursor-pointer" @click="eliminarEmpresaTransporte(t)">
+                    <TrashIcon class="h-3.5 w-3.5 text-red-600" />
+                    <span>Eliminar</span>
+                  </button>
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
+    <!-- PESTAÑA 6: ANÁLISIS GEOGRÁFICO DE TRANSPORTES -->
+    <div v-if="activeTab === 'analisis'" class="space-y-6">
+      <!-- Panel de Filtros Avanzados -->
+      <div class="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm space-y-4">
+        <div class="flex flex-wrap items-center justify-between gap-4 border-b border-slate-100 pb-3">
+          <div>
+            <h4 class="text-xs font-bold uppercase tracking-wider text-slate-700 flex items-center gap-2">
+              <ChartBarIcon class="h-4 w-4 text-indigo-600" />
+              <span>Análisis Geográfico de Transportes</span>
+            </h4>
+            <p class="text-xs text-slate-500">Visualización en mapa y comparativa de costos por localidad y períodos.</p>
+          </div>
+
+          <div class="flex flex-wrap items-center gap-3">
+            <label class="flex items-center cursor-pointer gap-2 text-xs font-semibold text-slate-700">
+              <span>Modo Comparación</span>
+              <input type="checkbox" v-model="isComparisonMode" class="checkbox-native cursor-pointer" />
+              <span class="w-9 h-5 bg-slate-200 rounded-full flex items-center p-0.5 transition-colors" :class="{ 'bg-indigo-600': isComparisonMode }">
+                <span class="w-4 h-4 bg-white rounded-full transition-transform" :class="{ 'translate-x-4': isComparisonMode }"></span>
+              </span>
+            </label>
+
+            <button type="button" class="btn-action-emerald" :disabled="isExportingAnalisis" @click="exportarAnalisisExcel">
+              <ArrowDownTrayIcon class="h-4 w-4" />
+              <span>{{ isExportingAnalisis ? 'Exportando...' : 'Exportar a Excel' }}</span>
+            </button>
+          </div>
+        </div>
+
+        <div class="grid grid-cols-1 gap-4 md:grid-cols-3">
+          <!-- Período A -->
+          <div class="rounded-xl border border-slate-200 bg-slate-50/50 p-3 space-y-2">
+            <h5 class="font-bold text-xs text-indigo-700">Período Principal (A)</h5>
+            <div class="grid grid-cols-2 gap-2">
+              <div>
+                <label class="field-label text-[10px]">Fecha Inicio</label>
+                <input type="date" v-model="fechaInicioA" class="form-input text-xs" />
+              </div>
+              <div>
+                <label class="field-label text-[10px]">Fecha Fin</label>
+                <input type="date" v-model="fechaFinA" class="form-input text-xs" />
+              </div>
+            </div>
+          </div>
+
+          <!-- Período B (Comparación) -->
+          <div class="rounded-xl border border-slate-200 bg-slate-50/50 p-3 space-y-2 transition-opacity" :class="{ 'opacity-40 pointer-events-none': !isComparisonMode }">
+            <h5 class="font-bold text-xs text-indigo-700">Período Comparación (B)</h5>
+            <div class="grid grid-cols-2 gap-2">
+              <div>
+                <label class="field-label text-[10px]">Fecha Inicio</label>
+                <input type="date" v-model="fechaInicioB" :disabled="!isComparisonMode" class="form-input text-xs" />
+              </div>
+              <div>
+                <label class="field-label text-[10px]">Fecha Fin</label>
+                <input type="date" v-model="fechaFinB" :disabled="!isComparisonMode" class="form-input text-xs" />
+              </div>
+            </div>
+          </div>
+
+          <!-- Filtros Generales -->
+          <div class="rounded-xl border border-slate-200 bg-slate-50/50 p-3 space-y-2">
+            <h5 class="font-bold text-xs text-slate-700">Filtros Avanzados</h5>
+            <div class="space-y-1.5">
+              <div>
+                <label class="field-label text-[10px]">Provincia</label>
+                <v-select v-model="selectedAnalisisProvinciaId" :options="provinciasOptions" :reduce="o => o.id" placeholder="Todas" class="v-select-filter text-xs" />
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- CONTENIDO DEL ANÁLISIS GEOGRÁFICO -->
+      <div v-if="analisisLoading" class="py-12 text-center text-slate-500">
+        <svg class="animate-spin h-8 w-8 text-indigo-600 mx-auto" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path></svg>
+        <p class="mt-2 text-xs font-semibold">Cargando datos del mapa y estadísticas...</p>
+      </div>
+
+      <div v-else-if="analisisError" class="rounded-xl border border-red-200 bg-red-50 p-4 text-xs font-semibold text-red-700">
+        {{ analisisError }}
+      </div>
+
+      <div v-else-if="analisisData" class="space-y-6">
+        <!-- KPIs Comparativos -->
+        <div class="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
+          <div class="rounded-2xl border border-slate-200 bg-white p-4 shadow-xs">
+            <span class="text-[10px] font-bold uppercase tracking-wider text-slate-500">Gasto Total (Periodo A)</span>
+            <p class="text-2xl font-bold text-slate-900 mt-1">{{ formatCurrency(kpisPeriodoA.gasto_total) }}</p>
+            <div v-if="isComparisonMode" class="mt-1 text-xs text-slate-500">
+              vs {{ formatCurrency(kpisPeriodoB.gasto_total) }}
+              <span :class="(kpisPeriodoA.gasto_total || 0) >= (kpisPeriodoB.gasto_total || 0) ? 'text-emerald-600 font-bold' : 'text-rose-600 font-bold'">
+                ({{ formatPercentage(((kpisPeriodoA.gasto_total || 0) - (kpisPeriodoB.gasto_total || 0)) / (kpisPeriodoB.gasto_total || 1) * 100) }})
+              </span>
+            </div>
+          </div>
+
+          <div class="rounded-2xl border border-slate-200 bg-white p-4 shadow-xs">
+            <span class="text-[10px] font-bold uppercase tracking-wider text-slate-500">Nº de Movimientos</span>
+            <p class="text-2xl font-bold text-indigo-600 mt-1">{{ kpisPeriodoA.total_gastos || 0 }}</p>
+            <div v-if="isComparisonMode" class="mt-1 text-xs text-slate-500">
+              vs {{ kpisPeriodoB.total_gastos || 0 }}
+            </div>
+          </div>
+
+          <div class="rounded-2xl border border-slate-200 bg-white p-4 shadow-xs">
+            <span class="text-[10px] font-bold uppercase tracking-wider text-slate-500">Localidades Únicas</span>
+            <p class="text-2xl font-bold text-slate-900 mt-1">{{ kpisPeriodoA.localidades_unicas || 0 }}</p>
+            <div v-if="isComparisonMode" class="mt-1 text-xs text-slate-500">
+              vs {{ kpisPeriodoB.localidades_unicas || 0 }}
+            </div>
+          </div>
+
+          <div class="rounded-2xl border border-slate-200 bg-white p-4 shadow-xs">
+            <span class="text-[10px] font-bold uppercase tracking-wider text-slate-500">Costo Promedio / Envío</span>
+            <p class="text-2xl font-bold text-slate-900 mt-1">{{ formatCurrency(kpisPeriodoA.costo_promedio_gasto) }}</p>
+            <div v-if="isComparisonMode" class="mt-1 text-xs text-slate-500">
+              vs {{ formatCurrency(kpisPeriodoB.costo_promedio_gasto) }}
+            </div>
+          </div>
+        </div>
+
+        <!-- GRÁFICO Y MAPA EN GRID DE 2 COLUMNAS -->
+        <div class="grid grid-cols-1 lg:grid-cols-5 gap-6">
+          <!-- Desglose por Localidad Tabla -->
+          <div class="lg:col-span-2 rounded-2xl border border-slate-200 bg-white shadow-xs overflow-hidden flex flex-col">
+            <div class="border-b border-slate-100 p-4">
+              <h4 class="text-xs font-bold uppercase tracking-wider text-slate-900">Desglose por Localidad</h4>
+            </div>
+            <div class="overflow-y-auto max-h-[460px] flex-1">
+              <table class="w-full text-left text-xs">
+                <thead class="bg-slate-50 text-[11px] font-bold uppercase tracking-wider text-slate-600 border-b border-slate-200 sticky top-0">
+                  <tr>
+                    <th class="px-4 py-2.5">Localidad</th>
+                    <th class="px-4 py-2.5 text-right">Total (A)</th>
+                    <th v-if="isComparisonMode" class="px-4 py-2.5 text-right">Total (B)</th>
+                  </tr>
+                </thead>
+                <tbody class="divide-y divide-slate-100">
+                  <tr v-if="localidadesComparativa.length === 0">
+                    <td :colspan="isComparisonMode ? 3 : 2" class="px-4 py-6 text-center text-slate-500">No hay datos para los filtros aplicados.</td>
+                  </tr>
+                  <tr v-for="loc in localidadesComparativa" :key="loc.localidad_nombre" class="hover:bg-slate-50">
+                    <td class="px-4 py-2.5 font-bold text-slate-900">
+                      {{ loc.localidad_nombre }}
+                      <span class="block text-[10px] font-normal text-slate-400">{{ loc.provincia_nombre }}</span>
+                    </td>
+                    <td class="px-4 py-2.5 text-right font-bold text-indigo-700">{{ formatCurrency(loc.gasto_total_a) }}</td>
+                    <td v-if="isComparisonMode" class="px-4 py-2.5 text-right font-semibold text-slate-600">{{ formatCurrency(loc.gasto_total_b) }}</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          <!-- Mapa de Puntos por Localidad -->
+          <div class="lg:col-span-3 rounded-2xl border border-slate-200 bg-white p-4 shadow-xs">
+            <h4 class="text-xs font-bold uppercase tracking-wider text-slate-900 mb-3 flex items-center gap-1.5">
+              <MapPinIcon class="h-4 w-4 text-rose-500" />
+              <span>Mapa Interactivo de Destinos</span>
+            </h4>
+            <div class="h-[420px] w-full rounded-xl overflow-hidden z-0 border border-slate-200">
+              <l-map ref="map" :zoom="4" :center="[-40, -64]" :key="mapKey">
+                <l-tile-layer url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" layer-type="base" name="OpenStreetMap"></l-tile-layer>
+                <l-marker v-for="loc in localidadesComparativa" :key="loc.localidad_nombre" :lat-lng="[loc.lat, loc.lng]" :icon="getMarkerIcon(loc.gasto_total_a)">
+                  <l-tooltip :options="{ sticky: true }">
+                    <strong class="text-xs font-bold text-slate-900">{{ loc.localidad_nombre }}</strong>
+                    <div class="text-[11px] text-slate-500">{{ loc.provincia_nombre }}</div>
+                    <hr class="my-1 border-slate-200">
+                    <div class="text-xs"><strong>Gasto (A):</strong> {{ formatCurrency(loc.gasto_total_a) }}</div>
+                    <div v-if="isComparisonMode" class="text-xs"><strong>Gasto (B):</strong> {{ formatCurrency(loc.gasto_total_b) }}</div>
+                  </l-tooltip>
+                </l-marker>
+              </l-map>
+            </div>
+          </div>
+        </div>
+
+        <!-- GRÁFICOS DE BARRAS COMPARATIVOS -->
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+          <div class="rounded-2xl border border-slate-200 bg-white p-5 shadow-xs">
+            <h4 class="text-xs font-bold uppercase tracking-wider text-slate-900 mb-4">Gasto por Localidad ($)</h4>
+            <div class="h-72">
+              <Bar :data="chartGastosData" :options="chartAnalisisOptions" v-if="chartGastosData.labels.length > 0" />
+              <p v-else class="text-center text-slate-400 py-16 text-xs">No hay datos para graficar.</p>
+            </div>
+          </div>
+
+          <div class="rounded-2xl border border-slate-200 bg-white p-5 shadow-xs">
+            <h4 class="text-xs font-bold uppercase tracking-wider text-slate-900 mb-4">Frecuencia de Envíos por Localidad</h4>
+            <div class="h-72">
+              <Bar :data="chartFrecuenciaData" :options="chartAnalisisOptions" v-if="chartFrecuenciaData.labels.length > 0" />
+              <p v-else class="text-center text-slate-400 py-16 text-xs">No hay datos para graficar.</p>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- MODAL DE CREACIÓN / EDICIÓN DE EMPRESA DE TRANSPORTE -->
+    <div v-if="isEmpresaModalOpen" class="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 p-4" @click.self="isEmpresaModalOpen = false">
+      <div class="w-full max-w-md rounded-2xl bg-white p-6 shadow-2xl space-y-4">
+        <div class="flex items-center justify-between border-b border-slate-100 pb-3">
+          <h3 class="text-base font-bold text-slate-900">{{ isEmpresaEdicion ? 'Editar Empresa de Transporte' : 'Nueva Empresa de Transporte' }}</h3>
+          <button type="button" class="text-slate-400 hover:text-slate-700" @click="isEmpresaModalOpen = false">✕</button>
+        </div>
+
+        <div class="space-y-3">
+          <label class="block text-xs font-bold uppercase text-slate-600">Nombre de la Empresa <span class="text-red-500">*</span></label>
+          <input v-model="empresaForm.nombre" type="text" class="form-input" placeholder="Ej: Vía Cargo, OCA, Credifin..." @keyup.enter="guardarEmpresaTransporte" />
+        </div>
+
+        <div class="flex items-center justify-end gap-3 pt-3 border-t border-slate-100">
+          <button type="button" class="btn-secondary" :disabled="savingEmpresa" @click="isEmpresaModalOpen = false">Cancelar</button>
+          <button type="button" class="btn-primary" :disabled="savingEmpresa" @click="guardarEmpresaTransporte">
+            {{ savingEmpresa ? 'Guardando...' : (isEmpresaEdicion ? 'Actualizar' : 'Crear Empresa') }}
+          </button>
+        </div>
+      </div>
+    </div>
 
     <AdminCtaCteVencimientosModal
       v-model="isCtaCteModalOpen"

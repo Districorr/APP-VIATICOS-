@@ -149,7 +149,7 @@ const routes = [
       { path: 'formatos-gasto/:formatoId/campos', name: 'AdminCamposFormato', component: () => import('../views/admin/AdminCamposFormatoView.vue'), props: true, meta: { title: 'Admin: Campos' } },
       { path: 'formatos-gasto/:formatoId/asignar-usuarios', name: 'AdminAsignarUsuariosFormato', component: () => import('../views/admin/AdminAsignarUsuariosFormatoView.vue'), props: true, meta: { title: 'Admin: Asignar Formatos' } },
       { path: 'clientes', name: 'AdminClientes', component: () => import('../views/admin/AdminClientesView.vue'), meta: { title: 'Admin: Clientes' } },
-      { path: 'transportes', name: 'AdminTransportes', component: () => import('../views/admin/AdminTransportesView.vue'), meta: { title: 'Admin: Transportes' } },
+      { path: 'transportes', name: 'AdminTransportes', redirect: { name: 'AdminMovimientosTransporte' } },
       { 
         path: 'movimientos-transporte', 
         name: 'AdminMovimientosTransporte', 
