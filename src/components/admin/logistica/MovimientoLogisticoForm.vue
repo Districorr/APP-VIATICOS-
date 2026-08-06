@@ -32,7 +32,7 @@ const defaultDate = () => new Date().toISOString().split('T')[0];
 
 const formState = reactive({
   tipo_logistica: 'cirugia',
-  fecha_gasto: defaultDate(),
+  fecha_gasto: props.initialData?.fecha_gasto || defaultDate(),
   transporte_id: null,
   provincia_id: null,
   localidad_destino_id: null,
@@ -380,7 +380,7 @@ watch(() => props.initialData, (newVal) => {
   if (newVal && Object.keys(newVal).length > 0) {
     Object.assign(formState, newVal);
   }
-}, { immediate: true });
+}, { immediate: true, deep: true });
 
 watch(formState, (newVal) => {
   if (isEmbeddedMode.value && props.initialData) {
@@ -481,7 +481,7 @@ watch(formState, (newVal) => {
 
           <!-- Campos de Entrada -->
           <div class="grid grid-cols-1 gap-4 md:grid-cols-2">
-            <label class="field-group">
+            <label v-if="!isEmbeddedMode" class="field-group">
               <span class="field-label">Fecha del Movimiento <span class="text-red-500">*</span></span>
               <input v-model="formState.fecha_gasto" type="date" class="form-input" />
             </label>
