@@ -115,14 +115,35 @@ const localidadOptionsActuales = computed(() => {
   return localidadesCache.value[String(formState.provincia_id)] || [];
 });
 
+function extractEntityId(val) {
+  if (val === null || val === undefined || val === '') return null;
+  if (typeof val === 'number') return val;
+  if (typeof val === 'string' && /^\d+$/.test(val)) return Number(val);
+  if (typeof val === 'object') {
+    const rawId = val.code ?? val.value ?? val.id;
+    if (typeof rawId === 'number') return rawId;
+    if (typeof rawId === 'string' && /^\d+$/.test(rawId)) return Number(rawId);
+    if (typeof rawId === 'string' && rawId.trim() !== '') return rawId.trim();
+  }
+  return val;
+}
+
+function formatFechaISOToInput(fechaStr) {
+  if (!fechaStr) return defaultDate();
+  const str = String(fechaStr).slice(0, 10);
+  return /^\d{4}-\d{2}-\d{2}$/.test(str) ? str : defaultDate();
+}
+
 async function resolverClienteId(val) {
   if (!val) return null;
-  if (typeof val === 'number' || (typeof val === 'string' && /^\d+$/.test(val))) {
-    return Number(val);
+  const idExtraido = extractEntityId(val);
+  if (typeof idExtraido === 'number') {
+    return idExtraido;
   }
-  let nombre = typeof val === 'object' ? (val.label || val.code) : val;
-  nombre = String(nombre).trim();
+  let nombre = typeof val === 'object' ? (val.label || val.code || val.value || val.nombre_cliente) : val;
+  nombre = String(nombre || '').trim();
   if (!nombre) return null;
+  if (/^\d+$/.test(nombre)) return Number(nombre);
 
   const { data: existing } = await supabase
     .from('clientes')
@@ -151,12 +172,14 @@ async function resolverClienteId(val) {
 
 async function resolverTransporteId(val) {
   if (!val) return null;
-  if (typeof val === 'number' || (typeof val === 'string' && /^\d+$/.test(val))) {
-    return Number(val);
+  const idExtraido = extractEntityId(val);
+  if (typeof idExtraido === 'number') {
+    return idExtraido;
   }
-  let nombre = typeof val === 'object' ? (val.label || val.code) : val;
-  nombre = String(nombre).trim();
+  let nombre = typeof val === 'object' ? (val.label || val.code || val.value || val.nombre) : val;
+  nombre = String(nombre || '').trim();
   if (!nombre) return null;
+  if (/^\d+$/.test(nombre)) return Number(nombre);
 
   const { data: existing } = await supabase
     .from('transportes')
@@ -185,12 +208,14 @@ async function resolverTransporteId(val) {
 
 async function resolverProveedorId(val) {
   if (!val) return null;
-  if (typeof val === 'number' || (typeof val === 'string' && /^\d+$/.test(val))) {
-    return Number(val);
+  const idExtraido = extractEntityId(val);
+  if (typeof idExtraido === 'number') {
+    return idExtraido;
   }
-  let nombre = typeof val === 'object' ? (val.label || val.code) : val;
-  nombre = String(nombre).trim();
+  let nombre = typeof val === 'object' ? (val.label || val.code || val.value || val.nombre) : val;
+  nombre = String(nombre || '').trim();
   if (!nombre) return null;
+  if (/^\d+$/.test(nombre)) return Number(nombre);
 
   const { data: existing } = await supabase
     .from('proveedores')
@@ -378,13 +403,29 @@ onUnmounted(() => {
 
 watch(() => props.initialData, (newVal) => {
   if (newVal && Object.keys(newVal).length > 0) {
-    Object.assign(formState, newVal);
+    const sanitizedFecha = formatFechaISOToInput(newVal.fecha_gasto);
+    Object.assign(formState, {
+      ...newVal,
+      fecha_gasto: sanitizedFecha,
+      transporte_id: extractEntityId(newVal.transporte_id),
+      proveedor_id: extractEntityId(newVal.proveedor_id),
+      cliente_id: extractEntityId(newVal.cliente_id),
+      provincia_id: extractEntityId(newVal.provincia_id),
+      localidad_destino_id: extractEntityId(newVal.localidad_destino_id),
+    });
   }
 }, { immediate: true, deep: true });
 
 watch(formState, (newVal) => {
   if (isEmbeddedMode.value && props.initialData) {
-    Object.assign(props.initialData, newVal);
+    const cleanFecha = formatFechaISOToInput(newVal.fecha_gasto);
+    Object.assign(props.initialData, {
+      ...newVal,
+      fecha_gasto: cleanFecha,
+      transporte_id: extractEntityId(newVal.transporte_id),
+      proveedor_id: extractEntityId(newVal.proveedor_id),
+      cliente_id: extractEntityId(newVal.cliente_id),
+    });
   }
 }, { deep: true });
 </script>

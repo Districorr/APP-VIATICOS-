@@ -167,14 +167,29 @@ const localidadOptionsActuales = computed(() => {
   return localidadesCache.value[String(formState.provincia_id)] || [];
 });
 
+function extractEntityId(val) {
+  if (val === null || val === undefined || val === '') return null;
+  if (typeof val === 'number') return val;
+  if (typeof val === 'string' && /^\d+$/.test(val)) return Number(val);
+  if (typeof val === 'object') {
+    const rawId = val.code ?? val.value ?? val.id;
+    if (typeof rawId === 'number') return rawId;
+    if (typeof rawId === 'string' && /^\d+$/.test(rawId)) return Number(rawId);
+    if (typeof rawId === 'string' && rawId.trim() !== '') return rawId.trim();
+  }
+  return val;
+}
+
 async function resolverClienteId(val) {
   if (!val) return null;
-  if (typeof val === 'number' || (typeof val === 'string' && /^\d+$/.test(val))) {
-    return Number(val);
+  const idExtraido = extractEntityId(val);
+  if (typeof idExtraido === 'number') {
+    return idExtraido;
   }
-  let nombre = typeof val === 'object' ? (val.label || val.code) : val;
-  nombre = String(nombre).trim();
+  let nombre = typeof val === 'object' ? (val.label || val.code || val.value || val.nombre_cliente) : val;
+  nombre = String(nombre || '').trim();
   if (!nombre) return null;
+  if (/^\d+$/.test(nombre)) return Number(nombre);
 
   const { data: existing } = await supabase
     .from('clientes')
@@ -203,12 +218,14 @@ async function resolverClienteId(val) {
 
 async function resolverTransporteId(val) {
   if (!val) return null;
-  if (typeof val === 'number' || (typeof val === 'string' && /^\d+$/.test(val))) {
-    return Number(val);
+  const idExtraido = extractEntityId(val);
+  if (typeof idExtraido === 'number') {
+    return idExtraido;
   }
-  let nombre = typeof val === 'object' ? (val.label || val.code) : val;
-  nombre = String(nombre).trim();
+  let nombre = typeof val === 'object' ? (val.label || val.code || val.value || val.nombre) : val;
+  nombre = String(nombre || '').trim();
   if (!nombre) return null;
+  if (/^\d+$/.test(nombre)) return Number(nombre);
 
   const { data: existing } = await supabase
     .from('transportes')
@@ -237,12 +254,14 @@ async function resolverTransporteId(val) {
 
 async function resolverProveedorId(val) {
   if (!val) return null;
-  if (typeof val === 'number' || (typeof val === 'string' && /^\d+$/.test(val))) {
-    return Number(val);
+  const idExtraido = extractEntityId(val);
+  if (typeof idExtraido === 'number') {
+    return idExtraido;
   }
-  let nombre = typeof val === 'object' ? (val.label || val.code) : val;
-  nombre = String(nombre).trim();
+  let nombre = typeof val === 'object' ? (val.label || val.code || val.value || val.nombre) : val;
+  nombre = String(nombre || '').trim();
   if (!nombre) return null;
+  if (/^\d+$/.test(nombre)) return Number(nombre);
 
   const { data: existing } = await supabase
     .from('proveedores')
@@ -274,8 +293,8 @@ function hydrateForm(gasto) {
   
   let tipoLogistica = datosAdicionales.tipo_logistica;
   if (!tipoLogistica) {
-    const provId = gasto?.proveedor_id ?? getRowValue(['proveedor_id']);
-    const cliId = gasto?.cliente_id ?? getRowValue(['cliente_id']);
+    const provId = extractEntityId(gasto?.proveedor_id ?? getRowValue(['proveedor_id']));
+    const cliId = extractEntityId(gasto?.cliente_id ?? getRowValue(['cliente_id']));
     const pacRef = gasto?.paciente_referido ?? getRowValue(['paciente_referido', 'paciente', 'nombre_paciente']);
     
     if (provId === 14 || cliId || pacRef) {
@@ -287,17 +306,18 @@ function hydrateForm(gasto) {
     }
   }
 
+  const fechaRaw = String(gasto?.fecha_gasto || getRowValue(['fecha_gasto', 'fecha'], '')).slice(0, 10);
   formState.tipo_logistica = tipoLogistica;
-  formState.fecha_gasto = String(gasto?.fecha_gasto || getRowValue(['fecha_gasto', 'fecha'], '')).slice(0, 10);
+  formState.fecha_gasto = /^\d{4}-\d{2}-\d{2}$/.test(fechaRaw) ? fechaRaw : new Date().toISOString().split('T')[0];
   formState.monto_total = gasto?.monto_total ?? getRowValue(['monto_total', 'monto', 'total'], '');
   formState.descripcion_general = gasto?.descripcion_general ?? getRowValue(['descripcion_general', 'descripcion', 'detalle'], '');
-  const rawProvId = gasto?.proveedor_id ?? getRowValue(['proveedor_id'], null);
+  const rawProvId = extractEntityId(gasto?.proveedor_id ?? getRowValue(['proveedor_id'], null));
   formState.proveedor_id = rawProvId === 14 ? null : rawProvId;
-  formState.transporte_id = gasto?.transporte_id ?? getRowValue(['transporte_id'], null);
-  formState.cliente_id = gasto?.cliente_id ?? getRowValue(['cliente_id'], null);
+  formState.transporte_id = extractEntityId(gasto?.transporte_id ?? getRowValue(['transporte_id'], null));
+  formState.cliente_id = extractEntityId(gasto?.cliente_id ?? getRowValue(['cliente_id'], null));
   formState.paciente_referido = gasto?.paciente_referido ?? getRowValue(['paciente_referido', 'paciente', 'nombre_paciente'], '');
-  formState.provincia_id = gasto?.provincia_id ?? getRowValue(['provincia_id'], null);
-  formState.localidad_destino_id = gasto?.localidad_destino_id ?? getRowValue(['localidad_destino_id'], null);
+  formState.provincia_id = extractEntityId(gasto?.provincia_id ?? getRowValue(['provincia_id'], null));
+  formState.localidad_destino_id = extractEntityId(gasto?.localidad_destino_id ?? getRowValue(['localidad_destino_id'], null));
   formState.cantidad_bultos = Number(datosAdicionales.cantidad_bultos) || 1;
   formState.sentido_movimiento = datosAdicionales.sentido_movimiento || 'ida';
   formState.tipo_movimiento_encomienda = datosAdicionales.tipo_movimiento_encomienda || getRowValue(['tipo_movimiento_encomienda', 'tipo_movimiento'], 'Envío');
