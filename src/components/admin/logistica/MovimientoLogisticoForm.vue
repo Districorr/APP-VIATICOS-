@@ -317,10 +317,11 @@ async function handleGuardar() {
     const userId = authData?.user?.id;
     if (!userId) throw new Error('Usuario no autenticado.');
 
+    const isCirugia = formState.tipo_logistica === 'cirugia';
     const [finalClienteId, finalTransporteId, finalProveedorId] = await Promise.all([
-      resolverClienteId(formState.cliente_id),
+      isCirugia ? resolverClienteId(formState.cliente_id) : Promise.resolve(null),
       resolverTransporteId(formState.transporte_id),
-      resolverProveedorId(formState.proveedor_id)
+      !isCirugia ? resolverProveedorId(formState.proveedor_id) : Promise.resolve(null)
     ]);
 
     let tipoGastoId = 22; // Fallback Estándar (Despacho / Envíos)
@@ -350,13 +351,13 @@ async function handleGuardar() {
       fecha_gasto: `${formState.fecha_gasto}T12:00:00Z`,
       descripcion_general: formState.descripcion_general?.trim() || `Despacho ${formState.tipo_movimiento_encomienda}`,
       monto_total: monto,
-      cliente_id: finalClienteId,
+      cliente_id: isCirugia ? finalClienteId : null,
       transporte_id: finalTransporteId,
-      proveedor_id: formState.tipo_logistica === 'cirugia' ? null : finalProveedorId,
+      proveedor_id: isCirugia ? null : finalProveedorId,
       provincia_id: formState.provincia_id || null,
       localidad_destino_id: formState.localidad_destino_id || null,
       numero_factura: formState.numero_guia?.trim() || null,
-      paciente_referido: formState.paciente_referido?.trim() || null,
+      paciente_referido: isCirugia ? (formState.paciente_referido?.trim() || null) : null,
       datos_adicionales: {
         modulo: 'logistica',
         origen_carga: 'formulario_movimientos',
@@ -401,11 +402,21 @@ onUnmounted(() => {
   window.removeEventListener('keydown', handleKeyDown);
 });
 
+watch(() => formState.tipo_logistica, (val) => {
+  if (val === 'cirugia') {
+    formState.proveedor_id = null;
+  } else if (val === 'proveedor_otros') {
+    formState.cliente_id = null;
+    formState.paciente_referido = '';
+  }
+});
+
 watch(() => props.initialData, (newVal) => {
   if (newVal && Object.keys(newVal).length > 0) {
     const sanitizedFecha = formatFechaISOToInput(newVal.fecha_gasto);
     Object.assign(formState, {
       ...newVal,
+      tipo_logistica: newVal.tipo_logistica || 'cirugia',
       fecha_gasto: sanitizedFecha,
       transporte_id: extractEntityId(newVal.transporte_id),
       proveedor_id: extractEntityId(newVal.proveedor_id),

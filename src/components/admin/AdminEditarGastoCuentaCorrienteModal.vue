@@ -361,12 +361,12 @@ function validateForm() {
     errorMessage.value = 'La fecha del gasto es obligatoria.';
     return false;
   }
-  if (!formState.transporte_id) {
+  if (!extractEntityId(formState.transporte_id)) {
     errorMessage.value = 'Debe seleccionar la Empresa de Transporte.';
     return false;
   }
   if (formState.tipo_logistica === 'cirugia') {
-    if (!formState.cliente_id) {
+    if (!extractEntityId(formState.cliente_id)) {
       errorMessage.value = 'Para Logística de Cirugía debe seleccionar un Cliente / Obra Social.';
       return false;
     }
@@ -375,7 +375,7 @@ function validateForm() {
       return false;
     }
   } else {
-    if (!formState.proveedor_id) {
+    if (!extractEntityId(formState.proveedor_id)) {
       errorMessage.value = 'Para Proveedor / Otros debe seleccionar el Proveedor Vinculado.';
       return false;
     }
@@ -398,10 +398,11 @@ async function saveGasto() {
 
   saving.value = true;
   try {
+    const isCirugia = formState.tipo_logistica === 'cirugia';
     const [finalClienteId, finalTransporteId, finalProveedorId] = await Promise.all([
-      resolverClienteId(formState.cliente_id),
+      isCirugia ? resolverClienteId(formState.cliente_id) : Promise.resolve(null),
       resolverTransporteId(formState.transporte_id),
-      resolverProveedorId(formState.proveedor_id)
+      !isCirugia ? resolverProveedorId(formState.proveedor_id) : Promise.resolve(null)
     ]);
 
     const datosAdicionales = {

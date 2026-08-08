@@ -512,9 +512,34 @@ function validateStep2() {
   if (isDelegating.value && !delegatedToUserId.value) { stepError.value = 'Debes seleccionar un responsable a quien delegar el gasto.'; return false; }
   if (!formState.tipo_gasto_id) { stepError.value = 'Debes seleccionar un tipo de gasto.'; return false; }
   for (const campo of camposObligatoriosVisibles.value) {
+    if (isLogisticaType.value && isProveedorField(campo) && (formState.tipo_logistica || 'cirugia') === 'cirugia') {
+      continue;
+    }
     if (isValorVacio(getValorCampoDinamico(campo))) {
       stepError.value = `Debes completar el campo "${campo.etiqueta_visible}".`;
       return false;
+    }
+  }
+  if (isLogisticaType.value) {
+    if (!extractEntityId(formState.transporte_id)) {
+      stepError.value = 'Debe seleccionar la Empresa de Transporte.';
+      return false;
+    }
+    const modoLogistica = formState.tipo_logistica || 'cirugia';
+    if (modoLogistica === 'cirugia') {
+      if (!extractEntityId(formState.cliente_id)) {
+        stepError.value = 'Para Logística de Cirugía debe seleccionar un Cliente / Obra Social.';
+        return false;
+      }
+      if (!formState.paciente_referido?.trim()) {
+        stepError.value = 'Para Logística de Cirugía debe ingresar el Paciente Referido.';
+        return false;
+      }
+    } else {
+      if (!extractEntityId(formState.proveedor_id)) {
+        stepError.value = 'Para Proveedor / Otros debe seleccionar el Proveedor Vinculado.';
+        return false;
+      }
     }
   }
   return true;
@@ -589,9 +614,11 @@ async function handleSubmit() {
     const provinciaOrigenIdFinal = formState.provincia_origen_id?.value || formState.provincia_origen_id;
     const provinciaDestinoIdFinal = formState.provincia_destino_id?.value || formState.provincia_destino_id;
 
+    const isCirugia = isLogisticaType.value && (formState.tipo_logistica || 'cirugia') === 'cirugia';
+
     const [finalClienteId, finalProveedorId, finalTransporteId, finalLocalidadOrigenId, finalLocalidadDestinoId] = await Promise.all([
-      resolverEntidadId(formState.cliente_id, 'clientes'),
-      resolverEntidadId(formState.proveedor_id, 'proveedores'),
+      (isLogisticaType.value && !isCirugia) ? Promise.resolve(null) : resolverEntidadId(formState.cliente_id, 'clientes'),
+      (isLogisticaType.value && isCirugia) ? Promise.resolve(null) : resolverEntidadId(formState.proveedor_id, 'proveedores'),
       resolverEntidadId(formState.transporte_id, 'transportes'),
       showTransporteFields.value ? resolverEntidadId(formState.localidad_origen_id, 'localidades', provinciaOrigenIdFinal) : Promise.resolve(null),
       showTransporteFields.value ? resolverEntidadId(formState.localidad_destino_id, 'localidades', provinciaDestinoIdFinal) : Promise.resolve(null)
@@ -650,9 +677,9 @@ async function handleSubmit() {
       factura_url: finalFacturaUrl,
       
       tipo_gasto_id: formState.tipo_gasto_id,
-      cliente_id: finalClienteId,
+      cliente_id: isLogisticaType.value ? (isCirugia ? finalClienteId : null) : finalClienteId,
       transporte_id: finalTransporteId,
-      proveedor_id: finalProveedorId,
+      proveedor_id: isLogisticaType.value ? (isCirugia ? null : finalProveedorId) : finalProveedorId,
       
       provincia_id: provinciaIdFinalGasto,
       provincia: nombreProvincia,

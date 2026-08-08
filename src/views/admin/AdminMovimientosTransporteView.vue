@@ -168,7 +168,13 @@ async function fetchDatosLogistica() {
 
     if (clientesRes.data) clientesOptions.value = clientesRes.data.map(c => ({ id: c.id, label: c.nombre_cliente }));
     if (transportesRes.data) transportesOptions.value = transportesRes.data.map(t => ({ id: t.id, label: t.nombre, created_at: t.created_at }));
-    if (proveedoresRes.data) proveedoresOptions.value = proveedoresRes.data.map(p => ({ id: p.id, label: p.nombre }));
+    if (proveedoresRes.data) {
+      const provs = proveedoresRes.data.map(p => ({ id: p.id, label: p.nombre }));
+      if (!provs.some(p => Number(p.id) === 14)) {
+        provs.unshift({ id: 14, label: 'LOGISTICA CIRUGIA' });
+      }
+      proveedoresOptions.value = provs;
+    }
     if (provinciasRes.data) provinciasOptions.value = provinciasRes.data.map(p => ({ id: p.id, label: p.nombre }));
     if (localidadesRes.data) localidadesOptions.value = localidadesRes.data.map(l => ({ id: l.id, label: l.nombre }));
 
@@ -554,7 +560,13 @@ const movimientosFiltrados = computed(() => {
     const matchesSentido = !filters.sentido || extra.sentido_movimiento === filters.sentido;
     const matchesCliente = !filters.clienteId || String(g.cliente_id) === String(filters.clienteId);
     const matchesPaciente = !filters.paciente || pacienteName.toLowerCase().includes(filters.paciente.toLowerCase().trim());
-    const matchesProveedor = !filters.proveedorId || String(g.proveedor_id) === String(filters.proveedorId);
+    const LOGISTICA_CIRUGIA_ID = 14;
+    const isCirugiaFilter = Number(filters.proveedorId) === LOGISTICA_CIRUGIA_ID;
+    const matchesProveedor = !filters.proveedorId
+      ? true
+      : isCirugiaFilter
+        ? (Number(g.proveedor_id) === LOGISTICA_CIRUGIA_ID || (!g.proveedor_id && (extra.tipo_logistica === 'cirugia' || (g.descripcion_general || '').toLowerCase().includes('cirug'))))
+        : String(g.proveedor_id) === String(filters.proveedorId);
     const matchesProvincia = !filters.provinciaId || String(g.provincia_id) === String(filters.provinciaId);
     const matchesLocalidad = !filters.localidadId || String(g.localidad_destino_id) === String(filters.localidadId);
     const matchesGuia = !filters.numeroGuia || guiaText.toLowerCase().includes(filters.numeroGuia.toLowerCase().trim());
