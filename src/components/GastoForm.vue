@@ -325,6 +325,21 @@ function getSelectorSimpleOptions(campo) {
     .map(opcion => ({ label: opcion, value: opcion }));
 }
 
+function extractEntityId(val) {
+  if (val === null || val === undefined || val === '') return null;
+  if (typeof val === 'number') return val;
+  if (typeof val === 'string' && /^\d+$/.test(val.trim())) return Number(val.trim());
+  if (typeof val === 'object') {
+    const rawId = val.code ?? val.value ?? val.id;
+    if (typeof rawId === 'number') return rawId;
+    if (typeof rawId === 'string' && /^\d+$/.test(rawId.trim())) return Number(rawId.trim());
+    if (typeof rawId === 'string' && rawId.trim() !== '') return rawId.trim();
+    if (val.label && val.__isNew) return val.label.trim();
+  }
+  if (typeof val === 'string' && val.trim() !== '') return val.trim();
+  return val;
+}
+
 function isValorVacio(valor) {
   return valor === null || valor === undefined || valor === '' || (typeof valor === 'string' && valor.trim() === '');
 }
