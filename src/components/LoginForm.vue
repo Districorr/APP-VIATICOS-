@@ -157,7 +157,6 @@ console.log("LoginForm.vue (Revisado v2): Script setup FINALIZADO");
           </button>
         </div>
         <div v-if="errorMessage" class="form-message error-message" role="alert">
-          <p class="font-semibold">Error al iniciar sesión:</p>
           <p>{{ errorMessage }}</p>
         </div>
         <div v-if="successMessage" class="form-message success-message" role="alert">
