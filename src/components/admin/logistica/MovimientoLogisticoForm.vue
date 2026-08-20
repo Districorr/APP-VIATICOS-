@@ -77,16 +77,43 @@ async function cargarOpciones() {
       supabase.from('tipos_gasto_config').select('id, nombre_tipo_gasto'),
     ]);
 
-    if (clientesRes.data) clientesOptions.value = clientesRes.data.map(c => ({ code: c.id, label: c.nombre_cliente }));
-    if (transportesRes.data) transportesOptions.value = transportesRes.data.map(t => ({ code: t.id, label: t.nombre }));
-    if (proveedoresRes.data) proveedoresOptions.value = proveedoresRes.data.map(p => ({ code: p.id, label: p.nombre }));
-    if (provinciasRes.data) provinciasOptions.value = provinciasRes.data.map(p => ({ code: p.id, label: p.nombre }));
+    if (clientesRes.data) clientesOptions.value = clientesRes.data.map(c => ({ code: c.id, value: c.id, label: c.nombre_cliente }));
+    if (transportesRes.data) transportesOptions.value = transportesRes.data.map(t => ({ code: t.id, value: t.id, label: t.nombre }));
+    if (proveedoresRes.data) proveedoresOptions.value = proveedoresRes.data.map(p => ({ code: p.id, value: p.id, label: p.nombre }));
+    if (provinciasRes.data) provinciasOptions.value = provinciasRes.data.map(p => ({ code: p.id, value: p.id, label: p.nombre }));
     if (tiposRes.data) tiposGastoOptions.value = tiposRes.data;
   } catch (e) {
     console.error('Error cargando opciones en MovimientoLogisticoForm:', e);
   } finally {
     loadingOptions.value = false;
   }
+}
+
+function handleCreateCliente(label) {
+  const cleanLabel = (label || '').trim();
+  const opt = { code: cleanLabel, value: cleanLabel, label: cleanLabel, __isNew: true };
+  if (!clientesOptions.value.some(o => o.code === cleanLabel || o.value === cleanLabel || o.label === cleanLabel)) {
+    clientesOptions.value.push(opt);
+  }
+  return opt;
+}
+
+function handleCreateTransporte(label) {
+  const cleanLabel = (label || '').trim();
+  const opt = { code: cleanLabel, value: cleanLabel, label: cleanLabel, __isNew: true };
+  if (!transportesOptions.value.some(o => o.code === cleanLabel || o.value === cleanLabel || o.label === cleanLabel)) {
+    transportesOptions.value.push(opt);
+  }
+  return opt;
+}
+
+function handleCreateProveedor(label) {
+  const cleanLabel = (label || '').trim();
+  const opt = { code: cleanLabel, value: cleanLabel, label: cleanLabel, __isNew: true };
+  if (!proveedoresOptions.value.some(o => o.code === cleanLabel || o.value === cleanLabel || o.label === cleanLabel)) {
+    proveedoresOptions.value.push(opt);
+  }
+  return opt;
 }
 
 async function handleProvinciaChange() {
@@ -104,7 +131,7 @@ async function handleProvinciaChange() {
       .order('nombre');
 
     if (error) throw error;
-    localidadesCache.value[key] = (data || []).map(l => ({ code: l.id, label: l.nombre }));
+    localidadesCache.value[key] = (data || []).map(l => ({ code: l.id, value: l.id, label: l.nombre }));
   } catch (e) {
     console.error('Error cargando localidades:', e);
   }
@@ -118,13 +145,15 @@ const localidadOptionsActuales = computed(() => {
 function extractEntityId(val) {
   if (val === null || val === undefined || val === '') return null;
   if (typeof val === 'number') return val;
-  if (typeof val === 'string' && /^\d+$/.test(val)) return Number(val);
+  if (typeof val === 'string' && /^\d+$/.test(val.trim())) return Number(val.trim());
   if (typeof val === 'object') {
     const rawId = val.code ?? val.value ?? val.id;
     if (typeof rawId === 'number') return rawId;
-    if (typeof rawId === 'string' && /^\d+$/.test(rawId)) return Number(rawId);
+    if (typeof rawId === 'string' && /^\d+$/.test(rawId.trim())) return Number(rawId.trim());
     if (typeof rawId === 'string' && rawId.trim() !== '') return rawId.trim();
+    if (val.label && val.__isNew) return val.label.trim();
   }
+  if (typeof val === 'string' && val.trim() !== '') return val.trim();
   return val;
 }
 
@@ -153,19 +182,18 @@ async function resolverClienteId(val) {
 
   if (existing) return existing.id;
 
-  const { data: newClient, error } = await supabase
-    .from('clientes')
-    .insert([{ nombre_cliente: nombre }])
-    .select('id')
-    .single();
+  const { data: newId, error } = await supabase.rpc('crear_entidad_al_vuelo', {
+    p_nombre_entidad: nombre,
+    p_nombre_tabla: 'clientes'
+  });
 
   if (error) {
     console.error('Error auto-creando cliente:', error);
-    return null;
+    throw new Error(`Error al crear cliente "${nombre}": ${error.message}`);
   }
-  if (newClient) {
-    clientesOptions.value.push({ code: newClient.id, label: nombre });
-    return newClient.id;
+  if (newId) {
+    clientesOptions.value.push({ code: newId, value: newId, label: nombre });
+    return newId;
   }
   return null;
 }
@@ -189,19 +217,18 @@ async function resolverTransporteId(val) {
 
   if (existing) return existing.id;
 
-  const { data: newTrans, error } = await supabase
-    .from('transportes')
-    .insert([{ nombre: nombre }])
-    .select('id')
-    .single();
+  const { data: newId, error } = await supabase.rpc('crear_entidad_al_vuelo', {
+    p_nombre_entidad: nombre,
+    p_nombre_tabla: 'transportes'
+  });
 
   if (error) {
     console.error('Error auto-creando transporte:', error);
-    return null;
+    throw new Error(`Error al crear transporte "${nombre}": ${error.message}`);
   }
-  if (newTrans) {
-    transportesOptions.value.push({ code: newTrans.id, label: nombre });
-    return newTrans.id;
+  if (newId) {
+    transportesOptions.value.push({ code: newId, value: newId, label: nombre });
+    return newId;
   }
   return null;
 }
@@ -225,19 +252,18 @@ async function resolverProveedorId(val) {
 
   if (existing) return existing.id;
 
-  const { data: newProv, error } = await supabase
-    .from('proveedores')
-    .insert([{ nombre: nombre, activo: true }])
-    .select('id')
-    .single();
+  const { data: newId, error } = await supabase.rpc('crear_entidad_al_vuelo', {
+    p_nombre_entidad: nombre,
+    p_nombre_tabla: 'proveedores'
+  });
 
   if (error) {
     console.error('Error auto-creando proveedor:', error);
-    return null;
+    throw new Error(`Error al crear proveedor "${nombre}": ${error.message}`);
   }
-  if (newProv) {
-    proveedoresOptions.value.push({ code: newProv.id, label: nombre });
-    return newProv.id;
+  if (newId) {
+    proveedoresOptions.value.push({ code: newId, value: newId, label: nombre });
+    return newId;
   }
   return null;
 }
@@ -414,29 +440,50 @@ watch(() => formState.tipo_logistica, (val) => {
 watch(() => props.initialData, (newVal) => {
   if (newVal && Object.keys(newVal).length > 0) {
     const sanitizedFecha = formatFechaISOToInput(newVal.fecha_gasto);
-    Object.assign(formState, {
-      ...newVal,
-      tipo_logistica: newVal.tipo_logistica || 'cirugia',
-      fecha_gasto: sanitizedFecha,
-      transporte_id: extractEntityId(newVal.transporte_id),
-      proveedor_id: extractEntityId(newVal.proveedor_id),
-      cliente_id: extractEntityId(newVal.cliente_id),
-      provincia_id: extractEntityId(newVal.provincia_id),
-      localidad_destino_id: extractEntityId(newVal.localidad_destino_id),
-    });
+    if (formState.tipo_logistica !== (newVal.tipo_logistica || 'cirugia')) formState.tipo_logistica = newVal.tipo_logistica || 'cirugia';
+    if (formState.fecha_gasto !== sanitizedFecha) formState.fecha_gasto = sanitizedFecha;
+
+    const newTrans = extractEntityId(newVal.transporte_id);
+    if (formState.transporte_id !== newTrans) formState.transporte_id = newTrans;
+
+    const newProv = extractEntityId(newVal.proveedor_id);
+    if (formState.proveedor_id !== newProv) formState.proveedor_id = newProv;
+
+    const newCli = extractEntityId(newVal.cliente_id);
+    if (formState.cliente_id !== newCli) formState.cliente_id = newCli;
+
+    const newProvincia = extractEntityId(newVal.provincia_id);
+    if (formState.provincia_id !== newProvincia) formState.provincia_id = newProvincia;
+
+    const newLocDest = extractEntityId(newVal.localidad_destino_id);
+    if (formState.localidad_destino_id !== newLocDest) formState.localidad_destino_id = newLocDest;
+
+    if (newVal.paciente_referido !== undefined && formState.paciente_referido !== newVal.paciente_referido) {
+      formState.paciente_referido = newVal.paciente_referido || '';
+    }
+    if (newVal.descripcion_general !== undefined && formState.descripcion_general !== newVal.descripcion_general) {
+      formState.descripcion_general = newVal.descripcion_general || '';
+    }
+    if (newVal.monto_total !== undefined && formState.monto_total !== newVal.monto_total) {
+      formState.monto_total = newVal.monto_total;
+    }
   }
 }, { immediate: true, deep: true });
 
 watch(formState, (newVal) => {
   if (isEmbeddedMode.value && props.initialData) {
     const cleanFecha = formatFechaISOToInput(newVal.fecha_gasto);
-    Object.assign(props.initialData, {
-      ...newVal,
-      fecha_gasto: cleanFecha,
-      transporte_id: extractEntityId(newVal.transporte_id),
-      proveedor_id: extractEntityId(newVal.proveedor_id),
-      cliente_id: extractEntityId(newVal.cliente_id),
-    });
+    const cleanTrans = extractEntityId(newVal.transporte_id);
+    const cleanProv = extractEntityId(newVal.proveedor_id);
+    const cleanCli = extractEntityId(newVal.cliente_id);
+
+    if (props.initialData.transporte_id !== cleanTrans) props.initialData.transporte_id = cleanTrans;
+    if (props.initialData.proveedor_id !== cleanProv) props.initialData.proveedor_id = cleanProv;
+    if (props.initialData.cliente_id !== cleanCli) props.initialData.cliente_id = cleanCli;
+    if (props.initialData.fecha_gasto !== cleanFecha) props.initialData.fecha_gasto = cleanFecha;
+    if (props.initialData.tipo_logistica !== newVal.tipo_logistica) props.initialData.tipo_logistica = newVal.tipo_logistica;
+    if (props.initialData.paciente_referido !== newVal.paciente_referido) props.initialData.paciente_referido = newVal.paciente_referido;
+    if (props.initialData.descripcion_general !== newVal.descripcion_general) props.initialData.descripcion_general = newVal.descripcion_general;
   }
 }, { deep: true });
 </script>
@@ -543,10 +590,10 @@ watch(formState, (newVal) => {
               <v-select
                 v-model="formState.transporte_id"
                 :options="transportesOptions"
-                :reduce="o => o.code"
+                :reduce="o => (o.code !== undefined ? o.code : o.value)"
                 :loading="loadingOptions"
                 taggable
-                :create-option="(label) => ({ code: label, label: label, __isNew: true })"
+                :create-option="handleCreateTransporte"
                 placeholder="Seleccionar o crear transporte..."
                 class="v-select-filter"
               />
@@ -573,10 +620,10 @@ watch(formState, (newVal) => {
                 <v-select
                   v-model="formState.cliente_id"
                   :options="clientesOptions"
-                  :reduce="o => o.code"
+                  :reduce="o => (o.code !== undefined ? o.code : o.value)"
                   :loading="loadingOptions"
                   taggable
-                  :create-option="(label) => ({ code: label, label: label, __isNew: true })"
+                  :create-option="handleCreateCliente"
                   placeholder="Seleccionar o escribir para crear cliente..."
                   class="v-select-filter"
                 />
@@ -604,10 +651,10 @@ watch(formState, (newVal) => {
                 <v-select
                   v-model="formState.proveedor_id"
                   :options="proveedoresOptions"
-                  :reduce="o => o.code"
+                  :reduce="o => (o.code !== undefined ? o.code : o.value)"
                   :loading="loadingOptions"
                   taggable
-                  :create-option="(label) => ({ code: label, label: label, __isNew: true })"
+                  :create-option="handleCreateProveedor"
                   placeholder="Seleccionar o crear proveedor..."
                   class="v-select-filter"
                 />
@@ -616,12 +663,12 @@ watch(formState, (newVal) => {
 
             <label class="field-group">
               <span class="field-label">Provincia Destino</span>
-              <v-select v-model="formState.provincia_id" :options="provinciasOptions" :reduce="o => o.code" placeholder="Provincia" class="v-select-filter" @update:modelValue="handleProvinciaChange" />
+              <v-select v-model="formState.provincia_id" :options="provinciasOptions" :reduce="o => (o.code !== undefined ? o.code : o.value)" placeholder="Provincia" class="v-select-filter" @update:modelValue="handleProvinciaChange" />
             </label>
 
             <label class="field-group">
               <span class="field-label">Localidad Destino</span>
-              <v-select v-model="formState.localidad_destino_id" :options="localidadOptionsActuales" :reduce="o => o.code" :disabled="!formState.provincia_id" placeholder="Localidad" class="v-select-filter" />
+              <v-select v-model="formState.localidad_destino_id" :options="localidadOptionsActuales" :reduce="o => (o.code !== undefined ? o.code : o.value)" :disabled="!formState.provincia_id" placeholder="Localidad" class="v-select-filter" />
             </label>
 
             <label class="field-group">

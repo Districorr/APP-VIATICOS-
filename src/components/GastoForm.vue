@@ -397,8 +397,16 @@ function inicializarFormState() {
       formState.viaje_id = viajeIdPredeterminado;
     }
   }
-  formattedMontoTotal.value = formatCurrencyForInput(formState.monto_total);
+  formattedMontoTotal.value = formState.monto_total ? formatCurrencyForInput(formState.monto_total) : '';
 }
+
+const handleMontoBlur = () => {
+  if (formState.monto_total && formState.monto_total > 0) {
+    formattedMontoTotal.value = formatCurrencyForInput(formState.monto_total);
+  } else {
+    formattedMontoTotal.value = '';
+  }
+};
 
 async function cargarGastoParaEditar() {
   const { data: gastoData, error: gastoError } = await supabase
@@ -435,7 +443,7 @@ async function cargarGastoParaEditar() {
 
   if (gastoData.factura_url) facturaPreview.value = gastoData.factura_url;
   sinFactura.value = !gastoData.numero_factura;
-  formattedMontoTotal.value = formatCurrencyForInput(formState.monto_total || 0);
+  formattedMontoTotal.value = formState.monto_total ? formatCurrencyForInput(formState.monto_total) : '';
   camposOpcionales.value.forEach(campo => {
     const campoTecnico = campo.nombre_campo_tecnico;
     if (formState[campoTecnico] !== null && formState[campoTecnico] !== undefined && formState[campoTecnico] !== '') {
@@ -825,7 +833,7 @@ async function handleSubmit() {
                 <label for="monto_total" class="form-label">Monto Total <span class="text-red-500">*</span></label>
                 <div class="relative mt-1">
                   <div class="pointer-events-none absolute inset-y-0 left-0 flex items-center pl-3"><span class="text-gray-500 sm:text-sm">$</span></div>
-                  <input type="text" id="monto_total" :value="formattedMontoTotal" @input="handleMontoInput" required class="form-input pl-7 text-right" inputmode="decimal" placeholder="0,00" title="Ingrese el monto total del gasto"/>
+                  <input type="text" id="monto_total" :value="formattedMontoTotal" @input="handleMontoInput" @blur="handleMontoBlur" required class="form-input pl-7 text-right" inputmode="decimal" placeholder="0,00" title="Ingrese el monto total del gasto"/>
                 </div>
               </div>
               <transition enter-active-class="transition ease-out duration-200" enter-from-class="opacity-0" enter-to-class="opacity-100" leave-active-class="transition ease-in duration-150" leave-from-class="opacity-100" leave-to-class="opacity-0">
