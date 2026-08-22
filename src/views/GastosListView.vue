@@ -180,54 +180,60 @@ function toggleGastoSelection(gastoId) {
 
 function openGroupModal() {
   if (selectedGastos.value.size === 0) return;
-  const allSelectedUngrouped = Array.from(selectedGastos.value).every(gastoId => {
-    const gasto = gastos.value.find(g => g.id === gastoId);
-    return gasto && !gasto.grupo_id;
-  });
-  if (!allSelectedUngrouped) {
-      groupError.value = "Solo puedes agrupar gastos que no pertenecen a un grupo existente.";
-      setTimeout(() => groupError.value = '', 5000);
-      return;
-  }
   newGroupName.value = '';
-  selectedGroupId.value = null;
+  selectedGroupId.value = existingGroups.value.length > 0 ? existingGroups.value[0].id : null;
   groupAction.value = 'create';
   groupError.value = '';
   showGroupModal.value = true;
 }
 
 async function handleGroupingAction() {
+  if (selectedGastos.value.size === 0) return;
   isGrouping.value = true;
   groupError.value = '';
   try {
     const gastoIdsToUpdate = Array.from(selectedGastos.value);
 
     if (groupAction.value === 'create') {
-      if (!newGroupName.value.trim()) throw new Error("El nombre del nuevo grupo no puede estar vacío.");
+      if (!newGroupName.value.trim()) throw new Error("Ingresá un nombre para el nuevo grupo.");
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) throw new Error("Usuario no autenticado.");
 
-      const { data: newGroup, error: groupError } = await supabase.from('grupos_gastos').insert({ nombre_grupo: newGroupName.value, viaje_id: viajeSeleccionadoInfo.value.id, creado_por_id: user.id }).select().single();
-      if (groupError) throw groupError;
+      const { data: newGroup, error: groupInsertError } = await supabase
+        .from('grupos_gastos')
+        .insert({ 
+          nombre_grupo: newGroupName.value.trim(), 
+          viaje_id: viajeSeleccionadoInfo.value.id, 
+          creado_por_id: user.id 
+        })
+        .select()
+        .single();
 
-      const { error: updateError } = await supabase.from('gastos').update({ grupo_id: newGroup.id }).in('id', gastoIdsToUpdate);
+      if (groupInsertError) throw groupInsertError;
+
+      const { error: updateError } = await supabase
+        .from('gastos')
+        .update({ grupo_id: newGroup.id })
+        .in('id', gastoIdsToUpdate);
+
       if (updateError) throw updateError;
       
     } else if (groupAction.value === 'add') {
       if (!selectedGroupId.value) throw new Error("Debes seleccionar un grupo existente.");
       
-      const { error } = await supabase.rpc('add_gastos_to_grupo', {
-        p_gasto_ids: gastoIdsToUpdate,
-        p_grupo_id: selectedGroupId.value
-      });
-      if (error) throw error;
+      const { error: updateError } = await supabase
+        .from('gastos')
+        .update({ grupo_id: selectedGroupId.value })
+        .in('id', gastoIdsToUpdate);
+
+      if (updateError) throw updateError;
     }
 
     selectedGastos.value.clear();
     showGroupModal.value = false;
     await fetchGastos();
     feedbackMessage.value = "Gastos agrupados con éxito.";
-    setTimeout(() => feedbackMessage.value = '', 4000);
+    setTimeout(() => { feedbackMessage.value = ''; }, 4000);
 
   } catch (e) {
     groupError.value = `Error al agrupar: ${e.message}`;
@@ -834,6 +840,102 @@ const generarRendicionPDFWrapper = () => {
       @close="showFondosModal = false"
       @fondos-agregados="handleFondosAgregados"
     />
+
+    <!-- Barra Flotante de Acciones en Lote (Agrupar / Desagrupar) -->
+    <transition enter-active-class="transform ease-out duration-300 transition" enter-from-class="translate-y-10 opacity-0" enter-to-class="translate-y-0 opacity-100" leave-active-class="transform ease-in duration-200 transition" leave-from-class="translate-y-0 opacity-100" leave-to-class="translate-y-10 opacity-0">
+      <div v-if="selectedGastos.size > 0" class="fixed bottom-8 left-1/2 -translate-x-1/2 z-40 bg-slate-900 text-white px-5 py-3 rounded-2xl shadow-2xl border border-slate-800 flex items-center justify-between gap-4 max-w-xl w-11/12 sm:w-auto">
+        <div class="flex items-center gap-2.5">
+          <span class="w-6 h-6 rounded-full bg-emerald-500 text-slate-950 font-black text-xs flex items-center justify-center font-mono shrink-0">{{ selectedGastos.size }}</span>
+          <span class="text-xs font-bold text-slate-200 whitespace-nowrap">{{ selectedGastos.size === 1 ? '1 seleccionado' : selectedGastos.size + ' seleccionados' }}</span>
+        </div>
+
+        <div class="h-4 w-px bg-slate-700 shrink-0"></div>
+
+        <div class="flex items-center gap-2 shrink-0">
+          <button @click="openGroupModal" class="px-3.5 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 active:scale-95 text-white font-bold text-xs shadow-xs transition-all flex items-center gap-1.5 cursor-pointer">
+            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10"/></svg>
+            Agrupar
+          </button>
+
+          <button v-if="canUngroup" @click="handleUngroup" class="px-3.5 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 font-bold text-xs transition-all flex items-center gap-1.5 cursor-pointer">
+            Desagrupar
+          </button>
+
+          <button @click="selectedGastos.clear()" class="px-2.5 py-1.5 rounded-xl hover:bg-slate-800 text-slate-400 hover:text-white font-bold text-xs transition-all cursor-pointer">
+            Cancelar
+          </button>
+        </div>
+      </div>
+    </transition>
+
+    <!-- Modal de Agrupación de Gastos -->
+    <transition enter-active-class="ease-out duration-300" enter-from-class="opacity-0" enter-to-class="opacity-100" leave-active-class="ease-in duration-200" leave-from-class="opacity-100" leave-to-class="opacity-0">
+      <div v-if="showGroupModal" class="fixed inset-0 z-50 overflow-y-auto bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4">
+        <div class="bg-white rounded-3xl max-w-md w-full p-6 shadow-2xl border border-slate-200 space-y-5">
+          
+          <div class="flex items-center justify-between border-b border-slate-100 pb-3">
+            <div>
+              <h3 class="text-base font-black text-slate-900">Agrupar Comprobantes</h3>
+              <p class="text-xs text-slate-500 font-medium">Vas a agrupar {{ selectedGastos.size }} {{ selectedGastos.size === 1 ? 'comprobante' : 'comprobantes' }}.</p>
+            </div>
+            <button @click="showGroupModal = false" class="w-8 h-8 rounded-full bg-slate-100 text-slate-400 hover:text-slate-700 flex items-center justify-center font-bold">✕</button>
+          </div>
+
+          <div v-if="groupError" class="p-3 bg-red-50 text-red-700 rounded-xl text-xs font-semibold border border-red-200">
+            {{ groupError }}
+          </div>
+
+          <div class="space-y-4 text-xs">
+            <!-- Opción 1: Crear Nuevo Grupo -->
+            <label class="flex items-start gap-3 p-3.5 rounded-2xl border transition-all cursor-pointer" :class="groupAction === 'create' ? 'border-emerald-500 bg-emerald-50/40 ring-2 ring-emerald-500/20' : 'border-slate-200 bg-white hover:bg-slate-50'">
+              <input type="radio" v-model="groupAction" value="create" class="mt-1 text-emerald-600 focus:ring-emerald-500" />
+              <div class="space-y-2 flex-grow">
+                <span class="font-bold text-slate-900 block">Crear un Nuevo Grupo</span>
+                <input 
+                  v-if="groupAction === 'create'" 
+                  type="text" 
+                  v-model="newGroupName" 
+                  placeholder="Ej: Peajes y Combustible, Viáticos Córdoba..." 
+                  class="w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-xs font-semibold text-slate-900 focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20 outline-none"
+                  @keyup.enter="handleGroupingAction"
+                />
+              </div>
+            </label>
+
+            <!-- Opción 2: Añadir a Grupo Existente -->
+            <label v-if="existingGroups.length > 0" class="flex items-start gap-3 p-3.5 rounded-2xl border transition-all cursor-pointer" :class="groupAction === 'add' ? 'border-emerald-500 bg-emerald-50/40 ring-2 ring-emerald-500/20' : 'border-slate-200 bg-white hover:bg-slate-50'">
+              <input type="radio" v-model="groupAction" value="add" class="mt-1 text-emerald-600 focus:ring-emerald-500" />
+              <div class="space-y-2 flex-grow">
+                <span class="font-bold text-slate-900 block">Añadir a un Grupo Existente</span>
+                <select 
+                  v-if="groupAction === 'add'" 
+                  v-model="selectedGroupId" 
+                  class="w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-xs font-bold text-slate-900 focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20 outline-none"
+                >
+                  <option v-for="grupo in existingGroups" :key="grupo.id" :value="grupo.id">{{ grupo.nombre_grupo }}</option>
+                </select>
+              </div>
+            </label>
+          </div>
+
+          <!-- Botones de Acción -->
+          <div class="flex items-center justify-end gap-2 pt-2 border-t border-slate-100">
+            <button @click="showGroupModal = false" class="px-4 py-2 text-xs font-bold text-slate-600 hover:text-slate-900 rounded-xl transition-colors cursor-pointer">
+              Cancelar
+            </button>
+            <button 
+              @click="handleGroupingAction" 
+              :disabled="isGrouping || (groupAction === 'create' && !newGroupName.trim())" 
+              class="px-5 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 active:scale-95 text-white font-bold text-xs shadow-xs transition-all flex items-center gap-2 cursor-pointer disabled:opacity-50"
+            >
+              <svg v-if="isGrouping" class="animate-spin h-3.5 w-3.5 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path></svg>
+              <span>{{ isGrouping ? 'Guardando...' : 'Confirmar Agrupación' }}</span>
+            </button>
+          </div>
+
+        </div>
+      </div>
+    </transition>
 
   </div>
 </template>
