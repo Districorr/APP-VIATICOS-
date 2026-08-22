@@ -34,7 +34,6 @@ const tiposDeGastoDisponibles = ref([]);
 const filtroViajeId = ref('');
 const filtroTipoGastoIds = ref([]);
 const filtroDescripcion = ref('');
-const isExportMenuOpen = ref(false);
 const expandedRows = ref(new Set());
 const isClosingRendicion = ref(false);
 const feedbackMessage = ref('');
@@ -475,14 +474,13 @@ const generarRendicionPDFWrapper = () => {
     return;
   }
   generateCanvaStylePDF(filtroViajeId.value);
-  isExportMenuOpen.value = false;
 };
 </script>
 
 <template>
-  <div class="bg-slate-50 min-h-screen font-sans pb-24 text-slate-800">
+  <div class="bg-slate-50 min-h-screen font-sans pb-24 text-slate-900">
 
-    <!-- Notificación Flotante / Banner de Feedback -->
+    <!-- Banner Flotante de Feedback / Notificación -->
     <transition enter-active-class="transform ease-out duration-300 transition" enter-from-class="translate-y-2 opacity-0 sm:translate-y-0 sm:translate-x-2" enter-to-class="translate-y-0 opacity-100 sm:translate-x-0" leave-active-class="transition ease-in duration-100" leave-from-class="opacity-100" leave-to-class="opacity-0">
       <div v-if="feedbackMessage" class="fixed top-5 right-5 z-50 max-w-md w-full bg-slate-900 text-white px-5 py-4 rounded-2xl shadow-2xl border border-slate-800 flex items-start gap-3.5">
         <div class="w-6 h-6 rounded-full bg-emerald-500/20 text-emerald-400 flex items-center justify-center font-bold text-xs shrink-0 mt-0.5">✓</div>
@@ -497,70 +495,80 @@ const generarRendicionPDFWrapper = () => {
       <button @click="errorMessage = ''" class="text-white/80 hover:text-white font-bold">✕</button>
     </div>
 
-    <!-- Contenedor Principal de Ancho Máximo Estilizado -->
+    <!-- Contenedor Principal -->
     <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pt-6 space-y-6">
 
-      <!-- Encabezado Principal (Solo Título y Acciones de la Rendición) -->
+      <!-- Encabezado de Rendición (Alto Contraste y Acciones Adaptadas) -->
       <div class="bg-white rounded-2xl p-5 sm:p-6 border border-slate-200 shadow-xs flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
           <div class="flex items-center gap-3">
             <h1 class="text-xl sm:text-2xl font-black text-slate-900 tracking-tight truncate">
               {{ viajeSeleccionadoInfo?.nombre_viaje || 'Mis Gastos' }}
             </h1>
-            <span v-if="viajeSeleccionadoInfo?.codigo_rendicion" class="px-3 py-1 rounded-full text-xs font-bold bg-emerald-50 text-emerald-800 border border-emerald-200 font-mono">
+            <span v-if="viajeSeleccionadoInfo?.codigo_rendicion" class="px-3 py-1 rounded-full text-xs font-bold bg-slate-900 text-emerald-400 border border-slate-700 font-mono shadow-xs">
               {{ viajeSeleccionadoInfo.codigo_rendicion }}
             </span>
           </div>
-          <p v-if="!viajeSeleccionadoInfo" class="text-xs text-slate-500 mt-1">Seleccioná una rendición activa para visualizar y gestionar sus comprobantes.</p>
-          <p v-else class="text-xs font-medium text-slate-500 mt-1">
+          <p v-if="!viajeSeleccionadoInfo" class="text-xs text-slate-600 mt-1 font-medium">Seleccioná una rendición activa para gestionar sus comprobantes.</p>
+          <p v-else class="text-xs font-semibold text-slate-600 mt-1">
             Periodo: {{ formatDate(viajeSeleccionadoInfo.fecha_inicio) }} - {{ viajeSeleccionadoInfo.fecha_fin ? formatDate(viajeSeleccionadoInfo.fecha_fin) : 'En curso' }}
           </p>
         </div>
 
-        <!-- Acciones Principales de Rendición -->
-        <div class="flex flex-wrap items-center gap-2.5 shrink-0">
-          <div class="relative" v-if="gastos.length > 0">
-            <button @click="isExportMenuOpen = !isExportMenuOpen" class="px-4 py-2.5 rounded-xl bg-slate-100 hover:bg-slate-200 font-bold text-xs text-slate-700 transition-all flex items-center gap-2 cursor-pointer">
-              <svg class="w-4 h-4 text-slate-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/></svg>
-              Exportar
-            </button>
-            <transition enter-active-class="transition ease-out duration-100" enter-from-class="transform opacity-0 scale-95" enter-to-class="transform opacity-100 scale-100" leave-active-class="transition ease-in duration-75" leave-from-class="transform opacity-100 scale-100" leave-to-class="transform opacity-0 scale-95">
-              <div v-if="isExportMenuOpen" @click.away="isExportMenuOpen = false" class="absolute right-0 mt-2 w-48 rounded-xl bg-white shadow-xl ring-1 ring-slate-900/5 focus:outline-none z-30 overflow-hidden p-1">
-                <button @click="generarRendicionPDFWrapper" class="w-full text-left px-3 py-2 rounded-lg text-xs font-bold text-slate-700 hover:bg-emerald-50 hover:text-emerald-700 transition-colors flex items-center gap-2">
-                  <svg class="w-4 h-4 text-emerald-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 21h10a2 2 0 002-2V9.414a1 1 0 00-.293-.707l-5.414-5.414A1 1 0 0012.586 3H7a2 2 0 00-2 2v14a2 2 0 002 2z"/></svg>
-                  Exportar PDF Canva
-                </button>
-              </div>
-            </transition>
-          </div>
+        <!-- Acciones Principales Adaptadas Móvil y Desktop -->
+        <div class="flex items-center gap-2 shrink-0">
 
-          <button v-if="viajeSeleccionadoInfo && !isViajeActualCerrado" @click="showFondosModal = true" class="px-4 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl font-bold text-xs shadow-sm transition-all flex items-center gap-2 cursor-pointer">
-            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M12 6v6m0 0v6m0-6h6m-6 0H6"/></svg>
-            Agregar Fondos
+          <!-- Botón Exportar PDF Adaptado Responsive -->
+          <button 
+            v-if="gastos.length > 0"
+            @click="generarRendicionPDFWrapper" 
+            class="px-3.5 py-2.5 rounded-xl bg-white border border-slate-300 hover:bg-slate-100 text-slate-800 font-bold text-xs shadow-xs transition-all flex items-center gap-2 cursor-pointer"
+            title="Exportar Reporte Rendición PDF"
+          >
+            <svg class="w-4 h-4 text-emerald-600 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/></svg>
+            <span class="hidden sm:inline">Exportar PDF</span>
+            <span class="sm:hidden">PDF</span>
           </button>
 
-          <button v-if="viajeSeleccionadoInfo && !isViajeActualCerrado" @click="cerrarRendicion" :disabled="isClosingRendicion || gastos.length === 0" class="px-4 py-2.5 bg-slate-900 hover:bg-slate-800 text-white rounded-xl font-bold text-xs shadow-sm transition-all flex items-center gap-2 cursor-pointer disabled:opacity-50">
+          <!-- Botón "Agregar Fondos" como ÍCONO Verde -->
+          <button 
+            v-if="viajeSeleccionadoInfo && !isViajeActualCerrado" 
+            @click="showFondosModal = true" 
+            class="w-10 h-10 rounded-xl bg-emerald-600 hover:bg-emerald-700 active:scale-95 text-white shadow-xs transition-all flex items-center justify-center cursor-pointer shrink-0"
+            title="Agregar Fondos a esta Rendición"
+          >
+            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M12 6v6m0 0v6m0-6h6m-6 0H6"/></svg>
+          </button>
+
+          <!-- Botón Cerrar Rendición -->
+          <button 
+            v-if="viajeSeleccionadoInfo && !isViajeActualCerrado" 
+            @click="cerrarRendicion" 
+            :disabled="isClosingRendicion || gastos.length === 0" 
+            class="px-4 py-2.5 bg-slate-900 hover:bg-slate-800 text-white rounded-xl font-bold text-xs shadow-sm transition-all flex items-center gap-2 cursor-pointer disabled:opacity-50"
+          >
             <svg v-if="!isClosingRendicion" class="w-4 h-4 text-slate-300" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg>
             <svg v-else class="animate-spin h-4 w-4 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path></svg>
-            {{ isClosingRendicion ? 'Cerrando...' : 'Cerrar Rendición' }}
+            <span class="hidden sm:inline">{{ isClosingRendicion ? 'Cerrando...' : 'Cerrar Rendición' }}</span>
+            <span class="sm:hidden">{{ isClosingRendicion ? '...' : 'Cerrar' }}</span>
           </button>
         </div>
       </div>
 
-      <!-- Tarjetas de Resumen Financiero (KPI) Fluyen de Forma Natural sin Tapar Filtros -->
+      <!-- Tarjetas de Resumen Financiero (KPI) -->
       <div class="grid grid-cols-1 sm:grid-cols-3 gap-4">
         <SummaryCard title="Adelanto Total" :value="adelantoTotal" :total="adelantoTotal > 0 ? adelantoTotal : 1" color="#3B82F6" />
         <SummaryCard title="Total Gastado" :value="totalGastado" :total="adelantoTotal" :color="totalGastado > adelantoTotal ? '#EF4444' : '#10B981'" />
         <SummaryCard title="Saldo Actual" :value="saldoActualRendicion" :format-as-currency="true" :color="saldoActualRendicion >= 0 ? '#475569' : '#EF4444'" :show-chart="false" />
       </div>
 
-      <!-- Tarjeta Espaciosa de Filtros y Selector de Rendición -->
+      <!-- Tarjeta de Filtros -->
       <div class="bg-white p-5 rounded-2xl border border-slate-200 shadow-xs space-y-4">
         <div class="grid grid-cols-1 md:grid-cols-12 gap-4 items-end">
 
           <!-- Selector Rendición Activa -->
           <div class="md:col-span-5 space-y-1">
-            <label for="filtro-viaje" class="block text-xs font-bold uppercase tracking-wider text-slate-700">Rendición Activa</label>
+            <label for="filtro-viaje" class="block text-xs font-bold uppercase tracking-wider text-slate-800">Rendición Activa</label>
             <select id="filtro-viaje" v-model="filtroViajeId" class="w-full rounded-xl border border-slate-300 bg-white px-3.5 py-2.5 text-xs font-bold text-slate-900 focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20 outline-none transition-all cursor-pointer">
               <option value="" disabled>Selecciona una rendición</option>
               <option v-if="listaViajesParaFiltro.length === 0" value="" disabled>No tienes rendiciones</option>
@@ -570,7 +578,7 @@ const generarRendicionPDFWrapper = () => {
 
           <!-- Búsqueda General -->
           <div class="md:col-span-4 space-y-1">
-            <label for="filtro-descripcion" class="block text-xs font-bold uppercase tracking-wider text-slate-700">Buscar en la Rendición</label>
+            <label for="filtro-descripcion" class="block text-xs font-bold uppercase tracking-wider text-slate-800">Buscar en la Rendición</label>
             <div class="relative">
               <input id="filtro-descripcion" type="text" v-model="filtroDescripcion" placeholder="Ej: Peaje, Nafta, Hotel..." class="w-full rounded-xl border border-slate-300 bg-white pl-9 pr-3.5 py-2.5 text-xs font-semibold text-slate-900 focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20 outline-none transition-all"/>
               <svg class="w-4 h-4 text-slate-400 absolute left-3 top-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/></svg>
@@ -579,10 +587,10 @@ const generarRendicionPDFWrapper = () => {
 
           <!-- Acciones de Filtro -->
           <div class="md:col-span-3 flex items-center justify-end gap-2">
-            <button @click="handleGroupByType" :disabled="isGroupingByType || isViajeActualCerrado || gastos.length === 0" class="px-3 py-2 text-xs font-bold text-slate-600 hover:text-emerald-700 transition-colors cursor-pointer disabled:opacity-40" title="Agrupar por tipo de gasto">
+            <button @click="handleGroupByType" :disabled="isGroupingByType || isViajeActualCerrado || gastos.length === 0" class="px-3 py-2 text-xs font-bold text-slate-700 hover:text-emerald-700 transition-colors cursor-pointer disabled:opacity-40" title="Agrupar por tipo de gasto">
               Agrupar por Tipo
             </button>
-            <button @click="isConciliacionMode = !isConciliacionMode" class="px-3.5 py-2 rounded-xl text-xs font-bold border transition-all cursor-pointer flex items-center gap-1.5" :class="isConciliacionMode ? 'bg-indigo-50 text-indigo-700 border-indigo-300' : 'bg-white text-slate-700 border-slate-300 hover:bg-slate-50'">
+            <button @click="isConciliacionMode = !isConciliacionMode" class="px-3.5 py-2 rounded-xl text-xs font-bold border transition-all cursor-pointer flex items-center gap-1.5" :class="isConciliacionMode ? 'bg-indigo-50 text-indigo-700 border-indigo-300' : 'bg-white text-slate-800 border-slate-300 hover:bg-slate-50'">
               <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
               Conciliar
             </button>
@@ -596,37 +604,37 @@ const generarRendicionPDFWrapper = () => {
         <div v-if="isConciliacionMode" class="p-4 bg-indigo-50 border border-indigo-200 rounded-2xl space-y-3">
           <div class="flex flex-col sm:flex-row items-center justify-between gap-4">
             <div class="space-y-1">
-              <label class="block text-xs font-bold uppercase tracking-wider text-indigo-900">Estado de Revisión de Comprobantes</label>
+              <label class="block text-xs font-bold uppercase tracking-wider text-indigo-950">Estado de Revisión de Comprobantes</label>
               <div class="inline-flex rounded-xl p-1 bg-white border border-indigo-200 shadow-xs">
-                <button @click="filtroRevisado = 'todos'" :class="filtroRevisado === 'todos' ? 'bg-indigo-600 text-white font-bold' : 'text-slate-600 font-semibold'" class="px-3 py-1 text-xs rounded-lg transition-all cursor-pointer">Todos</button>
-                <button @click="filtroRevisado = 'no_revisados'" :class="filtroRevisado === 'no_revisados' ? 'bg-indigo-600 text-white font-bold' : 'text-slate-600 font-semibold'" class="px-3 py-1 text-xs rounded-lg transition-all cursor-pointer">Pendientes</button>
-                <button @click="filtroRevisado = 'revisados'" :class="filtroRevisado === 'revisados' ? 'bg-indigo-600 text-white font-bold' : 'text-slate-600 font-semibold'" class="px-3 py-1 text-xs rounded-lg transition-all cursor-pointer">Revisados</button>
+                <button @click="filtroRevisado = 'todos'" :class="filtroRevisado === 'todos' ? 'bg-indigo-600 text-white font-bold' : 'text-slate-700 font-semibold'" class="px-3 py-1 text-xs rounded-lg transition-all cursor-pointer">Todos</button>
+                <button @click="filtroRevisado = 'no_revisados'" :class="filtroRevisado === 'no_revisados' ? 'bg-indigo-600 text-white font-bold' : 'text-slate-700 font-semibold'" class="px-3 py-1 text-xs rounded-lg transition-all cursor-pointer">Pendientes</button>
+                <button @click="filtroRevisado = 'revisados'" :class="filtroRevisado === 'revisados' ? 'bg-indigo-600 text-white font-bold' : 'text-slate-700 font-semibold'" class="px-3 py-1 text-xs rounded-lg transition-all cursor-pointer">Revisados</button>
               </div>
             </div>
             <div class="text-right text-xs">
-              <span class="block text-slate-500 font-semibold">Total Registrado en Sistema</span>
+              <span class="block text-slate-600 font-semibold">Total Registrado en Sistema</span>
               <span class="text-base font-black text-slate-900">{{ formatCurrency(totalGastado) }}</span>
             </div>
           </div>
         </div>
       </transition>
 
-      <!-- Estado de Rendición (Aprobada / Rechazada / Pendiente) -->
-      <div v-if="viajeSeleccionadoInfo?.estado_aprobacion === 'pendiente_aprobacion'" class="p-4 text-center text-xs font-bold bg-amber-50 text-amber-800 border border-amber-200 rounded-2xl shadow-xs">
+      <!-- Estado de Rendición -->
+      <div v-if="viajeSeleccionadoInfo?.estado_aprobacion === 'pendiente_aprobacion'" class="p-4 text-center text-xs font-bold bg-amber-50 text-amber-900 border border-amber-300 rounded-2xl shadow-xs">
         Esta rendición está cerrada y en proceso de auditoría/aprobación por administración.
       </div>
-      <div v-else-if="viajeSeleccionadoInfo?.estado_aprobacion === 'aprobado'" class="p-4 text-center text-xs font-bold bg-emerald-50 text-emerald-800 border border-emerald-200 rounded-2xl shadow-xs">
+      <div v-else-if="viajeSeleccionadoInfo?.estado_aprobacion === 'aprobado'" class="p-4 text-center text-xs font-bold bg-emerald-50 text-emerald-900 border border-emerald-300 rounded-2xl shadow-xs">
         ¡Rendición auditada y aprobada exitosamente!
       </div>
-      <div v-else-if="viajeSeleccionadoInfo?.estado_aprobacion === 'rechazado'" class="p-4 text-xs bg-red-50 text-red-800 border border-red-200 rounded-2xl space-y-1 shadow-xs">
+      <div v-else-if="viajeSeleccionadoInfo?.estado_aprobacion === 'rechazado'" class="p-4 text-xs bg-red-50 text-red-900 border border-red-300 rounded-2xl space-y-1 shadow-xs">
         <p class="font-bold">Esta rendición fue rechazada por administración.</p>
-        <p v-if="viajeSeleccionadoInfo.comentarios_aprobacion" class="text-red-700">Observación: "{{ viajeSeleccionadoInfo.comentarios_aprobacion }}"</p>
+        <p v-if="viajeSeleccionadoInfo.comentarios_aprobacion" class="text-red-800">Observación: "{{ viajeSeleccionadoInfo.comentarios_aprobacion }}"</p>
       </div>
 
       <!-- Estado de Carga -->
       <div v-if="loading" class="py-20 text-center space-y-3">
         <svg class="animate-spin h-8 w-8 text-emerald-600 mx-auto" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg>
-        <p class="text-xs font-bold text-slate-500">Cargando comprobantes...</p>
+        <p class="text-xs font-bold text-slate-600">Cargando comprobantes...</p>
       </div>
 
       <!-- Estado Vacío -->
@@ -635,35 +643,37 @@ const generarRendicionPDFWrapper = () => {
           <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/></svg>
         </div>
         <h3 class="text-sm font-bold text-slate-800">Sin gastos cargados</h3>
-        <p class="text-xs text-slate-500">Hacé clic en el botón verde flotante "+" o en "Agregar Fondos" para comenzar.</p>
+        <p class="text-xs text-slate-600">Hacé clic en el botón verde flotante "+" o en el ícono de recarga para agregar fondos.</p>
       </div>
 
-      <!-- LISTA DE GASTOS PROPORCIONADA Y ESPACIOSA -->
+      <!-- LISTA DE GASTOS CON ALTO CONTRASATE Y ENCABEZADOS OSCUROS -->
       <div v-else class="space-y-6">
 
-        <!-- TABLA DE ESCRITORIO CON ALTOS NIVELES DE CLARIDAD -->
+        <!-- VISTA DE ESCRITORIO CON ENCABEZADOS DE ALTO CONTRASATE -->
         <div class="hidden lg:block space-y-6">
-          <div v-for="grupo in gastosRenderList.userGroups.concat(gastosRenderList.dateGroups)" :key="grupo.id">
+          <div v-for="grupo in gastosRenderList.userGroups.concat(gastosRenderList.dateGroups)" :key="grupo.id" class="space-y-3">
             
-            <!-- Título de Sección / Grupo -->
-            <div class="flex items-center justify-between mb-3 px-1">
-              <div class="flex items-center gap-2">
-                <span class="w-2.5 h-2.5 rounded-full bg-emerald-500"></span>
-                <h2 class="text-xs font-black uppercase tracking-wider text-slate-700 font-mono">{{ grupo.name }}</h2>
-                <span class="text-[11px] font-bold text-slate-400 bg-slate-200/60 px-2 py-0.5 rounded-full">{{ grupo.gastos.length }} ítems</span>
+            <!-- Encabezado Oscuro de Grupo / Sección -->
+            <div class="bg-slate-900 text-white rounded-2xl p-3 px-4 shadow-sm border border-slate-800 flex items-center justify-between">
+              <div class="flex items-center gap-3">
+                <span class="w-3 h-3 rounded-full bg-emerald-400 shadow-xs"></span>
+                <h2 class="text-xs font-black uppercase tracking-wider text-slate-100 font-mono">{{ grupo.name }}</h2>
+                <span class="px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-slate-800 text-emerald-400 border border-slate-700 font-mono">
+                  {{ grupo.gastos.length }} {{ grupo.gastos.length === 1 ? 'comprobante' : 'comprobantes' }}
+                </span>
               </div>
 
-              <div v-if="grupo.isGroup && !isViajeActualCerrado" class="flex items-center gap-3">
-                <button @click="handleRenameGroup(grupo.id)" class="text-xs font-bold text-slate-500 hover:text-slate-900 transition-colors cursor-pointer">Renombrar</button>
-                <button @click="handleDeleteGroup(grupo.id, grupo.name)" class="text-xs font-bold text-red-500 hover:text-red-700 transition-colors cursor-pointer">Eliminar</button>
+              <div v-if="grupo.isGroup && !isViajeActualCerrado" class="flex items-center gap-2">
+                <button @click="handleRenameGroup(grupo.id)" class="px-2.5 py-1 text-xs font-bold text-slate-300 hover:text-white bg-slate-800 rounded-lg hover:bg-slate-700 transition-colors cursor-pointer">Renombrar</button>
+                <button @click="handleDeleteGroup(grupo.id, grupo.name)" class="px-2.5 py-1 text-xs font-bold text-red-400 hover:text-red-300 bg-red-950/60 rounded-lg hover:bg-red-900/80 transition-colors cursor-pointer">Eliminar</button>
               </div>
             </div>
 
-            <!-- Tabla Card -->
+            <!-- Tabla Card con Encabezados de Alto Contraste -->
             <div class="bg-white rounded-2xl border border-slate-200 shadow-xs overflow-hidden">
               <table class="w-full text-left text-xs">
                 <thead>
-                  <tr class="bg-slate-100/70 border-b border-slate-200 text-slate-600 font-bold uppercase tracking-wider text-[11px]">
+                  <tr class="bg-slate-200/80 border-b border-slate-300 text-slate-900 font-black uppercase tracking-wider text-[11px]">
                     <th class="py-3.5 px-4 w-10 text-center"></th>
                     <th class="py-3.5 px-4 w-12 text-center">Ícono</th>
                     <th class="py-3.5 px-4 sortable cursor-pointer" @click="sortBy('fecha_gasto')">Fecha</th>
@@ -678,51 +688,51 @@ const generarRendicionPDFWrapper = () => {
                   <template v-for="gasto in grupo.gastos" :key="gasto.id">
                     <tr 
                       @click="toggleRowExpansion(gasto.id)"
-                      class="hover:bg-slate-50/90 transition-colors cursor-pointer"
-                      :class="{'bg-indigo-50/60': selectedGastos.has(gasto.id)}"
+                      class="hover:bg-slate-50 transition-colors cursor-pointer"
+                      :class="{'bg-indigo-50/70': selectedGastos.has(gasto.id)}"
                     >
                       <td class="py-3.5 px-4 text-center" @click.stop>
                         <input type="checkbox" :checked="selectedGastos.has(gasto.id)" @change="toggleGastoSelection(gasto.id)" class="rounded border-slate-300 text-emerald-600 focus:ring-emerald-500 cursor-pointer" :disabled="isViajeActualCerrado">
                       </td>
                       <td class="py-3.5 px-4 text-center">
-                        <div class="w-9 h-9 rounded-xl bg-slate-100 border border-slate-200/60 flex items-center justify-center text-slate-800 shrink-0 mx-auto">
+                        <div class="w-9 h-9 rounded-xl bg-slate-100 border border-slate-200 flex items-center justify-center text-slate-800 shrink-0 mx-auto">
                           <IconRenderer :icon-data="gasto.tipos_gasto_config?.icono_svg" :color="gasto.tipos_gasto_config?.color_accent" />
                         </div>
                       </td>
-                      <td class="py-3.5 px-4 font-bold text-slate-700 whitespace-nowrap">{{ formatDate(gasto.fecha_gasto) }}</td>
+                      <td class="py-3.5 px-4 font-bold text-slate-800 whitespace-nowrap">{{ formatDate(gasto.fecha_gasto) }}</td>
                       <td class="py-3.5 px-4 font-black text-slate-900 whitespace-nowrap">{{ gasto.tipos_gasto_config?.nombre_tipo_gasto || 'Gasto General' }}</td>
-                      <td class="py-3.5 px-4 text-slate-600 max-w-sm truncate font-medium">{{ gasto.descripcion_general || 'Sin detalle' }}</td>
-                      <td class="py-3.5 px-4 text-slate-500 font-mono font-semibold">{{ gasto.numero_factura || '-' }}</td>
+                      <td class="py-3.5 px-4 text-slate-700 max-w-sm truncate font-medium">{{ gasto.descripcion_general || 'Sin detalle' }}</td>
+                      <td class="py-3.5 px-4 text-slate-600 font-mono font-bold">{{ gasto.numero_factura || '-' }}</td>
                       <td class="py-3.5 px-4 text-right font-black text-slate-900 text-sm whitespace-nowrap">{{ formatCurrency(gasto.monto_total) }}</td>
                       <td class="py-3.5 px-4 text-center" @click.stop>
                         <div class="flex items-center justify-center gap-1.5">
-                          <a v-if="gasto.factura_url" :href="gasto.factura_url" target="_blank" class="w-8 h-8 rounded-lg border border-slate-200 bg-white hover:bg-slate-100 text-slate-600 flex items-center justify-center transition-colors" title="Ver Comprobante">
+                          <a v-if="gasto.factura_url" :href="gasto.factura_url" target="_blank" class="w-8 h-8 rounded-lg border border-slate-300 bg-white hover:bg-slate-100 text-slate-700 flex items-center justify-center transition-colors" title="Ver Comprobante">
                             <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"/></svg>
                           </a>
-                          <button @click="editarGasto(gasto)" :disabled="isViajeActualCerrado" class="w-8 h-8 rounded-lg border border-slate-200 bg-white hover:bg-emerald-50 hover:text-emerald-700 text-slate-600 flex items-center justify-center transition-colors cursor-pointer" title="Editar Gasto">
+                          <button @click="editarGasto(gasto)" :disabled="isViajeActualCerrado" class="w-8 h-8 rounded-lg border border-slate-300 bg-white hover:bg-emerald-50 hover:text-emerald-700 text-slate-700 flex items-center justify-center transition-colors cursor-pointer" title="Editar Gasto">
                             <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"/></svg>
                           </button>
-                          <button @click="eliminarGasto(gasto.id)" :disabled="isViajeActualCerrado" class="w-8 h-8 rounded-lg border border-slate-200 bg-white hover:bg-red-50 hover:text-red-600 text-slate-600 flex items-center justify-center transition-colors cursor-pointer" title="Eliminar Gasto">
+                          <button @click="eliminarGasto(gasto.id)" :disabled="isViajeActualCerrado" class="w-8 h-8 rounded-lg border border-slate-300 bg-white hover:bg-red-50 hover:text-red-600 text-slate-700 flex items-center justify-center transition-colors cursor-pointer" title="Eliminar Gasto">
                             <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/></svg>
                           </button>
                         </div>
                       </td>
                     </tr>
 
-                    <!-- Detalle Expandido (Solamente mostrando campos poblados) -->
+                    <!-- Detalle Expandido -->
                     <tr v-if="expandedRows.has(gasto.id)" class="bg-slate-50 border-b border-slate-200">
                       <td colspan="8" class="p-5">
                         <div class="space-y-3 text-xs">
-                          <h4 class="font-bold text-slate-700 uppercase tracking-wider text-[11px]">Detalles del Comprobante</h4>
+                          <h4 class="font-black text-slate-900 uppercase tracking-wider text-[11px]">Detalles del Comprobante</h4>
                           
-                          <div v-if="hasDetailedInfo(gasto)" class="grid grid-cols-2 sm:grid-cols-4 gap-4 text-slate-600">
-                            <div v-if="gasto.clientes?.nombre_cliente"><span class="block font-bold text-slate-800">Cliente:</span>{{ gasto.clientes.nombre_cliente }}</div>
-                            <div v-if="gasto.proveedores?.nombre"><span class="block font-bold text-slate-800">Proveedor:</span>{{ gasto.proveedores.nombre }}</div>
-                            <div v-if="gasto.transportes?.nombre"><span class="block font-bold text-slate-800">Transporte:</span>{{ gasto.transportes.nombre }}</div>
-                            <div v-if="gasto.nombre_chofer"><span class="block font-bold text-slate-800">Chofer:</span>{{ gasto.nombre_chofer }}</div>
-                            <div v-if="gasto.vehiculos"><span class="block font-bold text-slate-800">Vehículo:</span>{{ gasto.vehiculos.marca }} {{ gasto.vehiculos.modelo }} ({{ gasto.vehiculos.patente }})</div>
+                          <div v-if="hasDetailedInfo(gasto)" class="grid grid-cols-2 sm:grid-cols-4 gap-4 text-slate-700">
+                            <div v-if="gasto.clientes?.nombre_cliente"><span class="block font-bold text-slate-900">Cliente:</span>{{ gasto.clientes.nombre_cliente }}</div>
+                            <div v-if="gasto.proveedores?.nombre"><span class="block font-bold text-slate-900">Proveedor:</span>{{ gasto.proveedores.nombre }}</div>
+                            <div v-if="gasto.transportes?.nombre"><span class="block font-bold text-slate-900">Transporte:</span>{{ gasto.transportes.nombre }}</div>
+                            <div v-if="gasto.nombre_chofer"><span class="block font-bold text-slate-900">Chofer:</span>{{ gasto.nombre_chofer }}</div>
+                            <div v-if="gasto.vehiculos"><span class="block font-bold text-slate-900">Vehículo:</span>{{ gasto.vehiculos.marca }} {{ gasto.vehiculos.modelo }} ({{ gasto.vehiculos.patente }})</div>
                           </div>
-                          <p v-else class="text-slate-400 font-semibold italic">No existen datos adicionales registrados para este comprobante.</p>
+                          <p v-else class="text-slate-500 font-semibold italic">No existen datos adicionales registrados para este comprobante.</p>
 
                           <DetallesJson v-if="gasto.datos_adicionales && Object.keys(gasto.datos_adicionales).length > 0" :datos="gasto.datos_adicionales" class="pt-3 border-t border-slate-200"/>
                         </div>
@@ -736,13 +746,16 @@ const generarRendicionPDFWrapper = () => {
           </div>
         </div>
 
-        <!-- VISTA MÓVIL REFINADA -->
+        <!-- VISTA MÓVIL REFINADA DE ALTO CONTRASATE -->
         <div class="lg:hidden space-y-5">
           <div v-for="grupo in gastosRenderList.userGroups.concat(gastosRenderList.dateGroups)" :key="grupo.id + '-mobile'" class="space-y-2.5">
             
-            <div class="flex items-center justify-between px-1">
-              <span class="text-xs font-black text-slate-600 uppercase tracking-wider">{{ grupo.name }}</span>
-              <span class="text-[11px] font-bold text-slate-400 bg-slate-200/60 px-2 py-0.5 rounded-full">{{ grupo.gastos.length }} ítems</span>
+            <div class="bg-slate-900 text-white rounded-2xl p-3 px-4 shadow-xs border border-slate-800 flex items-center justify-between">
+              <div class="flex items-center gap-2.5">
+                <span class="w-2.5 h-2.5 rounded-full bg-emerald-400"></span>
+                <span class="text-xs font-black text-slate-100 uppercase tracking-wider font-mono">{{ grupo.name }}</span>
+              </div>
+              <span class="text-[11px] font-bold text-emerald-400 bg-slate-800 px-2 py-0.5 rounded-full border border-slate-700 font-mono">{{ grupo.gastos.length }} ítems</span>
             </div>
 
             <div class="space-y-2">
@@ -750,41 +763,41 @@ const generarRendicionPDFWrapper = () => {
                 v-for="gasto in grupo.gastos" 
                 :key="gasto.id" 
                 @click="toggleRowExpansion(gasto.id)"
-                class="bg-white rounded-2xl p-4 border border-slate-200/80 shadow-xs space-y-3 cursor-pointer"
+                class="bg-white rounded-2xl p-4 border border-slate-200 shadow-xs space-y-3 cursor-pointer"
               >
                 <div class="flex items-center justify-between gap-3">
                   <div class="flex items-center gap-3 min-w-0">
-                    <div class="w-11 h-11 rounded-2xl bg-slate-100 border border-slate-200/60 flex items-center justify-center text-slate-800 shrink-0">
+                    <div class="w-11 h-11 rounded-2xl bg-slate-100 border border-slate-200 flex items-center justify-center text-slate-800 shrink-0">
                       <IconRenderer :icon-data="gasto.tipos_gasto_config?.icono_svg" :color="gasto.tipos_gasto_config?.color_accent" />
                     </div>
 
                     <div class="min-w-0">
                       <h4 class="text-sm font-bold text-slate-900 truncate">{{ gasto.tipos_gasto_config?.nombre_tipo_gasto || 'Gasto' }}</h4>
-                      <p class="text-xs text-slate-500 truncate mt-0.5">{{ gasto.descripcion_general || 'Sin descripción' }}</p>
+                      <p class="text-xs text-slate-600 truncate mt-0.5 font-medium">{{ gasto.descripcion_general || 'Sin descripción' }}</p>
                     </div>
                   </div>
 
                   <div class="text-right shrink-0">
                     <span class="text-base font-black text-slate-900 block">{{ formatCurrency(gasto.monto_total) }}</span>
-                    <span class="text-[10px] font-semibold text-slate-400">{{ formatDate(gasto.fecha_gasto) }}</span>
+                    <span class="text-[10px] font-bold text-slate-500">{{ formatDate(gasto.fecha_gasto) }}</span>
                   </div>
                 </div>
 
                 <!-- Detalle Expandido en Móvil -->
                 <transition enter-active-class="transition ease-out duration-200" enter-from-class="opacity-0 translate-y-[-4px]" enter-to-class="opacity-100 translate-y-0">
-                  <div v-if="expandedRows.has(gasto.id)" class="pt-3 border-t border-slate-100 space-y-2 text-xs text-slate-600">
-                    <div v-if="gasto.proveedores?.nombre" class="flex justify-between"><span class="font-bold text-slate-800">Proveedor:</span><span>{{ gasto.proveedores.nombre }}</span></div>
-                    <div v-if="gasto.clientes?.nombre_cliente" class="flex justify-between"><span class="font-bold text-slate-800">Cliente:</span><span>{{ gasto.clientes.nombre_cliente }}</span></div>
-                    <div v-if="gasto.numero_factura" class="flex justify-between"><span class="font-bold text-slate-800">Nº Factura:</span><span class="font-mono">{{ gasto.numero_factura }}</span></div>
+                  <div v-if="expandedRows.has(gasto.id)" class="pt-3 border-t border-slate-100 space-y-2 text-xs text-slate-700">
+                    <div v-if="gasto.proveedores?.nombre" class="flex justify-between"><span class="font-bold text-slate-900">Proveedor:</span><span>{{ gasto.proveedores.nombre }}</span></div>
+                    <div v-if="gasto.clientes?.nombre_cliente" class="flex justify-between"><span class="font-bold text-slate-900">Cliente:</span><span>{{ gasto.clientes.nombre_cliente }}</span></div>
+                    <div v-if="gasto.numero_factura" class="flex justify-between"><span class="font-bold text-slate-900">Nº Factura:</span><span class="font-mono font-bold">{{ gasto.numero_factura }}</span></div>
                     
-                    <div class="pt-2 flex items-center justify-end gap-3" @click.stop>
-                      <a v-if="gasto.factura_url" :href="gasto.factura_url" target="_blank" class="px-3 py-1.5 bg-slate-100 text-slate-700 rounded-xl font-bold text-xs">
+                    <div class="pt-2 flex items-center justify-end gap-2" @click.stop>
+                      <a v-if="gasto.factura_url" :href="gasto.factura_url" target="_blank" class="px-3 py-1.5 bg-slate-100 text-slate-800 border border-slate-200 rounded-xl font-bold text-xs">
                         Comprobante
                       </a>
-                      <button @click="editarGasto(gasto)" :disabled="isViajeActualCerrado" class="px-3 py-1.5 bg-emerald-50 text-emerald-700 rounded-xl font-bold text-xs cursor-pointer">
+                      <button @click="editarGasto(gasto)" :disabled="isViajeActualCerrado" class="px-3 py-1.5 bg-emerald-50 text-emerald-800 border border-emerald-200 rounded-xl font-bold text-xs cursor-pointer">
                         Editar
                       </button>
-                      <button @click="eliminarGasto(gasto.id)" :disabled="isViajeActualCerrado" class="px-3 py-1.5 bg-red-50 text-red-700 rounded-xl font-bold text-xs cursor-pointer">
+                      <button @click="eliminarGasto(gasto.id)" :disabled="isViajeActualCerrado" class="px-3 py-1.5 bg-red-50 text-red-800 border border-red-200 rounded-xl font-bold text-xs cursor-pointer">
                         Eliminar
                       </button>
                     </div>
@@ -816,6 +829,7 @@ const generarRendicionPDFWrapper = () => {
     <AgregarFondosModal
       v-if="showFondosModal"
       :viaje-id="filtroViajeId"
+      :rendicion="viajeSeleccionadoInfo"
       @close="showFondosModal = false"
       @fondos-agregados="handleFondosAgregados"
     />

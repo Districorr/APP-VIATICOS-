@@ -13,7 +13,11 @@ import { useViajes } from '../composables/useViajes.js';
 const props = defineProps({
   isOpen: {
     type: Boolean,
-    required: true,
+    default: true,
+  },
+  viajeId: {
+    type: [Number, String],
+    default: null,
   },
   rendicion: {
     type: Object,
@@ -29,9 +33,13 @@ const montoAdicional = ref('');
 const observacion = ref('');
 const errorMessage = ref('');
 
+const targetViajeId = computed(() => {
+  return props.rendicion?.id || props.viajeId || null;
+});
+
 const montoActual = computed(() => {
-  if (!props.rendicion) return 0;
-  return parseFloat(props.rendicion.monto_adelanto) || 0;
+  if (props.rendicion) return parseFloat(props.rendicion.monto_adelanto) || 0;
+  return 0;
 });
 
 const parseMontoNumerico = (val) => {
@@ -92,15 +100,15 @@ const handleSubmit = async () => {
     return;
   }
 
-  if (!props.rendicion || !props.rendicion.id) {
+  if (!targetViajeId.value) {
     errorMessage.value = 'No se ha seleccionado ninguna rendición.';
     return;
   }
 
   try {
-    const res = await agregarFondosARendicion(props.rendicion.id, numMonto, observacion.value);
+    const res = await agregarFondosARendicion(targetViajeId.value, numMonto, observacion.value);
     emit('fondos-agregados', {
-      viajeId: props.rendicion.id,
+      viajeId: targetViajeId.value,
       nuevoMonto: res.monto_adelanto,
       montoAdicional: numMonto,
     });
@@ -112,7 +120,7 @@ const handleSubmit = async () => {
 </script>
 
 <template>
-  <TransitionRoot appear :show="isOpen" as="template">
+  <TransitionRoot appear :show="isOpen !== false" as="template">
     <Dialog as="div" @close="handleClose" class="relative z-50">
       <TransitionChild
         as="template"
