@@ -795,7 +795,9 @@ async function handleSubmit() {
     }
 
     let feedbackMessage = `Gasto ${isEditMode.value ? 'actualizado' : 'creado'} con éxito.`;
-    let redirectTo = { name: 'Dashboard' };
+    if (isCuentaCorrienteEmpresa.value || payload.origen_gasto === 'cuenta_corriente_empresa') {
+        feedbackMessage = 'Se ha guardado el gasto como cuenta corriente, por favor si necesitas más data, contacta con usuarios administradores, junior/cesar.';
+    }
 
     if (isDelegating.value) {
         const receptor = opcionesSelect.value.usuariosParaDelegar.find(u => u.id === delegatedToUserId.value);

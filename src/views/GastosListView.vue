@@ -116,6 +116,22 @@ function sortBy(key) {
   }
 }
 
+const isIngresoGasto = (g) => {
+  if (g.es_ingreso_fondos === true) return true;
+  if (g.datos_adicionales && typeof g.datos_adicionales === 'object') {
+    if (g.datos_adicionales.es_ingreso_fondos === true || g.datos_adicionales.tipo_registro === 'ingreso_fondos') return true;
+  }
+  const desc = (g.descripcion_general || '').toLowerCase();
+  return desc.includes('ingreso de fondos');
+};
+
+const totalGastado = computed(() => {
+  return gastos.value.reduce((sum, g) => sum + (parseFloat(g.monto_total) || 0), 0);
+});
+const adelantoTotal = computed(() => viajeSeleccionadoInfo.value?.monto_adelanto || 0);
+const saldoActualRendicion = computed(() => adelantoTotal.value - totalGastado.value);
+const isViajeActualCerrado = computed(() => !!viajeSeleccionadoInfo.value?.cerrado_en);
+
 const gastosFiltrados = computed(() => {
   if (!isConciliacionMode.value || filtroRevisado.value === 'todos') return gastos.value;
   if (filtroRevisado.value === 'revisados') return gastos.value.filter(g => g.es_revisado);
@@ -275,33 +291,22 @@ async function handleGroupByType() {
   }
 }
 
-// CORRECCIÓN BUG EXPANSIÓN: Se añade un log para depurar
 const toggleRowExpansion = (gastoId) => {
-  console.log(`Toggling expansion for gasto ID: ${gastoId}`);
-  const newSet = new Set(expandedRows.value);
-  if (newSet.has(gastoId)) {
-    newSet.delete(gastoId);
+  if (expandedRows.value.has(gastoId)) {
+    expandedRows.value.delete(gastoId);
   } else {
-    newSet.add(gastoId);
+    expandedRows.value.add(gastoId);
   }
-  expandedRows.value = newSet;
 };
 
-const isIngresoGasto = (g) => {
-  if (g.es_ingreso_fondos === true) return true;
-  if (g.datos_adicionales && typeof g.datos_adicionales === 'object') {
-    if (g.datos_adicionales.es_ingreso_fondos === true || g.datos_adicionales.tipo_registro === 'ingreso_fondos') return true;
+const editarGasto = (gasto) => {
+  if (isViajeActualCerrado.value) {
+    feedbackMessage.value = "No se pueden editar gastos de una rendición cerrada.";
+    setTimeout(() => feedbackMessage.value = '', 4000);
+    return;
   }
-  const desc = (g.descripcion_general || '').toLowerCase();
-  return desc.includes('ingreso de fondos');
+  router.push({ name: 'GastoFormEdit', params: { id: gasto.id } });
 };
-
-const totalGastado = computed(() => {
-  return gastos.value.reduce((sum, g) => sum + (parseFloat(g.monto_total) || 0), 0);
-});
-const adelantoTotal = computed(() => viajeSeleccionadoInfo.value?.monto_adelanto || 0);
-const saldoActualRendicion = computed(() => adelantoTotal.value - totalGastado.value);
-const isViajeActualCerrado = computed(() => !!viajeSeleccionadoInfo.value?.cerrado_en);
 
 const fetchInitialData = async () => {
   loading.value = true;
@@ -351,10 +356,7 @@ const fetchGastos = async () => {
       .select(`*`)
       .eq('dueno_id', user.id)
       .eq('viaje_id', filtroViajeId.value);
-    
-    if (filtroTipoGastoIds.value.length > 0) {
-      // Este filtro necesita ajustarse si la columna tipo_gasto_id no está en la vista
-    }
+
     if (filtroDescripcion.value) {
       query = query.ilike('descripcion_general', `%${filtroDescripcion.value}%`);
     }
@@ -363,41 +365,22 @@ const fetchGastos = async () => {
     
     if (error) throw error;
     
-    // Filtrar estrictamente cualquier registro de ingreso para que la lista contenga únicamente gastos de la rendición
     gastos.value = (data || []).filter(g => !isIngresoGasto(g));
 
   } catch (error) {
     errorMessage.value = 'No se pudieron cargar los gastos: ' + error.message;
-    gastos.value = [];
   } finally {
     loading.value = false;
   }
 };
 
-function showFeedbackMessage() {
+onMounted(async () => {
   if (route.query.feedback) {
     feedbackMessage.value = route.query.feedback;
-    router.replace({ query: { ...route.query, feedback: undefined } }).catch(()=>{});
-    setTimeout(() => { feedbackMessage.value = ''; }, 4000);
+    setTimeout(() => { feedbackMessage.value = ''; }, 7000);
   }
-}
-
-function editarGasto(gasto) {
-  if (!gasto || !gasto.id) {
-    errorMessage.value = "Error: No se pudo identificar el gasto a editar.";
-    return;
-  }
-  if (isViajeActualCerrado.value) {
-    feedbackMessage.value = "No se pueden editar gastos de una rendición cerrada.";
-    setTimeout(() => feedbackMessage.value = '', 4000);
-    return;
-  }
-  router.push({ name: 'GastoFormEdit', params: { id: gasto.id } });
-}
-
-onMounted(() => {
-  fetchInitialData();
-  showFeedbackMessage();
+  await fetchInitialData();
+  if (filtroViajeId.value) await fetchGastos();
 });
 
 watch(filtroViajeId, (newId, oldId) => {
@@ -475,236 +458,262 @@ async function cerrarRendicion() {
   }
 }
 
-// ========= INICIO DE LA CORRECCIÓN CRÍTICA =========
 const generarRendicionPDFWrapper = () => {
-  // Usamos 'filtroViajeId.value' que está directamente enlazado al <select>
-  // y siempre contiene el UUID correcto de la rendición seleccionada.
-  // Esto es más robusto que depender de 'viajeSeleccionadoInfo.value'.
   if (!filtroViajeId.value) {
     feedbackMessage.value = 'Selecciona una rendición para generar el PDF.';
     setTimeout(() => feedbackMessage.value = '', 4000);
     return;
   }
-  // Pasamos el UUID correcto a la función de generación.
   generateCanvaStylePDF(filtroViajeId.value);
   isExportMenuOpen.value = false;
 };
-// ========= FIN DE LA CORRECCIÓN CRÍTICA =========
 </script>
+
 <template>
-  <div class="bg-gray-50 min-h-screen font-sans">
-    <!-- Mensaje de Feedback -->
-    <div v-if="feedbackMessage" class="fixed top-24 right-6 bg-green-500 text-white px-6 py-3 rounded-lg shadow-lg z-50 transition-opacity duration-300" role="alert">
-      {{ feedbackMessage }}
-    </div>
-    <!-- Mensaje de Error -->
-     <div v-if="errorMessage && !feedbackMessage" class="fixed top-24 right-6 bg-red-500 text-white px-6 py-3 rounded-lg shadow-lg z-50 transition-opacity duration-300" role="alert">
-      {{ errorMessage }}
+  <div class="bg-slate-50 min-h-screen font-sans pb-24 text-slate-800">
+
+    <!-- Notificación Flotante / Banner de Feedback estilo Emil Kowalski -->
+    <transition enter-active-class="transform ease-out duration-300 transition" enter-from-class="translate-y-2 opacity-0 sm:translate-y-0 sm:translate-x-2" enter-to-class="translate-y-0 opacity-100 sm:translate-x-0" leave-active-class="transition ease-in duration-100" leave-from-class="opacity-100" leave-to-class="opacity-0">
+      <div v-if="feedbackMessage" class="fixed top-5 right-5 z-50 max-w-md w-full bg-slate-900 text-white px-5 py-4 rounded-2xl shadow-2xl border border-slate-800 flex items-start gap-3.5">
+        <div class="w-6 h-6 rounded-full bg-emerald-500/20 text-emerald-400 flex items-center justify-center font-bold text-xs shrink-0 mt-0.5">✓</div>
+        <div class="flex-grow text-xs font-semibold leading-relaxed">{{ feedbackMessage }}</div>
+        <button @click="feedbackMessage = ''" class="text-slate-400 hover:text-white transition-colors cursor-pointer text-xs font-bold px-1">✕</button>
+      </div>
+    </transition>
+
+    <!-- Error Banner -->
+    <div v-if="errorMessage && !feedbackMessage" class="fixed top-5 right-5 z-50 max-w-md w-full bg-red-600 text-white px-5 py-4 rounded-2xl shadow-2xl flex items-center justify-between gap-3 text-xs font-semibold">
+      <span>{{ errorMessage }}</span>
+      <button @click="errorMessage = ''" class="text-white/80 hover:text-white font-bold">✕</button>
     </div>
 
-    <div class="container mx-auto px-4 sm:px-6 lg:px-8 py-8">
-      <!-- Encabezado Fijo con Título, Botones y Resumen -->
-      <div class="sticky top-0 z-20 bg-gray-50/80 backdrop-blur-sm -mx-4 sm:-mx-6 lg:-mx-8 px-4 sm:px-6 lg:px-8 pt-8 pb-4 mb-6 border-b border-gray-200">
-        <div class="flex flex-wrap items-center justify-between gap-4 mb-6">
-          <div class="flex-grow min-w-0">
-            <h1 class="text-2xl sm:text-3xl font-bold text-gray-800 tracking-tight truncate">{{ viajeSeleccionadoInfo?.nombre_viaje || 'Mis Gastos' }}</h1>
-            <p v-if="!viajeSeleccionadoInfo" class="mt-1 text-gray-600">Selecciona una rendición para ver sus gastos.</p>
-             <p v-else class="mt-1 text-sm text-gray-500">
-                {{ formatDate(viajeSeleccionadoInfo.fecha_inicio) }} - {{ viajeSeleccionadoInfo.fecha_fin ? formatDate(viajeSeleccionadoInfo.fecha_fin) : 'Actualidad' }}
-                <span v-if="viajeSeleccionadoInfo.codigo_rendicion"> | Código: {{ viajeSeleccionadoInfo.codigo_rendicion }}</span>
+    <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pt-6 space-y-6">
+
+      <!-- Encabezado Sticky con Glassmorphism -->
+      <div class="sticky top-0 z-20 bg-slate-50/90 backdrop-blur-md -mx-4 sm:-mx-6 lg:-mx-8 px-4 sm:px-6 lg:px-8 py-4 border-b border-slate-200/80 transition-all">
+        <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+          <div>
+            <div class="flex items-center gap-2.5">
+              <h1 class="text-xl sm:text-2xl font-black text-slate-900 tracking-tight truncate">
+                {{ viajeSeleccionadoInfo?.nombre_viaje || 'Mis Gastos' }}
+              </h1>
+              <span v-if="viajeSeleccionadoInfo?.codigo_rendicion" class="px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-slate-200/70 text-slate-700 font-mono">
+                {{ viajeSeleccionadoInfo.codigo_rendicion }}
+              </span>
+            </div>
+            <p v-if="!viajeSeleccionadoInfo" class="text-xs text-slate-500 mt-0.5">Selecciona una rendición para ver sus gastos.</p>
+            <p v-else class="text-xs font-medium text-slate-500 mt-0.5">
+              {{ formatDate(viajeSeleccionadoInfo.fecha_inicio) }} - {{ viajeSeleccionadoInfo.fecha_fin ? formatDate(viajeSeleccionadoInfo.fecha_fin) : 'En curso' }}
             </p>
           </div>
-          <div class="relative flex-shrink-0 flex items-center gap-2">
+
+          <!-- Acciones de Encabezado -->
+          <div class="flex flex-wrap items-center gap-2">
             <div class="relative" v-if="gastos.length > 0">
-              <button @click="isExportMenuOpen = !isExportMenuOpen" class="btn-secondary flex items-center gap-2">
-                <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M3 17a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1zm3.293-7.707a1 1 0 011.414 0L9 10.586V3a1 1 0 112 0v7.586l1.293-1.293a1 1 0 111.414 1.414l-3 3a1 1 0 01-1.414 0l-3-3a1 1 0 010-1.414z" clip-rule="evenodd" /></svg>
+              <button @click="isExportMenuOpen = !isExportMenuOpen" class="px-3.5 py-2 rounded-xl bg-white border border-slate-200 hover:bg-slate-100 font-bold text-xs text-slate-700 shadow-xs transition-all flex items-center gap-1.5 cursor-pointer">
+                <svg class="w-4 h-4 text-slate-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/></svg>
                 Exportar
               </button>
-              <transition name="fade">
-                <div v-if="isExportMenuOpen" @click.away="isExportMenuOpen = false" class="absolute right-0 mt-2 w-48 origin-top-right rounded-md bg-white shadow-lg ring-1 ring-black ring-opacity-5 focus:outline-none z-30">
-                  <div class="py-1">
-                    <button @click="generarRendicionPDFWrapper" class="export-btn">Exportar a PDF</button>
-                  </div>
+              <transition enter-active-class="transition ease-out duration-100" enter-from-class="transform opacity-0 scale-95" enter-to-class="transform opacity-100 scale-100" leave-active-class="transition ease-in duration-75" leave-from-class="transform opacity-100 scale-100" leave-to-class="transform opacity-0 scale-95">
+                <div v-if="isExportMenuOpen" @click.away="isExportMenuOpen = false" class="absolute right-0 mt-2 w-48 rounded-xl bg-white shadow-xl ring-1 ring-slate-900/5 focus:outline-none z-30 overflow-hidden p-1">
+                  <button @click="generarRendicionPDFWrapper" class="w-full text-left px-3 py-2 rounded-lg text-xs font-bold text-slate-700 hover:bg-emerald-50 hover:text-emerald-700 transition-colors flex items-center gap-2">
+                    <svg class="w-4 h-4 text-emerald-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 21h10a2 2 0 002-2V9.414a1 1 0 00-.293-.707l-5.414-5.414A1 1 0 0012.586 3H7a2 2 0 00-2 2v14a2 2 0 002 2z"/></svg>
+                    Exportar PDF Canva
+                  </button>
                 </div>
               </transition>
             </div>
 
-            <button v-if="viajeSeleccionadoInfo && !isViajeActualCerrado" @click="showFondosModal = true" class="px-3.5 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-md font-semibold text-sm shadow-sm transition-all flex items-center gap-1.5" title="Agregar Fondos a esta Rendición">
-              <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
-                <path fill-rule="evenodd" d="M10 3a1 1 0 011 1v5h5a1 1 0 110 2h-5v5a1 1 0 11-2 0v-5H4a1 1 0 110-2h5V4a1 1 0 011-1z" clip-rule="evenodd" />
-              </svg>
+            <button v-if="viajeSeleccionadoInfo && !isViajeActualCerrado" @click="showFondosModal = true" class="px-3.5 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl font-bold text-xs shadow-sm hover:shadow transition-all flex items-center gap-1.5 cursor-pointer">
+              <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6v6m0 0v6m0-6h6m-6 0H6"/></svg>
               Agregar Fondos
             </button>
-            <button v-if="viajeSeleccionadoInfo && !isViajeActualCerrado" @click="cerrarRendicion" :disabled="isClosingRendicion || gastos.length === 0" class="btn-danger flex items-center">
-              <svg v-if="!isClosingRendicion" xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 mr-2" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M5 9V7a5 5 0 0110 0v2a2 2 0 012 2v5a2 2 0 01-2 2H5a2 2 0 01-2-2v-5a2 2 0 012-2zm8-2v2H7V7a3 3 0 016 0z" clip-rule="evenodd" /></svg>
-              <svg v-if="isClosingRendicion" class="animate-spin h-5 w-5 mr-2" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path></svg>
+
+            <button v-if="viajeSeleccionadoInfo && !isViajeActualCerrado" @click="cerrarRendicion" :disabled="isClosingRendicion || gastos.length === 0" class="px-3.5 py-2 bg-slate-900 hover:bg-slate-800 text-white rounded-xl font-bold text-xs shadow-sm transition-all flex items-center gap-1.5 cursor-pointer disabled:opacity-50">
+              <svg v-if="!isClosingRendicion" class="w-4 h-4 text-slate-300" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg>
+              <svg v-else class="animate-spin h-4 w-4 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path></svg>
               {{ isClosingRendicion ? 'Cerrando...' : 'Cerrar y Enviar' }}
             </button>
           </div>
         </div>
-        <div class="hidden sm:grid grid-cols-1 sm:grid-cols-3 gap-4">
+
+        <!-- Tarjetas de Resumen KPI (PC / Desktop) -->
+        <div class="hidden sm:grid grid-cols-1 sm:grid-cols-3 gap-4 pt-3">
           <SummaryCard title="Adelanto Total" :value="adelantoTotal" :total="adelantoTotal > 0 ? adelantoTotal : 1" color="#3B82F6" />
-          <SummaryCard title="Total Gastado" :value="totalGastado" :total="adelantoTotal" :color="totalGastado > adelantoTotal ? '#EF4444' : '#22C55E'" />
-          <SummaryCard title="Saldo Actual" :value="saldoActualRendicion" :format-as-currency="true" :color="saldoActualRendicion >= 0 ? '#6B7280' : '#EF4444'" :show-chart="false" />
+          <SummaryCard title="Total Gastado" :value="totalGastado" :total="adelantoTotal" :color="totalGastado > adelantoTotal ? '#EF4444' : '#10B981'" />
+          <SummaryCard title="Saldo Actual" :value="saldoActualRendicion" :format-as-currency="true" :color="saldoActualRendicion >= 0 ? '#475569' : '#EF4444'" :show-chart="false" />
         </div>
-        <div class="grid grid-cols-2 gap-4 sm:hidden">
-            <div class="summary-card-mobile"><p class="summary-label">Total Gastado</p><p class="summary-value-mobile">{{ formatCurrency(totalGastado) }}</p></div>
-            <div class="summary-card-mobile"><p class="summary-label">Saldo Actual</p><p class="summary-value-mobile" :class="saldoActualRendicion >= 0 ? 'text-gray-800' : 'text-red-600'">{{ formatCurrency(saldoActualRendicion) }}</p></div>
+
+        <!-- Tarjetas KPI Estilo Mobile (Inspiradas en Referencia) -->
+        <div class="grid grid-cols-2 gap-3 sm:hidden pt-2">
+          <div class="bg-white p-4 rounded-2xl border border-slate-200/80 shadow-xs flex flex-col justify-between">
+            <span class="text-[11px] font-bold uppercase tracking-wider text-slate-500">Total Gastado</span>
+            <span class="text-lg font-black text-slate-900 mt-1">{{ formatCurrency(totalGastado) }}</span>
+          </div>
+          <div class="bg-white p-4 rounded-2xl border border-slate-200/80 shadow-xs flex flex-col justify-between">
+            <span class="text-[11px] font-bold uppercase tracking-wider text-slate-500">Saldo Actual</span>
+            <span class="text-lg font-black mt-1" :class="saldoActualRendicion >= 0 ? 'text-slate-900' : 'text-red-600'">{{ formatCurrency(saldoActualRendicion) }}</span>
+          </div>
         </div>
       </div>
 
-      <div class="bg-white p-4 rounded-xl shadow-sm border border-gray-200 mb-6">
-        <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 items-end">
-          <div class="lg:col-span-2 grid grid-cols-1 md:grid-cols-2 gap-4">
-            <div>
-              <label for="filtro-viaje" class="form-label-filter">Rendición Activa</label>
-              <select id="filtro-viaje" v-model="filtroViajeId" class="form-input mt-1">
-                <option value="" disabled>Selecciona una rendición</option>
-                <option v-if="listaViajesParaFiltro.length === 0" value="" disabled>No tienes rendiciones</option>
-                <option v-for="viaje in listaViajesParaFiltro" :key="viaje.id" :value="viaje.id">{{ viaje.nombre_viaje }}</option>
-              </select>
-            </div>
-            <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
-              <div>
-                <label for="filtro-tipo" class="form-label-filter">Filtrar por Tipo</label>
-                <v-select id="filtro-tipo" v-model="filtroTipoGastoIds" :options="tiposDeGastoDisponibles" multiple placeholder="Todos" class="v-select-filter mt-1"></v-select>
-              </div>
-              <div>
-                <label for="filtro-descripcion" class="form-label-filter">Buscar en Descripción</label>
-                <input id="filtro-descripcion" type="text" v-model="filtroDescripcion" placeholder="Ej: Nafta, Hotel..." class="form-input mt-1">
-              </div>
+      <!-- Barra de Filtros y Herramientas -->
+      <div class="bg-white p-4 sm:p-5 rounded-2xl border border-slate-200 shadow-xs space-y-4">
+        <div class="grid grid-cols-1 md:grid-cols-12 gap-3 items-center">
+
+          <!-- Selector de Rendición Activa -->
+          <div class="md:col-span-5">
+            <label for="filtro-viaje" class="block text-[11px] font-bold uppercase tracking-wider text-slate-500 mb-1">Rendición Activa</label>
+            <select id="filtro-viaje" v-model="filtroViajeId" class="w-full rounded-xl border border-slate-200 bg-slate-50 px-3.5 py-2 text-xs font-bold text-slate-900 focus:bg-white focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20 outline-none transition-all">
+              <option value="" disabled>Selecciona una rendición</option>
+              <option v-if="listaViajesParaFiltro.length === 0" value="" disabled>No tienes rendiciones</option>
+              <option v-for="viaje in listaViajesParaFiltro" :key="viaje.id" :value="viaje.id">{{ viaje.nombre_viaje }}</option>
+            </select>
+          </div>
+
+          <!-- Búsqueda en Descripción -->
+          <div class="md:col-span-4">
+            <label for="filtro-descripcion" class="block text-[11px] font-bold uppercase tracking-wider text-slate-500 mb-1">Buscar Gasto</label>
+            <div class="relative">
+              <input id="filtro-descripcion" type="text" v-model="filtroDescripcion" placeholder="Ej: Peaje, Nafta..." class="w-full rounded-xl border border-slate-200 bg-slate-50 pl-9 pr-3.5 py-2 text-xs font-semibold text-slate-900 focus:bg-white focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20 outline-none transition-all"/>
+              <svg class="w-4 h-4 text-slate-400 absolute left-3 top-2.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/></svg>
             </div>
           </div>
-          <div class="flex items-center justify-end gap-4">
-             <button @click="handleGroupByType" :disabled="isGroupingByType || isViajeActualCerrado || gastos.length === 0" class="btn-link" title="Agrupa todos los gastos sin grupo por su tipo.">Agrupar por Tipo</button>
-             <button @click="isConciliacionMode = !isConciliacionMode" class="btn-secondary flex items-center gap-2" :class="{'bg-indigo-100 ring-indigo-300': isConciliacionMode}">
-                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="w-5 h-5"><path fill-rule="evenodd" d="M9 3.5a5.5 5.5 0 100 11 5.5 5.5 0 000-11zM2 9a7 7 0 1112.452 4.391l3.328 3.329a.75.75 0 11-1.06 1.06l-3.329-3.328A7 7 0 012 9z" clip-rule="evenodd" /></svg>
-                Conciliar
-             </button>
+
+          <!-- Botones de Acción de Filtros -->
+          <div class="md:col-span-3 flex items-center justify-end gap-2 pt-2 md:pt-4">
+            <button @click="handleGroupByType" :disabled="isGroupingByType || isViajeActualCerrado || gastos.length === 0" class="px-3 py-2 text-xs font-bold text-slate-600 hover:text-emerald-600 transition-colors cursor-pointer disabled:opacity-40" title="Agrupar por tipo de gasto">
+              Agrupar por Tipo
+            </button>
+            <button @click="isConciliacionMode = !isConciliacionMode" class="px-3 py-2 rounded-xl text-xs font-bold border border-slate-200 hover:bg-slate-100 transition-all cursor-pointer flex items-center gap-1.5" :class="isConciliacionMode ? 'bg-indigo-50 text-indigo-700 border-indigo-200' : 'bg-white text-slate-700'">
+              <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+              Conciliar
+            </button>
           </div>
+
         </div>
       </div>
-      
-      <transition name="fade">
-        <div v-if="isConciliacionMode" class="mb-6 p-4 bg-indigo-50 border border-indigo-200 rounded-xl">
-            <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
-                <div class="md:col-span-2">
-                    <label class="form-label-filter">Filtrar por Estado de Revisión</label>
-                    <div class="mt-2 flex rounded-md shadow-sm">
-                        <button @click="filtroRevisado = 'todos'" :class="filtroRevisado === 'todos' ? 'btn-filter-active' : 'btn-filter-inactive'" class="rounded-l-md">Todos</button>
-                        <button @click="filtroRevisado = 'no_revisados'" :class="filtroRevisado === 'no_revisados' ? 'btn-filter-active' : 'btn-filter-inactive'" class="-ml-px">No Revisados</button>
-                        <button @click="filtroRevisado = 'revisados'" :class="filtroRevisado === 'revisados' ? 'btn-filter-active' : 'btn-filter-inactive'" class="-ml-px rounded-r-md">Revisados</button>
-                    </div>
-                </div>
-                <div class="space-y-2">
-                    <div>
-                        <label for="total-manual" class="form-label-filter">Total Facturas en Mano</label>
-                        <div class="relative">
-                            <div class="pointer-events-none absolute inset-y-0 left-0 flex items-center pl-3"><span class="text-gray-500 sm:text-sm">$</span></div>
-                            <input type="number" id="total-manual" v-model.number="totalFacturasManual" class="form-input pl-7 text-right" placeholder="0.00">
-                        </div>
-                    </div>
-                    <div class="flex justify-between text-sm"><span class="text-gray-600">Total en Sistema:</span><span class="font-semibold text-gray-800">{{ formatCurrency(totalGastado) }}</span></div>
-                    <div class="flex justify-between text-sm pt-1 border-t"><span class="font-bold text-gray-800">Diferencia:</span><span class="font-bold" :class="diferenciaConciliacion === 0 ? 'text-green-600' : 'text-red-600'">{{ formatCurrency(diferenciaConciliacion) }}</span></div>
-                </div>
+
+      <!-- Modo Conciliación -->
+      <transition enter-active-class="transition ease-out duration-200" enter-from-class="opacity-0 translate-y-[-4px]" enter-to-class="opacity-100 translate-y-0" leave-active-class="transition ease-in duration-150" leave-from-class="opacity-100" leave-to-class="opacity-0">
+        <div v-if="isConciliacionMode" class="p-4 bg-indigo-50/70 border border-indigo-100 rounded-2xl space-y-3">
+          <div class="grid grid-cols-1 md:grid-cols-3 gap-4 items-center">
+            <div class="md:col-span-2">
+              <label class="block text-[11px] font-bold uppercase tracking-wider text-indigo-900 mb-1">Estado de Revisión</label>
+              <div class="inline-flex rounded-xl p-1 bg-white border border-indigo-100 shadow-xs">
+                <button @click="filtroRevisado = 'todos'" :class="filtroRevisado === 'todos' ? 'bg-indigo-600 text-white font-bold' : 'text-slate-600 font-semibold'" class="px-3 py-1 text-xs rounded-lg transition-all cursor-pointer">Todos</button>
+                <button @click="filtroRevisado = 'no_revisados'" :class="filtroRevisado === 'no_revisados' ? 'bg-indigo-600 text-white font-bold' : 'text-slate-600 font-semibold'" class="px-3 py-1 text-xs rounded-lg transition-all cursor-pointer">Pendientes</button>
+                <button @click="filtroRevisado = 'revisados'" :class="filtroRevisado === 'revisados' ? 'bg-indigo-600 text-white font-bold' : 'text-slate-600 font-semibold'" class="px-3 py-1 text-xs rounded-lg transition-all cursor-pointer">Revisados</button>
+              </div>
             </div>
+            <div class="space-y-1 text-xs">
+              <div class="flex justify-between text-slate-600"><span class="font-semibold">Total Sistema:</span><span class="font-bold text-slate-900">{{ formatCurrency(totalGastado) }}</span></div>
+            </div>
+          </div>
         </div>
       </transition>
-      
-      <div v-if="selectedGastos.size > 0" class="mb-4 p-3 bg-indigo-50 border border-indigo-200 rounded-lg flex items-center justify-between flex-wrap gap-2">
-        <span class="font-semibold text-indigo-800">{{ selectedGastos.size }} gasto(s) seleccionado(s)</span>
-        <div class="flex gap-2">
-          <button @click="handleUngroup" :disabled="!canUngroup || isGrouping" class="btn-secondary text-sm">{{ isGrouping ? '...' : 'Desagrupar' }}</button>
-          <button @click="openGroupModal" :disabled="isGrouping" class="btn-primary text-sm">Agrupar</button>
-        </div>
-      </div>
 
-      <div v-if="viajeSeleccionadoInfo?.estado_aprobacion === 'pendiente_aprobacion'" class="mb-4 p-3 text-center text-sm bg-blue-100 text-blue-800 border border-blue-200 rounded-lg">Esta rendición está cerrada y pendiente de aprobación por un administrador.</div>
-      <div v-else-if="viajeSeleccionadoInfo?.estado_aprobacion === 'aprobado'" class="mb-4 p-3 text-center text-sm bg-green-100 text-green-800 border border-green-200 rounded-lg">¡Felicidades! Esta rendición ha sido aprobada.</div>
-      <div v-else-if="viajeSeleccionadoInfo?.estado_aprobacion === 'rechazado'" class="mb-4 p-3 text-sm bg-red-100 text-red-800 border border-red-200 rounded-lg">
+      <!-- Estado de Rendición (Aprobada / Rechazada / Pendiente) -->
+      <div v-if="viajeSeleccionadoInfo?.estado_aprobacion === 'pendiente_aprobacion'" class="p-3.5 text-center text-xs font-bold bg-amber-50 text-amber-800 border border-amber-200 rounded-2xl">
+        Esta rendición está cerrada y pendiente de revisión por un administrador.
+      </div>
+      <div v-else-if="viajeSeleccionadoInfo?.estado_aprobacion === 'aprobado'" class="p-3.5 text-center text-xs font-bold bg-emerald-50 text-emerald-800 border border-emerald-200 rounded-2xl">
+        ¡Rendición aprobada exitosamente!
+      </div>
+      <div v-else-if="viajeSeleccionadoInfo?.estado_aprobacion === 'rechazado'" class="p-4 text-xs bg-red-50 text-red-800 border border-red-200 rounded-2xl space-y-1">
         <p class="font-bold">Esta rendición fue rechazada.</p>
-        <p v-if="viajeSeleccionadoInfo.comentarios_aprobacion" class="mt-1">Motivo: "{{ viajeSeleccionadoInfo.comentarios_aprobacion }}"</p>
+        <p v-if="viajeSeleccionadoInfo.comentarios_aprobacion" class="text-red-700">Motivo: "{{ viajeSeleccionadoInfo.comentarios_aprobacion }}"</p>
       </div>
 
-      <div v-if="loading" class="text-center py-20 text-gray-500">Cargando gastos...</div>
-      <div v-else-if="errorMessage && !feedbackMessage" class="p-4 bg-red-100 text-red-700 rounded-lg">{{ errorMessage }}</div>
-      <div v-else-if="gastos.length === 0 && !loading" class="text-center py-20 text-gray-500"><p class="font-semibold">No se encontraron gastos.</p><p class="text-sm mt-1">Intenta ajustar los filtros o registra un nuevo gasto.</p></div>
+      <!-- Estado de Carga o Lista Vacía -->
+      <div v-if="loading" class="py-20 text-center space-y-3">
+        <svg class="animate-spin h-8 w-8 text-emerald-600 mx-auto" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg>
+        <p class="text-xs font-bold text-slate-500">Cargando comprobantes de la rendición...</p>
+      </div>
 
-      <div v-else>
+      <div v-else-if="gastos.length === 0 && !loading" class="bg-white p-12 text-center rounded-2xl border border-slate-200 shadow-xs space-y-3 max-w-lg mx-auto">
+        <div class="w-12 h-12 rounded-full bg-slate-100 text-slate-400 flex items-center justify-center mx-auto">
+          <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/></svg>
+        </div>
+        <h3 class="text-sm font-bold text-slate-800">No se encontraron gastos cargados</h3>
+        <p class="text-xs text-slate-500">Comenzá haciendo clic en el botón flotante "+" o agregá fondos a la rendición.</p>
+      </div>
+
+      <!-- Contenedor Principal de Gastos -->
+      <div v-else class="space-y-6">
+
+        <!-- VISTA DE ESCRITORIO (Tabla elegante y minimalista) -->
         <div class="hidden lg:block space-y-6">
           <div v-for="grupo in gastosRenderList.userGroups.concat(gastosRenderList.dateGroups)" :key="grupo.id">
-            <div class="flex items-center justify-between mb-2 px-1">
-              <h2 class="text-base font-bold text-gray-600">{{ grupo.name }}</h2>
+            <div class="flex items-center justify-between mb-2.5 px-1">
+              <h2 class="text-xs font-bold uppercase tracking-wider text-slate-500">{{ grupo.name }}</h2>
               <div v-if="grupo.isGroup && !isViajeActualCerrado" class="flex items-center gap-2">
-                <button @click="handleRenameGroup(grupo.id)" class="btn-icon-action btn-icon-edit" title="Renombrar Grupo"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" fill="currentColor" class="w-4 h-4"><path d="M11.013 2.513a1.75 1.75 0 0 1 2.475 2.474L6.523 11.952l-2.756.87a.75.75 0 0 1-.917-.917l.87-2.756L11.013 2.513Z" /></svg></button>
-                <button @click="handleDeleteGroup(grupo.id, grupo.name)" class="btn-icon-action btn-icon-delete" title="Eliminar Grupo (solo si está vacío)"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" fill="currentColor" class="w-4 h-4"><path fill-rule="evenodd" d="M5 3.25V4H2.75a.75.75 0 0 0 0 1.5h.3l.815 8.15A1.5 1.5 0 0 0 5.357 15h5.285a1.5 1.5 0 0 0 1.493-1.35l.815-8.15h.3a.75.75 0 0 0 0-1.5H11v-.75A2.25 2.25 0 0 0 8.75 1h-1.5A2.25 2.25 0 0 0 5 3.25Zm2.25-.75a.75.75 0 0 0-.75.75V4h3v-.75a.75.75 0 0 0-.75-.75h-1.5Z" clip-rule="evenodd" /></svg></button>
+                <button @click="handleRenameGroup(grupo.id)" class="text-xs font-semibold text-slate-400 hover:text-slate-700 transition-colors cursor-pointer">Renombrar</button>
+                <button @click="handleDeleteGroup(grupo.id, grupo.name)" class="text-xs font-semibold text-red-500 hover:text-red-700 transition-colors cursor-pointer">Eliminar</button>
               </div>
             </div>
-            <div class="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
-              <table class="min-w-full text-sm">
-                <thead class="bg-gray-100">
-                  <tr>
-                    <th class="table-header w-12"></th>
-                    <th v-if="isConciliacionMode" class="table-header w-12">✔</th>
-                    <th class="table-header w-12"></th>
-                    <th class="table-header sortable" @click="sortBy('fecha_gasto')">Fecha</th>
-                    <th class="table-header">Tipo de Gasto</th>
-                    <th class="table-header">Descripción</th>
-                    <th class="table-header">Provincia</th>
-                    <th class="table-header">N° Factura</th>
-                    <th class="table-header text-right sortable" @click="sortBy('monto_total')">Monto</th>
-                    <th class="table-header text-center">Acciones</th>
+
+            <div class="bg-white rounded-2xl border border-slate-200/90 shadow-xs overflow-hidden">
+              <table class="w-full text-left text-xs">
+                <thead>
+                  <tr class="bg-slate-50/80 border-b border-slate-200 text-slate-500 font-bold uppercase tracking-wider text-[11px]">
+                    <th class="py-3 px-4 w-10"></th>
+                    <th class="py-3 px-4 w-12">Ícono</th>
+                    <th class="py-3 px-4 sortable cursor-pointer" @click="sortBy('fecha_gasto')">Fecha</th>
+                    <th class="py-3 px-4">Categoría</th>
+                    <th class="py-3 px-4">Descripción</th>
+                    <th class="py-3 px-4">Factura</th>
+                    <th class="py-3 px-4 text-right sortable cursor-pointer" @click="sortBy('monto_total')">Monto Total</th>
+                    <th class="py-3 px-4 text-center w-28">Acciones</th>
                   </tr>
                 </thead>
-                <tbody class="divide-y divide-gray-200">
+                <tbody class="divide-y divide-slate-100">
                   <template v-for="gasto in grupo.gastos" :key="gasto.id">
-                    <tr class="transition-colors cursor-pointer" :class="{'bg-indigo-50': selectedGastos.has(gasto.id), 'bg-blue-50': gasto.es_delegado, 'hover:bg-blue-100': gasto.es_delegado, 'hover:bg-gray-50': !gasto.es_delegado}" @click="toggleRowExpansion(gasto.id)">
-                      <td class="table-cell text-center" @click.stop><input type="checkbox" :checked="selectedGastos.has(gasto.id)" @change="toggleGastoSelection(gasto.id)" class="checkbox-sm" :disabled="isViajeActualCerrado"></td>
-                      <td v-if="isConciliacionMode" class="table-cell text-center" @click.stop><input type="checkbox" :checked="gasto.es_revisado" @change="toggleRevisado(gasto)" class="checkbox-sm" :disabled="isViajeActualCerrado"></td>
-                      <td class="table-cell text-center"><IconRenderer :icon-data="gasto.tipos_gasto_config?.icono_svg" :color="gasto.tipos_gasto_config?.color_accent" /></td>
-                      <td class="table-cell font-semibold text-gray-700 w-28">{{ formatDate(gasto.fecha_gasto) }}</td>
-                      <td class="table-cell w-40 font-semibold" :class="isIngresoGasto(gasto) ? 'text-emerald-700' : ''">{{ gasto.tipos_gasto_config?.nombre_tipo_gasto || (isIngresoGasto(gasto) ? 'Ingreso de Fondos' : '-') }}</td>
-                      <td class="table-cell font-medium text-gray-900 max-w-sm truncate">{{ gasto.descripcion_general }}</td>
-                      <td class="table-cell w-36">{{ gasto.provincia_gasto?.nombre || '-' }}</td>
-                      <td class="table-cell w-28">{{ gasto.numero_factura || '-' }}</td>
-                      <td class="table-cell text-right w-36" :class="isIngresoGasto(gasto) ? 'text-emerald-600 font-black text-base' : 'text-gray-800 font-bold'">{{ (isIngresoGasto(gasto) ? '+ ' : '') + formatCurrency(gasto.monto_total) }}</td>
-                      <td class="table-cell text-center w-28" @click.stop>
-                        <div class="flex justify-center items-center gap-2">
-                          <a v-if="gasto.factura_url" :href="gasto.factura_url" target="_blank" class="btn-icon-action btn-icon-link" aria-label="Ver factura"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" fill="currentColor" class="w-4 h-4"><path d="M4.25 2A2.25 2.25 0 0 0 2 4.25v7.5A2.25 2.25 0 0 0 4.25 14h7.5A2.25 2.25 0 0 0 14 11.75V7.5a.75.75 0 0 0-1.5 0v4.25a.75.75 0 0 1-.75.75h-7.5a.75.75 0 0 1-.75-.75v-7.5a.75.75 0 0 1 .75-.75h3.5a.75.75 0 0 0 0-1.5h-3.5Z" /><path d="M10 .75a.75.75 0 0 1 .75.75v3.5a.75.75 0 0 1-1.5 0V2.56L6.03 6.28a.75.75 0 0 1-1.06-1.06L8.69 1.5H7.25a.75.75 0 0 1 0-1.5h3.5Z" /></svg></a>
-                          <button @click="editarGasto(gasto)" :disabled="isViajeActualCerrado" class="btn-icon-action btn-icon-edit" aria-label="Editar Gasto Completo"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" fill="currentColor" class="w-4 h-4"><path d="M11.013 2.513a1.75 1.75 0 0 1 2.475 2.474L6.523 11.952l-2.756.87a.75.75 0 0 1-.917-.917l.87-2.756L11.013 2.513Z" /></svg></button>
-                          <button @click="eliminarGasto(gasto.id)" :disabled="isViajeActualCerrado" class="btn-icon-action btn-icon-delete" aria-label="Eliminar Gasto"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" fill="currentColor" class="w-4 h-4"><path fill-rule="evenodd" d="M5 3.25V4H2.75a.75.75 0 0 0 0 1.5h.3l.815 8.15A1.5 1.5 0 0 0 5.357 15h5.285a1.5 1.5 0 0 0 1.493-1.35l.815-8.15h.3a.75.75 0 0 0 0-1.5H11v-.75A2.25 2.25 0 0 0 8.75 1h-1.5A2.25 2.25 0 0 0 5 3.25Zm2.25-.75a.75.75 0 0 0-.75.75V4h3v-.75a.75.75 0 0 0-.75-.75h-1.5Z" clip-rule="evenodd" /></svg></button>
+                    <tr 
+                      @click="toggleRowExpansion(gasto.id)"
+                      class="hover:bg-slate-50/80 transition-colors cursor-pointer font-medium"
+                      :class="{'bg-indigo-50/50': selectedGastos.has(gasto.id)}"
+                    >
+                      <td class="py-3 px-4" @click.stop>
+                        <input type="checkbox" :checked="selectedGastos.has(gasto.id)" @change="toggleGastoSelection(gasto.id)" class="rounded border-slate-300 text-emerald-600 focus:ring-emerald-500 cursor-pointer" :disabled="isViajeActualCerrado">
+                      </td>
+                      <td class="py-3 px-4">
+                        <div class="w-8 h-8 rounded-full bg-slate-100 flex items-center justify-center text-slate-700 shrink-0">
+                          <IconRenderer :icon-data="gasto.tipos_gasto_config?.icono_svg" :color="gasto.tipos_gasto_config?.color_accent" />
+                        </div>
+                      </td>
+                      <td class="py-3 px-4 font-semibold text-slate-700 whitespace-nowrap">{{ formatDate(gasto.fecha_gasto) }}</td>
+                      <td class="py-3 px-4 font-bold text-slate-900 whitespace-nowrap">{{ gasto.tipos_gasto_config?.nombre_tipo_gasto || '-' }}</td>
+                      <td class="py-3 px-4 text-slate-600 max-w-xs truncate">{{ gasto.descripcion_general || 'Sin detalle' }}</td>
+                      <td class="py-3 px-4 text-slate-500 font-mono">{{ gasto.numero_factura || '-' }}</td>
+                      <td class="py-3 px-4 text-right font-black text-slate-900 text-sm whitespace-nowrap">{{ formatCurrency(gasto.monto_total) }}</td>
+                      <td class="py-3 px-4 text-center" @click.stop>
+                        <div class="flex items-center justify-center gap-1.5">
+                          <a v-if="gasto.factura_url" :href="gasto.factura_url" target="_blank" class="p-1 text-slate-400 hover:text-emerald-600 transition-colors" title="Ver Comprobante">
+                            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"/></svg>
+                          </a>
+                          <button @click="editarGasto(gasto)" :disabled="isViajeActualCerrado" class="p-1 text-slate-400 hover:text-slate-700 transition-colors cursor-pointer" title="Editar Gasto">
+                            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"/></svg>
+                          </button>
+                          <button @click="eliminarGasto(gasto.id)" :disabled="isViajeActualCerrado" class="p-1 text-slate-400 hover:text-red-600 transition-colors cursor-pointer" title="Eliminar Gasto">
+                            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/></svg>
+                          </button>
                         </div>
                       </td>
                     </tr>
-                    <tr v-if="expandedRows.has(gasto.id)">
-                      <td :colspan="isConciliacionMode ? 10 : 9" class="p-0">
-                        <div class="bg-gray-50 px-6 py-4">
-                          <h4 class="text-xs font-bold uppercase text-gray-500 mb-3">Detalles del Gasto</h4>
-                          <div class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-x-6 gap-y-4 text-sm">
-                            <div v-if="gasto.es_delegado">
-                              <p class="font-semibold text-gray-800">Responsable Original</p>
-                              <p class="text-gray-600">{{ gasto.responsable_principal_nombre }}</p>
-                            </div>
-                            <div v-if="gasto.es_delegado">
-                              <p class="font-semibold text-gray-800">Rendido por</p>
-                              <p class="text-gray-600">{{ gasto.dueno_nombre }}</p>
-                            </div>
-                            <div v-if="gasto.clientes?.nombre_cliente"><p class="font-semibold text-gray-800">Cliente</p><p class="text-gray-600">{{ gasto.clientes.nombre_cliente }}</p></div>
-                            <div v-if="gasto.proveedores?.nombre"><p class="font-semibold text-gray-800">Proveedor</p><p class="text-gray-600">{{ gasto.proveedores.nombre }}</p></div>
-                            <div v-if="gasto.transportes?.nombre"><p class="font-semibold text-gray-800">Transporte</p><p class="text-gray-600">{{ gasto.transportes.nombre }}</p></div>
-                            <div v-if="gasto.paciente_referido"><p class="font-semibold text-gray-800">Paciente</p><p class="text-gray-600">{{ gasto.paciente_referido }}</p></div>
-                            <div v-if="gasto.nombre_chofer"><p class="font-semibold text-gray-800">Chofer</p><p class="text-gray-600">{{ gasto.nombre_chofer }}</p></div>
-                            <div v-if="gasto.vehiculos"><p class="font-semibold text-gray-800">Vehículo</p><p class="text-gray-600">{{ gasto.vehiculos.marca }} {{ gasto.vehiculos.modelo }} ({{ gasto.vehiculos.patente }})</p></div>
-                            <div v-if="gasto.provincia_origen?.nombre">
-                              <p class="font-semibold text-gray-800">Origen</p>
-                              <p class="text-gray-600">{{ gasto.provincia_origen.nombre }}<span v-if="gasto.localidad_origen?.nombre"> - {{ gasto.localidad_origen.nombre }}</span></p>
-                            </div>
-                            <div v-if="gasto.provincia_destino?.nombre">
-                              <p class="font-semibold text-gray-800">Destino</p>
-                              <p class="text-gray-600">{{ gasto.provincia_destino.nombre }}<span v-if="gasto.localidad_destino?.nombre"> - {{ gasto.localidad_destino.nombre }}</span></p>
-                            </div>
+                    <!-- Fila Expandible de Detalles (Desktop) -->
+                    <tr v-if="expandedRows.has(gasto.id)" class="bg-slate-50/90 border-b border-slate-200">
+                      <td colspan="8" class="p-5">
+                        <div class="space-y-3 text-xs">
+                          <h4 class="font-bold text-slate-700 uppercase tracking-wider text-[11px]">Información Detallada del Comprobante</h4>
+                          <div class="grid grid-cols-2 sm:grid-cols-4 gap-4 text-slate-600">
+                            <div v-if="gasto.clientes?.nombre_cliente"><span class="block font-bold text-slate-800">Cliente:</span>{{ gasto.clientes.nombre_cliente }}</div>
+                            <div v-if="gasto.proveedores?.nombre"><span class="block font-bold text-slate-800">Proveedor:</span>{{ gasto.proveedores.nombre }}</div>
+                            <div v-if="gasto.transportes?.nombre"><span class="block font-bold text-slate-800">Transporte:</span>{{ gasto.transportes.nombre }}</div>
+                            <div v-if="gasto.nombre_chofer"><span class="block font-bold text-slate-800">Chofer:</span>{{ gasto.nombre_chofer }}</div>
+                            <div v-if="gasto.vehiculos"><span class="block font-bold text-slate-800">Vehículo:</span>{{ gasto.vehiculos.patente }}</div>
                           </div>
-                          <DetallesJson v-if="gasto.datos_adicionales && Object.keys(gasto.datos_adicionales).length > 0" :datos="gasto.datos_adicionales" class="mt-4 pt-4 border-t border-gray-200" />
+                          <DetallesJson v-if="gasto.datos_adicionales && Object.keys(gasto.datos_adicionales).length > 0" :datos="gasto.datos_adicionales" class="pt-3 border-t border-slate-200"/>
                         </div>
                       </td>
                     </tr>
@@ -715,143 +724,92 @@ const generarRendicionPDFWrapper = () => {
           </div>
         </div>
 
-        <!-- Vista de Móvil -->
-        <div class="lg:hidden space-y-4">
-          <div v-for="grupo in gastosRenderList.userGroups.concat(gastosRenderList.dateGroups)" :key="grupo.id + '-mobile'">
-            <div class="flex items-center justify-between mb-2 px-1">
-              <h2 class="text-base font-bold text-gray-600">{{ grupo.name }}</h2>
-              <div v-if="grupo.isGroup && !isViajeActualCerrado" class="flex items-center gap-2">
-                <button @click="handleRenameGroup(grupo.id)" class="btn-icon-action btn-icon-edit" title="Renombrar Grupo"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" fill="currentColor" class="w-4 h-4"><path d="M11.013 2.513a1.75 1.75 0 0 1 2.475 2.474L6.523 11.952l-2.756.87a.75.75 0 0 1-.917-.917l.87-2.756L11.013 2.513Z" /></svg></button>
-                <button @click="handleDeleteGroup(grupo.id, grupo.name)" class="btn-icon-action btn-icon-delete" title="Eliminar Grupo (solo si está vacío)"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" fill="currentColor" class="w-4 h-4"><path fill-rule="evenodd" d="M5 3.25V4H2.75a.75.75 0 0 0 0 1.5h.3l.815 8.15A1.5 1.5 0 0 0 5.357 15h5.285a1.5 1.5 0 0 0 1.493-1.35l.815-8.15h.3a.75.75 0 0 0 0-1.5H11v-.75A2.25 2.25 0 0 0 8.75 1h-1.5A2.25 2.25 0 0 0 5 3.25Zm2.25-.75a.75.75 0 0 0-.75.75V4h3v-.75a.75.75 0 0 0-.75-.75h-1.5Z" clip-rule="evenodd" /></svg></button>
+        <!-- VISTA MÓVIL (Inspirada en el diseño de referencia adjunto) -->
+        <div class="lg:hidden space-y-6">
+          <div v-for="grupo in gastosRenderList.userGroups.concat(gastosRenderList.dateGroups)" :key="grupo.id + '-mobile'" class="space-y-2.5">
+            <!-- Encabezado de Agrupación Fecha / Concepto -->
+            <div class="flex items-center justify-between px-1">
+              <span class="text-xs font-black text-slate-500 uppercase tracking-wider">{{ grupo.name }}</span>
+              <span class="text-[11px] font-bold text-slate-400 bg-slate-200/60 px-2 py-0.5 rounded-full">{{ grupo.gastos.length }} operaciones</span>
+            </div>
+
+            <!-- Lista de Tarjetas de Transacción -->
+            <div class="space-y-2">
+              <div 
+                v-for="gasto in grupo.gastos" 
+                :key="gasto.id" 
+                @click="toggleRowExpansion(gasto.id)"
+                class="bg-white rounded-2xl p-4 border border-slate-200/80 shadow-xs hover:shadow-sm transition-all cursor-pointer space-y-3"
+              >
+                <div class="flex items-center justify-between gap-3">
+                  <div class="flex items-center gap-3 min-w-0">
+                    <!-- Ícono de Categoría Circundante estilo Referencia -->
+                    <div class="w-11 h-11 rounded-2xl bg-slate-100 flex items-center justify-center text-slate-800 shrink-0 shadow-xs">
+                      <IconRenderer :icon-data="gasto.tipos_gasto_config?.icono_svg" :color="gasto.tipos_gasto_config?.color_accent" />
+                    </div>
+
+                    <div class="min-w-0">
+                      <h4 class="text-sm font-bold text-slate-900 truncate">{{ gasto.tipos_gasto_config?.nombre_tipo_gasto || 'Gasto' }}</h4>
+                      <p class="text-xs text-slate-500 truncate mt-0.5">{{ gasto.descripcion_general || 'Sin descripción' }}</p>
+                    </div>
+                  </div>
+
+                  <!-- Monto en Estilo Financiero Prominente -->
+                  <div class="text-right shrink-0">
+                    <span class="text-base font-black text-slate-900 block">{{ formatCurrency(gasto.monto_total) }}</span>
+                    <span class="text-[10px] font-semibold text-slate-400">{{ formatDate(gasto.fecha_gasto) }}</span>
+                  </div>
+                </div>
+
+                <!-- Detalle Expandido en Móvil -->
+                <transition enter-active-class="transition ease-out duration-200" enter-from-class="opacity-0 translate-y-[-4px]" enter-to-class="opacity-100 translate-y-0">
+                  <div v-if="expandedRows.has(gasto.id)" class="pt-3 border-t border-slate-100 space-y-2 text-xs text-slate-600">
+                    <div v-if="gasto.proveedores?.nombre" class="flex justify-between"><span class="font-bold text-slate-800">Proveedor:</span><span>{{ gasto.proveedores.nombre }}</span></div>
+                    <div v-if="gasto.clientes?.nombre_cliente" class="flex justify-between"><span class="font-bold text-slate-800">Cliente:</span><span>{{ gasto.clientes.nombre_cliente }}</span></div>
+                    <div v-if="gasto.numero_factura" class="flex justify-between"><span class="font-bold text-slate-800">Nº Factura:</span><span class="font-mono">{{ gasto.numero_factura }}</span></div>
+                    
+                    <div class="pt-2 flex items-center justify-end gap-3" @click.stop>
+                      <a v-if="gasto.factura_url" :href="gasto.factura_url" target="_blank" class="px-3 py-1.5 bg-slate-100 text-slate-700 rounded-xl font-bold text-xs hover:bg-slate-200 transition-colors">
+                        Ver Comprobante
+                      </a>
+                      <button @click="editarGasto(gasto)" :disabled="isViajeActualCerrado" class="px-3 py-1.5 bg-emerald-50 text-emerald-700 rounded-xl font-bold text-xs hover:bg-emerald-100 transition-colors cursor-pointer">
+                        Editar
+                      </button>
+                      <button @click="eliminarGasto(gasto.id)" :disabled="isViajeActualCerrado" class="px-3 py-1.5 bg-red-50 text-red-700 rounded-xl font-bold text-xs hover:bg-red-100 transition-colors cursor-pointer">
+                        Eliminar
+                      </button>
+                    </div>
+                  </div>
+                </transition>
               </div>
             </div>
-            <div class="bg-white rounded-lg shadow-sm border border-gray-200 divide-y divide-gray-200">
-              <div v-for="gasto in grupo.gastos" :key="gasto.id" class="p-4" :class="{'bg-blue-50': gasto.es_delegado}" @click="toggleRowExpansion(gasto.id)">
-                <div v-if="isConciliacionMode" class="flex items-center justify-end mb-2" @click.stop>
-                    <label :for="`revisado-${gasto.id}`" class="text-sm font-medium text-gray-700 mr-2">Revisado</label>
-                    <input :id="`revisado-${gasto.id}`" type="checkbox" :checked="gasto.es_revisado" @change="toggleRevisado(gasto)" class="checkbox-sm" :disabled="isViajeActualCerrado">
-                </div>
-                <div class="flex justify-between items-start gap-4">
-                  <div class="flex-shrink-0 mt-1" @click.stop>
-                     <input type="checkbox" :checked="selectedGastos.has(gasto.id)" @change="toggleGastoSelection(gasto.id)" class="checkbox-sm" :disabled="isViajeActualCerrado">
-                  </div>
-                  <div class="flex-shrink-0"><IconRenderer :icon-data="gasto.tipos_gasto_config?.icono_svg" :color="gasto.tipos_gasto_config?.color_accent" /></div>
-                  <div class="flex-grow min-w-0">
-                    <p class="font-semibold text-gray-800">{{ gasto.tipos_gasto_config?.nombre_tipo_gasto || 'Gasto' }}</p>
-                    <p class="text-sm text-gray-600 truncate">{{ gasto.descripcion_general }}</p>
-                  </div>
-                  <p class="font-bold text-lg flex-shrink-0 ml-2" :class="isIngresoGasto(gasto) ? 'text-emerald-600 font-black' : 'text-gray-800'">{{ (isIngresoGasto(gasto) ? '+ ' : '') + formatCurrency(gasto.monto_total) }}</p>
-                </div>
-                <div v-if="expandedRows.has(gasto.id)" class="mt-3 pt-3 border-t border-gray-100">
-                  <div class="space-y-2 text-sm">
-                    <div v-if="gasto.es_delegado" class="flex justify-between"><span class="font-semibold text-gray-800">Responsable Original:</span><span class="text-gray-600 text-right">{{ gasto.responsable_principal_nombre }}</span></div>
-                    <div v-if="gasto.es_delegado" class="flex justify-between"><span class="font-semibold text-gray-800">Rendido por:</span><span class="text-gray-600 text-right">{{ gasto.dueno_nombre }}</span></div>
-                    <div v-if="gasto.clientes?.nombre_cliente" class="flex justify-between"><span class="font-semibold text-gray-800">Cliente:</span><span class="text-gray-600 text-right">{{ gasto.clientes.nombre_cliente }}</span></div>
-                    <div v-if="gasto.proveedores?.nombre" class="flex justify-between"><span class="font-semibold text-gray-800">Proveedor:</span><span class="text-gray-600 text-right">{{ gasto.proveedores.nombre }}</span></div>
-                    <div v-if="gasto.transportes?.nombre" class="flex justify-between"><span class="font-semibold text-gray-800">Transporte:</span><span class="text-gray-600 text-right">{{ gasto.transportes.nombre }}</span></div>
-                    <div v-if="gasto.paciente_referido" class="flex justify-between"><span class="font-semibold text-gray-800">Paciente:</span><span class="text-gray-600 text-right">{{ gasto.paciente_referido }}</span></div>
-                    <div v-if="gasto.nombre_chofer" class="flex justify-between"><span class="font-semibold text-gray-800">Chofer:</span><span class="text-gray-600 text-right">{{ gasto.nombre_chofer }}</span></div>
-                    <div v-if="gasto.vehiculos" class="flex justify-between"><span class="font-semibold text-gray-800">Vehículo:</span><span class="text-gray-600 text-right">{{ gasto.vehiculos.patente }}</span></div>
-                    <div v-if="gasto.provincia_origen?.nombre" class="flex justify-between"><span class="font-semibold text-gray-800">Origen:</span><span class="text-gray-600 text-right">{{ gasto.provincia_origen.nombre }}<span v-if="gasto.localidad_origen?.nombre"> - {{ gasto.localidad_origen.nombre }}</span></span></div>
-                    <div v-if="gasto.provincia_destino?.nombre" class="flex justify-between"><span class="font-semibold text-gray-800">Destino:</span><span class="text-gray-600 text-right">{{ gasto.provincia_destino.nombre }}<span v-if="gasto.localidad_destino?.nombre"> - {{ gasto.localidad_destino.nombre }}</span></span></div>
-                  </div>
-                  <DetallesJson v-if="gasto.datos_adicionales && Object.keys(gasto.datos_adicionales).length > 0" :datos="gasto.datos_adicionales" class="mt-3 pt-3 border-t border-gray-200" />
-                </div>
-                <div class="mt-3 pt-3 border-t border-gray-100 flex justify-between items-center">
-                  <p class="text-xs text-gray-400">{{ formatDate(gasto.fecha_gasto) }}</p>
-                  <div class="flex items-center gap-2" @click.stop>
-                    <a v-if="gasto.factura_url" :href="gasto.factura_url" target="_blank" class="btn-icon-action btn-icon-link" aria-label="Ver factura"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" fill="currentColor" class="w-4 h-4"><path d="M4.25 2A2.25 2.25 0 0 0 2 4.25v7.5A2.25 2.25 0 0 0 4.25 14h7.5A2.25 2.25 0 0 0 14 11.75V7.5a.75.75 0 0 0-1.5 0v4.25a.75.75 0 0 1-.75.75h-7.5a.75.75 0 0 1-.75-.75v-7.5a.75.75 0 0 1 .75-.75h3.5a.75.75 0 0 0 0-1.5h-3.5Z" /><path d="M10 .75a.75.75 0 0 1 .75.75v3.5a.75.75 0 0 1-1.5 0V2.56L6.03 6.28a.75.75 0 0 1-1.06-1.06L8.69 1.5H7.25a.75.75 0 0 1 0-1.5h3.5Z" /></svg></a>
-                    <button @click="editarGasto(gasto)" :disabled="isViajeActualCerrado" class="btn-icon-action btn-icon-edit" aria-label="Editar Gasto"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" fill="currentColor" class="w-4 h-4"><path d="M11.013 2.513a1.75 1.75 0 0 1 2.475 2.474L6.523 11.952l-2.756.87a.75.75 0 0 1-.917-.917l.87-2.756L11.013 2.513Z" /></svg></button>
-                    <button @click="eliminarGasto(gasto.id)" :disabled="isViajeActualCerrado" class="btn-icon-action btn-icon-delete" aria-label="Eliminar Gasto"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" fill="currentColor" class="w-4 h-4"><path fill-rule="evenodd" d="M5 3.25V4H2.75a.75.75 0 0 0 0 1.5h.3l.815 8.15A1.5 1.5 0 0 0 5.357 15h5.285a1.5 1.5 0 0 0 1.493-1.35l.815-8.15h.3a.75.75 0 0 0 0-1.5H11v-.75A2.25 2.25 0 0 0 8.75 1h-1.5A2.25 2.25 0 0 0 5 3.25Zm2.25-.75a.75.75 0 0 0-.75.75V4h3v-.75a.75.75 0 0 0-.75-.75h-1.5Z" clip-rule="evenodd" /></svg></button>
-                  </div>
-                </div>
-              </div>
-            </div>
+
           </div>
         </div>
+
       </div>
+
     </div>
 
-    <!-- Botón FAB para Nuevo Gasto -->
-    <div class="fixed bottom-6 right-6 z-10">
-      <button @click="goToNuevoGasto" :disabled="isViajeActualCerrado || !filtroViajeId" class="fab-button" aria-label="Añadir nuevo gasto">
-        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" class="w-7 h-7"><path fill-rule="evenodd" d="M12 3.75a.75.75 0 01.75.75v6.75h6.75a.75.75 0 010 1.5h-6.75v6.75a.75.75 0 01-1.5 0v-6.75H4.5a.75.75 0 010-1.5h6.75V4.5a.75.75 0 01.75-.75z" clip-rule="evenodd" /></svg>
+    <!-- Botón Flotante (FAB) para Nuevo Gasto -->
+    <div class="fixed bottom-6 right-6 z-30">
+      <button 
+        @click="goToNuevoGasto" 
+        :disabled="isViajeActualCerrado || !filtroViajeId" 
+        class="w-14 h-14 bg-gradient-to-br from-emerald-500 to-teal-600 text-white rounded-2xl shadow-lg shadow-emerald-500/30 flex items-center justify-center hover:scale-105 active:scale-95 transition-all cursor-pointer disabled:opacity-50"
+        title="Registrar Nuevo Gasto"
+      >
+        <svg class="w-7 h-7" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M12 6v6m0 0v6m0-6h6m-6 0H6"/></svg>
       </button>
     </div>
-    
-    <!-- Modal para Crear/Añadir a Grupo -->
-    <div v-if="showGroupModal" class="fixed inset-0 bg-gray-600 bg-opacity-75 z-50 flex justify-center items-center" @click.self="showGroupModal = false">
-      <div class="bg-white rounded-lg shadow-xl max-w-md w-full p-6">
-        <h3 class="text-lg font-medium text-gray-900">Agrupar Gastos</h3>
-        <p class="text-sm text-gray-500 mt-1">Agrupa los {{ selectedGastos.size }} gastos seleccionados en un nuevo concepto o en uno ya existente.</p>
-        <fieldset class="mt-4">
-          <legend class="sr-only">Tipo de Agrupación</legend>
-          <div class="flex gap-4">
-            <div class="flex items-center">
-              <input id="create-group" name="group-action" type="radio" value="create" v-model="groupAction" class="h-4 w-4 border-gray-300 text-indigo-600 focus:ring-indigo-600">
-              <label for="create-group" class="ml-2 block text-sm font-medium text-gray-900">Crear Nuevo Grupo</label>
-            </div>
-            <div class="flex items-center">
-              <input id="add-to-group" name="group-action" type="radio" value="add" v-model="groupAction" class="h-4 w-4 border-gray-300 text-indigo-600 focus:ring-indigo-600" :disabled="existingGroups.length === 0">
-              <label for="add-to-group" class="ml-2 block text-sm font-medium text-gray-900" :class="{'text-gray-400': existingGroups.length === 0}">Añadir a Existente</label>
-            </div>
-          </div>
-        </fieldset>
-        <div class="mt-4">
-          <div v-if="groupAction === 'create'">
-            <label for="group_name" class="form-label-filter">Nombre del Nuevo Grupo</label>
-            <input type="text" id="group_name" v-model="newGroupName" class="form-input mt-1" placeholder="Ej: Cirugía Paciente X - Chaco">
-          </div>
-          <div v-if="groupAction === 'add'">
-            <label for="existing_group" class="form-label-filter">Seleccionar Grupo Existente</label>
-            <select id="existing_group" v-model="selectedGroupId" class="form-input mt-1">
-              <option :value="null" disabled>-- Elige un grupo --</option>
-              <option v-for="group in existingGroups" :key="group.id" :value="group.id">{{ group.nombre_grupo }}</option>
-            </select>
-          </div>
-        </div>
-        <div v-if="groupError" class="text-red-600 text-sm mt-2">{{ groupError }}</div>
-        <div class="mt-6 flex justify-end gap-3">
-          <button @click="showGroupModal = false" class="btn-secondary">Cancelar</button>
-          <button @click="handleGroupingAction" :disabled="isGrouping || (groupAction === 'create' && !newGroupName.trim()) || (groupAction === 'add' && !selectedGroupId)" class="btn-primary">
-            {{ isGrouping ? 'Procesando...' : 'Confirmar Agrupación' }}
-          </button>
-        </div>
-      </div>
-    </div>
 
-    <!-- Modal para Agregar Fondos -->
+    <!-- Modal de Fondos -->
     <AgregarFondosModal
-      :is-open="showFondosModal"
-      :rendicion="viajeSeleccionadoInfo"
+      v-if="showFondosModal"
+      :viaje-id="filtroViajeId"
       @close="showFondosModal = false"
       @fondos-agregados="handleFondosAgregados"
     />
+
   </div>
 </template>
-
-<style>
-.summary-card-mobile { @apply bg-white p-4 rounded-xl shadow-sm border border-gray-200 text-center; }
-.summary-value-mobile { @apply text-2xl font-bold text-gray-800 mt-1; }
-.fab-button { @apply h-14 w-14 bg-blue-600 text-white rounded-full flex items-center justify-center shadow-lg hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 transition-transform duration-150 hover:scale-110 disabled:bg-gray-400 disabled:cursor-not-allowed; }
-.export-btn { @apply flex items-center w-full px-4 py-2 text-sm text-left text-gray-700 hover:bg-gray-100; }
-.fade-enter-active, .fade-leave-active { transition: opacity 0.2s ease-in-out; }
-.fade-enter-from, .fade-leave-to { opacity: 0; }
-.form-label-filter { @apply block text-xs font-medium text-gray-600 mb-1; }
-.form-input { @apply block w-full rounded-md border-gray-300 shadow-sm focus:ring-blue-500 focus:border-blue-500 sm:text-sm transition-colors; }
-.table-header { @apply px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider; }
-.table-cell { @apply px-4 py-3 whitespace-nowrap text-sm text-gray-600; }
-.btn-icon-action { @apply inline-flex items-center p-1.5 rounded-md transition-all duration-150 disabled:opacity-40 disabled:cursor-not-allowed; }
-.btn-icon-edit { @apply text-blue-600 hover:bg-blue-100 hover:scale-110 disabled:hover:bg-transparent disabled:hover:scale-100; }
-.btn-icon-delete { @apply text-red-600 hover:bg-red-100 hover:scale-110 disabled:hover:bg-transparent disabled:hover:scale-100; }
-.btn-icon-link { @apply text-gray-500 hover:bg-gray-200 hover:scale-110 disabled:hover:bg-transparent disabled:hover:scale-100; }
-.v-select-filter { --vs-controls-color: #6b7280; --vs-border-color: #d1d5db; --vs-dropdown-bg: #ffffff; --vs-dropdown-option-bg: #ffffff; --vs-dropdown-option-color: #374151; --vs-dropdown-option-padding: 0.5rem 1rem; --vs-dropdown-option--active-bg: #3b82f6; --vs-dropdown-option--active-color: #ffffff; --vs-selected-bg: #3b82f6; --vs-selected-color: #ffffff; --vs-search-input-color: #4b5563; --vs-line-height: 1.5; --vs-font-size: 0.875rem; }
-.btn-primary { @apply bg-indigo-600 text-white px-4 py-2 rounded-md text-sm font-semibold shadow-sm hover:bg-indigo-700 disabled:opacity-50 disabled:cursor-not-allowed; }
-.btn-secondary { @apply bg-white text-gray-700 px-4 py-2 rounded-md text-sm font-semibold shadow-sm ring-1 ring-inset ring-gray-300 hover:bg-gray-50 disabled:opacity-50; }
-.btn-danger { @apply bg-red-600 text-white px-4 py-2 rounded-md text-sm font-semibold shadow-sm hover:bg-red-700 disabled:opacity-50 disabled:cursor-not-allowed; }
-.table-header.sortable { @apply cursor-pointer hover:bg-gray-200; }
-.btn-link { @apply text-sm font-semibold text-indigo-600 hover:text-indigo-500 disabled:text-gray-400 disabled:cursor-not-allowed; }
-.btn-filter-inactive { @apply relative inline-flex items-center bg-white px-3 py-2 text-sm font-medium text-gray-900 ring-1 ring-inset ring-gray-300 hover:bg-gray-50 focus:z-10; }
-.btn-filter-active { @apply relative z-10 inline-flex items-center bg-indigo-600 px-3 py-2 text-sm font-medium text-white focus:z-10; }
-.checkbox-sm { @apply h-4 w-4 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500; }
-</style>
