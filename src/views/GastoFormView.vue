@@ -90,14 +90,15 @@ function seleccionarFormato(formato) {
 function handleGastoGuardado(gastoGuardado) {
   let feedbackMessage = gastoIdToEdit.value ? 'Gasto actualizado con éxito.' : 'Gasto creado con éxito.';
   const isCtaCte = gastoGuardado?.origen_gasto === 'cuenta_corriente_empresa';
+  const viajeIdTarget = gastoGuardado?.viaje_id || viajeIdPredeterminadoQuery.value || localStorage.getItem('lastUsedViajeId');
 
   if (isCtaCte) {
     feedbackMessage = 'Se ha guardado el gasto como cuenta corriente, por favor si necesitas más data, contacta con usuarios administradores, junior/cesar.';
     router.push({ name: 'GastosListUser', query: { feedback: feedbackMessage } });
   } else if (gastoGuardado?.caja_id) {
     router.push({ name: 'CajaDiaria', query: { feedback: feedbackMessage } });
-  } else if (gastoGuardado?.viaje_id) {
-    router.push({ name: 'GastosListUser', query: { viajeId: gastoGuardado.viaje_id, feedback: feedbackMessage } });
+  } else if (viajeIdTarget) {
+    router.push({ name: 'GastosListUser', query: { viajeId: viajeIdTarget, feedback: feedbackMessage } });
   } else {
     router.push({ name: 'GastosListUser', query: { feedback: feedbackMessage } });
   }
