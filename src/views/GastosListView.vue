@@ -695,16 +695,16 @@ const generarRendicionPDFWrapper = () => {
                       <td class="py-3.5 px-4 text-center" @click.stop>
                         <input type="checkbox" :checked="selectedGastos.has(gasto.id)" @change="toggleGastoSelection(gasto.id)" class="rounded border-slate-300 text-emerald-600 focus:ring-emerald-500 cursor-pointer" :disabled="isViajeActualCerrado">
                       </td>
-                      <td class="py-3.5 px-4 text-center">
-                        <div class="w-9 h-9 rounded-xl bg-slate-100 border border-slate-200 flex items-center justify-center text-slate-800 shrink-0 mx-auto">
+                      <td class="py-3 px-4 text-center">
+                        <div class="w-7 h-7 rounded-lg bg-slate-100 border border-slate-200 flex items-center justify-center text-slate-700 shrink-0 mx-auto p-1">
                           <IconRenderer :icon-data="gasto.tipos_gasto_config?.icono_svg" :color="gasto.tipos_gasto_config?.color_accent" />
                         </div>
                       </td>
-                      <td class="py-3.5 px-4 font-bold text-slate-800 whitespace-nowrap">{{ formatDate(gasto.fecha_gasto) }}</td>
-                      <td class="py-3.5 px-4 font-black text-slate-900 whitespace-nowrap">{{ gasto.tipos_gasto_config?.nombre_tipo_gasto || 'Gasto General' }}</td>
-                      <td class="py-3.5 px-4 text-slate-700 max-w-sm truncate font-medium">{{ gasto.descripcion_general || 'Sin detalle' }}</td>
-                      <td class="py-3.5 px-4 text-slate-600 font-mono font-bold">{{ gasto.numero_factura || '-' }}</td>
-                      <td class="py-3.5 px-4 text-right font-black text-slate-900 text-sm whitespace-nowrap">{{ formatCurrency(gasto.monto_total) }}</td>
+                      <td class="py-3 px-4 text-slate-600 whitespace-nowrap font-normal">{{ formatDate(gasto.fecha_gasto) }}</td>
+                      <td class="py-3 px-4 text-slate-600 whitespace-nowrap font-normal">{{ gasto.tipos_gasto_config?.nombre_tipo_gasto || 'Gasto General' }}</td>
+                      <td class="py-3 px-4 text-slate-900 max-w-sm truncate font-bold text-xs">{{ gasto.descripcion_general || 'Sin detalle' }}</td>
+                      <td class="py-3 px-4 text-slate-500 font-mono text-xs">{{ gasto.numero_factura || '-' }}</td>
+                      <td class="py-3 px-4 text-right font-bold text-slate-900 text-xs whitespace-nowrap">{{ formatCurrency(gasto.monto_total) }}</td>
                       <td class="py-3.5 px-4 text-center" @click.stop>
                         <div class="flex items-center justify-center gap-1.5">
                           <a v-if="gasto.factura_url" :href="gasto.factura_url" target="_blank" class="w-8 h-8 rounded-lg border border-slate-300 bg-white hover:bg-slate-100 text-slate-700 flex items-center justify-center transition-colors" title="Ver Comprobante">
@@ -768,13 +768,13 @@ const generarRendicionPDFWrapper = () => {
               >
                 <div class="flex items-center justify-between gap-3">
                   <div class="flex items-center gap-3 min-w-0">
-                    <div class="w-11 h-11 rounded-2xl bg-slate-100 border border-slate-200 flex items-center justify-center text-slate-800 shrink-0">
+                    <div class="w-8 h-8 rounded-lg bg-slate-100 border border-slate-200 flex items-center justify-center text-slate-700 shrink-0 p-1">
                       <IconRenderer :icon-data="gasto.tipos_gasto_config?.icono_svg" :color="gasto.tipos_gasto_config?.color_accent" />
                     </div>
 
                     <div class="min-w-0">
-                      <h4 class="text-sm font-bold text-slate-900 truncate">{{ gasto.tipos_gasto_config?.nombre_tipo_gasto || 'Gasto' }}</h4>
-                      <p class="text-xs text-slate-600 truncate mt-0.5 font-medium">{{ gasto.descripcion_general || 'Sin descripción' }}</p>
+                      <h4 class="text-xs font-bold text-slate-900 truncate">{{ gasto.descripcion_general || 'Sin descripción' }}</h4>
+                      <p class="text-[11px] text-slate-500 truncate mt-0.5 font-normal">{{ gasto.tipos_gasto_config?.nombre_tipo_gasto || 'Gasto General' }}</p>
                     </div>
                   </div>
 
