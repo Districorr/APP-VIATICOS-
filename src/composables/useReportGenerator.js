@@ -24,6 +24,19 @@ const getReportData = async (viajeId) => {
   if (!reporte) {
     throw new Error("No se encontraron datos para la rendición especificada.");
   }
+
+  // Traer comentarios u observaciones actualizadas del viaje (para historial de fondos/notas)
+  const { data: viaje } = await supabase
+    .from('viajes')
+    .select('comentarios_aprobacion, observacion_cierre')
+    .eq('id', viajeId)
+    .maybeSingle();
+
+  if (viaje && reporte.metadata) {
+    reporte.metadata.comentarios = viaje.comentarios_aprobacion || null;
+    reporte.metadata.observacion_cierre = viaje.observacion_cierre || null;
+  }
+
   return reporte;
 };
 export function useReportGenerator() {
@@ -233,7 +246,47 @@ const generateCanvaStylePDF = async (viajeId) => {
       columnStyles: { 0: { fontStyle: 'bold' }, 2: { fontStyle: 'bold' } }
     });
     lastY = doc.lastAutoTable.finalY + 4;
-    
+
+    // Sintetizar grupo de Ingresos de Fondos si existen recargas o adelanto
+    const recargasListPDF = parseComentariosYRecargas(reporte.metadata?.comentarios);
+    const itemsIngresosPDF = [];
+
+    if (recargasListPDF.length > 0) {
+      recargasListPDF.forEach(r => {
+        const rawMontoNum = parseFloat(r.monto?.replace(/[^\d.,]/g, '').replace(/\./g, '').replace(',', '.')) || 0;
+        itemsIngresosPDF.push({
+          tipo_gasto: 'Ingreso de Fondos',
+          fecha: r.fecha || '--/--/----',
+          descripcion: r.motivo || 'Recarga de adelanto autorizada',
+          monto: rawMontoNum > 0 ? rawMontoNum : (reporte.resumen_financiero?.total_adelantos || 0),
+          es_ingreso: true,
+          detalles_adicionales: {}
+        });
+      });
+    } else if (reporte.resumen_financiero?.total_adelantos > 0) {
+      itemsIngresosPDF.push({
+        tipo_gasto: 'Ingreso de Fondos',
+        fecha: reporte.metadata?.periodo?.split(' ')[0] || '--/--/----',
+        descripcion: 'Adelanto Inicial de Rendición',
+        monto: reporte.resumen_financiero.total_adelantos,
+        es_ingreso: true,
+        detalles_adicionales: {}
+      });
+    }
+
+    if (itemsIngresosPDF.length > 0 && Array.isArray(reporte.grupos)) {
+      const yaTieneGrupoIngresos = reporte.grupos.some(g => g.es_grupo_ingresos || (g.group_name && g.group_name.toLowerCase().includes('ingreso')));
+      if (!yaTieneGrupoIngresos) {
+        const totalIngresosMonto = itemsIngresosPDF.reduce((sum, i) => sum + (parseFloat(i.monto) || 0), 0);
+        reporte.grupos.unshift({
+          group_name: 'Ingresos de Fondos / Adelantos',
+          total_monto: totalIngresosMonto,
+          es_grupo_ingresos: true,
+          gastos: itemsIngresosPDF
+        });
+      }
+    }
+
     // --- BUCLE PRINCIPAL: UNA TABLA POR GRUPO ---
     if (reporte.grupos && Array.isArray(reporte.grupos)) {
 
@@ -250,11 +303,8 @@ const generateCanvaStylePDF = async (viajeId) => {
         doc.rect(margin, lastY, pageWidth - margin * 2, groupTitleHeight, 'F');
         doc.setFontSize(9).setFont(undefined, 'bold').setTextColor(255, 255, 255);
         
-        // ========= INICIO DE LA CORRECCIÓN: Mostrar el total del grupo =========
-        // Aquí leemos el campo 'total_monto' que nos envía la RPC y lo formateamos
-        const tituloGrupo = `${grupo.group_name || 'Grupo sin nombre'} | Total: ${formatCurrency(grupo.total_monto || 0)}`;
+        const tituloGrupo = `${grupo.group_name || 'Grupo sin nombre'} | Total: ${grupo.es_grupo_ingresos ? '+ ' : ''}${formatCurrency(grupo.total_monto || 0)}`;
         doc.text(tituloGrupo, margin + 2, lastY + 5);
-        // ========= FIN DE LA CORRECCIÓN =========
 
         lastY += groupTitleHeight;
         
@@ -262,10 +312,11 @@ const generateCanvaStylePDF = async (viajeId) => {
         
         if (grupo.gastos && Array.isArray(grupo.gastos)) {
           grupo.gastos.forEach(gasto => {
+              const isIngresoItem = grupo.es_grupo_ingresos || gasto.es_ingreso;
               bodyData.push([
-                  { content: gasto.tipo_gasto || 'Gasto General', styles: { fontStyle: 'bold', fontSize: 8, valign: 'middle' } },
+                  { content: gasto.tipo_gasto || (isIngresoItem ? 'Ingreso de Fondos' : 'Gasto General'), styles: { fontStyle: 'bold', fontSize: 8, valign: 'middle' } },
                   { content: gasto.descripcion || 'Sin descripción', styles: { fontStyle: 'bold', fontSize: 8, valign: 'middle' } },
-                  { content: formatCurrency(gasto.monto), styles: { fontStyle: 'bold', fontSize: 9, halign: 'right', valign: 'middle' } }
+                  { content: (isIngresoItem ? '+ ' : '') + formatCurrency(gasto.monto), styles: { fontStyle: 'bold', fontSize: 9, halign: 'right', valign: 'middle', textColor: isIngresoItem ? [0, 120, 0] : [40, 40, 40] } }
               ]);
 
               const detalles = [];
@@ -339,6 +390,47 @@ const generateCanvaStylePDF = async (viajeId) => {
     ], margin: { left: margin + (columnWidth + 4.5) * 2 }});
     finalY = Math.max(finalY, doc.lastAutoTable.finalY);
 
+    if (reporte.metadata?.comentarios) {
+      const parsedRecargas = parseComentariosYRecargas(reporte.metadata.comentarios);
+      if (parsedRecargas.length > 0) {
+        finalY += 6;
+        if (finalY + 30 > pageHeight - margin) {
+          doc.addPage();
+          finalY = margin + 5;
+        }
+
+        doc.setFontSize(8.5).setFont(undefined, 'bold').setTextColor(40, 56, 104);
+        doc.text("Detalle de Ingreso / Recargas de Fondos y Motivos:", margin, finalY);
+        finalY += 3;
+
+        doc.autoTable({
+          startY: finalY,
+          head: [["Fecha / Hora", "Monto Adicional", "Motivo / Observación"]],
+          body: parsedRecargas.map(r => [r.fecha, r.monto, r.motivo]),
+          theme: 'grid',
+          headStyles: {
+            fillColor: [40, 56, 104],
+            textColor: [255, 255, 255],
+            fontStyle: 'bold',
+            fontSize: 7.5,
+            cellPadding: 1.5
+          },
+          styles: {
+            fontSize: 7,
+            cellPadding: 1.5,
+            overflow: 'linebreak'
+          },
+          columnStyles: {
+            0: { cellWidth: 42, fontStyle: 'bold' },
+            1: { cellWidth: 35, fontStyle: 'bold', halign: 'right', textColor: [0, 100, 0] },
+            2: { cellWidth: 'auto' }
+          },
+        });
+
+        finalY = doc.lastAutoTable.finalY + 2;
+      }
+    }
+
     lastY = finalY + 12;
     if (lastY > pageHeight - margin) { doc.addPage(); lastY = margin + 10; }
     doc.setFontSize(8).setTextColor(0,0,0);
@@ -362,6 +454,34 @@ const generateCanvaStylePDF = async (viajeId) => {
   }
 };
     // --- FUNCIONES AUXILIARES Y OTRAS FUNCIONES DE REPORTE (INTACTAS DEL ORIGINAL) ---
+  const parseComentariosYRecargas = (comentariosRaw) => {
+    if (!comentariosRaw || typeof comentariosRaw !== 'string') return [];
+    const lines = comentariosRaw.split('\n').map(l => l.trim()).filter(Boolean);
+    const result = [];
+
+    for (const line of lines) {
+      const dateMatch = line.match(/^\[(.*?)\]\s*(.*)$/);
+      if (dateMatch) {
+        const fecha = dateMatch[1].trim();
+        const rest = dateMatch[2].trim();
+        
+        const montoMatch = rest.match(/^(?:Fondos agregados|Recarga de Fondos|Adicional)?:?\s*(?:\+\$?([\d.,]+))?\s*(?:-\s*(.*))?$/i);
+        if (montoMatch && (montoMatch[1] || montoMatch[2])) {
+          const rawMonto = montoMatch[1];
+          const rawMotivo = montoMatch[2];
+          const montoStr = rawMonto ? `+$ ${rawMonto}` : 'Recarga';
+          const motivoStr = rawMotivo && rawMotivo.trim() ? rawMotivo.trim() : (rest || 'Recarga de fondos realizada');
+          result.push({ fecha, monto: montoStr, motivo: motivoStr });
+        } else {
+          result.push({ fecha, monto: 'Recarga', motivo: rest });
+        }
+      } else {
+        result.push({ fecha: 'Historial', monto: 'Observación', motivo: line });
+      }
+    }
+    return result;
+  };
+
   const formatearDetallesAdicionales = (gasto) => {
     const datos = gasto.datos_adicionales;
     if (!datos) return '';
@@ -621,13 +741,32 @@ const generateCanvaStylePDF = async (viajeId) => {
     const tableFoot = [[ { content: 'TOTALES DE LA RENDICIÓN:', colSpan: 3, styles: { halign: 'right', fontStyle: 'bold'} }, { content: formatCurrency(totalNetoRendicion, monedaPrincipal), styles: { halign: 'right', fontStyle: 'bold'} }, { content: formatCurrency(totalIVARendicion, monedaPrincipal), styles: { halign: 'right', fontStyle: 'bold'} }, { content: formatCurrency(totalBrutoRendicion, monedaPrincipal), styles: { halign: 'right', fontStyle: 'bold'} }, { content: '', styles: { halign: 'right', fontStyle: 'bold'} } ]];
     doc.autoTable({ head: [tableColumn], body: tableRows, foot: tableFoot, startY: currentY, theme: 'striped', headStyles: { fillColor: [13, 47, 91], textColor: [255,255,255], fontStyle: 'bold', fontSize: 9 }, footStyles: { fillColor: [220, 220, 220], textColor: [0,0,0], fontStyle: 'bold', fontSize: 9, halign: 'right' }, styles: { fontSize: 8, cellPadding: 1.5, overflow: 'linebreak' }, columnStyles: { 3: { halign: 'right' }, 4: { halign: 'right' }, 5: { halign: 'right' } }, didDrawPage: (data) => { currentY = data.cursor.y + 15; } });
     if (viajeSeleccionadoInfo && typeof viajeSeleccionadoInfo.monto_adelanto === 'number') {
-        currentY = doc.lastAutoTable.finalY + 20;
+        currentY = doc.lastAutoTable.finalY + 15;
         if (currentY > doc.internal.pageSize.getHeight() - 60) { doc.addPage(); currentY = margin; }
-        doc.setFontSize(10).setFont(undefined, 'bold').text('Resumen del Adelanto:', margin, currentY); currentY += 15;
-        doc.setFont(undefined, 'normal').text(`Monto del Adelanto: ${formatCurrency(viajeSeleccionadoInfo.monto_adelanto, monedaPrincipal)}`, margin + 5, currentY); currentY += 12;
-        doc.text(`Total Gastado (aplicado al adelanto): ${formatCurrency(totalBrutoRendicion, monedaPrincipal)}`, margin + 5, currentY); currentY += 12;
+        doc.setFontSize(10).setFont(undefined, 'bold').text('Resumen del Adelanto:', margin, currentY); currentY += 12;
+        doc.setFont(undefined, 'normal').text(`Monto del Adelanto: ${formatCurrency(viajeSeleccionadoInfo.monto_adelanto, monedaPrincipal)}`, margin + 5, currentY); currentY += 10;
+        doc.text(`Total Gastado (aplicado al adelanto): ${formatCurrency(totalBrutoRendicion, monedaPrincipal)}`, margin + 5, currentY); currentY += 10;
         const saldo = (viajeSeleccionadoInfo.monto_adelanto || 0) - totalBrutoRendicion;
-        doc.setFont(undefined, 'bold').text(`Saldo del Adelanto: ${formatCurrency(saldo, monedaPrincipal)} (${saldo >= 0 ? 'A favor del responsable' : 'A reintegrar por el responsable'})`, margin + 5, currentY);
+        doc.setFont(undefined, 'bold').text(`Saldo del Adelanto: ${formatCurrency(saldo, monedaPrincipal)} (${saldo >= 0 ? 'A favor del responsable' : 'A reintegrar por el responsable'})`, margin + 5, currentY); currentY += 14;
+
+        if (viajeSeleccionadoInfo.comentarios_aprobacion) {
+          const parsedRecargas = parseComentariosYRecargas(viajeSeleccionadoInfo.comentarios_aprobacion);
+          if (parsedRecargas.length > 0) {
+            currentY += 4;
+            if (currentY + 25 > doc.internal.pageSize.getHeight() - margin) { doc.addPage(); currentY = margin; }
+            doc.setFontSize(9.5).setFont(undefined, 'bold').setTextColor(13, 47, 91).text('Detalle de Ingreso / Recargas de Fondos y Motivos:', margin, currentY); currentY += 4;
+            doc.autoTable({
+              startY: currentY,
+              head: [["Fecha / Hora", "Monto Adicional", "Motivo / Observación"]],
+              body: parsedRecargas.map(r => [r.fecha, r.monto, r.motivo]),
+              theme: 'grid',
+              headStyles: { fillColor: [13, 47, 91], textColor: [255, 255, 255], fontStyle: 'bold', fontSize: 8, cellPadding: 1.5 },
+              styles: { fontSize: 7.5, cellPadding: 1.5, overflow: 'linebreak' },
+              columnStyles: { 0: { cellWidth: 42, fontStyle: 'bold' }, 1: { cellWidth: 35, fontStyle: 'bold', halign: 'right', textColor: [0, 100, 0] }, 2: { cellWidth: 'auto' } }
+            });
+            currentY = doc.lastAutoTable.finalY + 4;
+          }
+        }
     }
     doc.save(`Rendicion_${viajeSeleccionadoInfo?.codigo_rendicion || 'General'}_${new Date().toISOString().split('T')[0]}.pdf`);
   };

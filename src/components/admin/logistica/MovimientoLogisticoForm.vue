@@ -305,6 +305,13 @@ async function handleGuardar() {
   errorMessage.value = '';
   successMessage.value = '';
 
+  if (!formState.tipo_movimiento_encomienda) {
+    formState.tipo_movimiento_encomienda = 'Envío';
+  }
+  if (!formState.sentido_movimiento) {
+    formState.sentido_movimiento = 'ida';
+  }
+
   if (!formState.transporte_id) {
     errorMessage.value = 'Debe seleccionar la Empresa de Transporte.';
     return;
@@ -324,6 +331,11 @@ async function handleGuardar() {
       errorMessage.value = 'Para Proveedor / Otros debe seleccionar el Proveedor Vinculado.';
       return;
     }
+  }
+
+  if (!formState.tipo_movimiento_encomienda) {
+    errorMessage.value = 'Debe seleccionar el Tipo de Movimiento.';
+    return;
   }
 
   if (formState.cantidad_bultos === null || formState.cantidad_bultos === undefined || Number(formState.cantidad_bultos) <= 0) {
@@ -388,9 +400,9 @@ async function handleGuardar() {
         modulo: 'logistica',
         origen_carga: 'formulario_movimientos',
         tipo_logistica: formState.tipo_logistica,
-        tipo_movimiento_encomienda: formState.tipo_movimiento_encomienda,
+        tipo_movimiento_encomienda: formState.tipo_movimiento_encomienda || 'Envío',
         cantidad_bultos: Number(formState.cantidad_bultos) || 1,
-        sentido_movimiento: formState.sentido_movimiento,
+        sentido_movimiento: formState.sentido_movimiento || 'ida',
         destino_texto: formState.destino_texto?.trim() || null,
         observacion_logistica: formState.observacion_logistica?.trim() || null,
       },
@@ -458,6 +470,25 @@ watch(() => props.initialData, (newVal) => {
     const newLocDest = extractEntityId(newVal.localidad_destino_id);
     if (formState.localidad_destino_id !== newLocDest) formState.localidad_destino_id = newLocDest;
 
+    const newTipoMov = newVal.tipo_movimiento_encomienda || newVal.datos_adicionales?.tipo_movimiento_encomienda || 'Envío';
+    if (formState.tipo_movimiento_encomienda !== newTipoMov) formState.tipo_movimiento_encomienda = newTipoMov;
+
+    const newSentido = newVal.sentido_movimiento || newVal.datos_adicionales?.sentido_movimiento || 'ida';
+    if (formState.sentido_movimiento !== newSentido) formState.sentido_movimiento = newSentido;
+
+    const newBultos = Number(newVal.cantidad_bultos || newVal.datos_adicionales?.cantidad_bultos) || 1;
+    if (formState.cantidad_bultos !== newBultos) formState.cantidad_bultos = newBultos;
+
+    if (newVal.numero_guia !== undefined || newVal.datos_adicionales?.numero_guia !== undefined) {
+      const newGuia = newVal.numero_guia || newVal.numero_factura || newVal.datos_adicionales?.numero_guia || '';
+      if (formState.numero_guia !== newGuia) formState.numero_guia = newGuia;
+    }
+
+    if (newVal.observacion_logistica !== undefined || newVal.datos_adicionales?.observacion_logistica !== undefined) {
+      const newObs = newVal.observacion_logistica || newVal.datos_adicionales?.observacion_logistica || '';
+      if (formState.observacion_logistica !== newObs) formState.observacion_logistica = newObs;
+    }
+
     if (newVal.paciente_referido !== undefined && formState.paciente_referido !== newVal.paciente_referido) {
       formState.paciente_referido = newVal.paciente_referido || '';
     }
@@ -476,12 +507,21 @@ watch(formState, (newVal) => {
     const cleanTrans = extractEntityId(newVal.transporte_id);
     const cleanProv = extractEntityId(newVal.proveedor_id);
     const cleanCli = extractEntityId(newVal.cliente_id);
+    const cleanProvincia = extractEntityId(newVal.provincia_id);
+    const cleanLocDest = extractEntityId(newVal.localidad_destino_id);
 
     if (props.initialData.transporte_id !== cleanTrans) props.initialData.transporte_id = cleanTrans;
     if (props.initialData.proveedor_id !== cleanProv) props.initialData.proveedor_id = cleanProv;
     if (props.initialData.cliente_id !== cleanCli) props.initialData.cliente_id = cleanCli;
+    if (props.initialData.provincia_id !== cleanProvincia) props.initialData.provincia_id = cleanProvincia;
+    if (props.initialData.localidad_destino_id !== cleanLocDest) props.initialData.localidad_destino_id = cleanLocDest;
     if (props.initialData.fecha_gasto !== cleanFecha) props.initialData.fecha_gasto = cleanFecha;
     if (props.initialData.tipo_logistica !== newVal.tipo_logistica) props.initialData.tipo_logistica = newVal.tipo_logistica;
+    if (props.initialData.tipo_movimiento_encomienda !== (newVal.tipo_movimiento_encomienda || 'Envío')) props.initialData.tipo_movimiento_encomienda = newVal.tipo_movimiento_encomienda || 'Envío';
+    if (props.initialData.sentido_movimiento !== (newVal.sentido_movimiento || 'ida')) props.initialData.sentido_movimiento = newVal.sentido_movimiento || 'ida';
+    if (props.initialData.cantidad_bultos !== (newVal.cantidad_bultos || 1)) props.initialData.cantidad_bultos = newVal.cantidad_bultos || 1;
+    if (props.initialData.numero_guia !== newVal.numero_guia) props.initialData.numero_guia = newVal.numero_guia;
+    if (props.initialData.observacion_logistica !== newVal.observacion_logistica) props.initialData.observacion_logistica = newVal.observacion_logistica;
     if (props.initialData.paciente_referido !== newVal.paciente_referido) props.initialData.paciente_referido = newVal.paciente_referido;
     if (props.initialData.descripcion_general !== newVal.descripcion_general) props.initialData.descripcion_general = newVal.descripcion_general;
   }
@@ -633,15 +673,6 @@ watch(formState, (newVal) => {
                 <span class="field-label">Paciente Referido <span class="text-red-500">*</span></span>
                 <input v-model="formState.paciente_referido" type="text" class="form-input" placeholder="Nombre completo del paciente" />
               </label>
-
-              <label class="field-group md:col-span-2">
-                <span class="field-label">Sentido del Envío</span>
-                <select v-model="formState.sentido_movimiento" class="form-input">
-                  <option value="ida">Ida</option>
-                  <option value="vuelta">Vuelta</option>
-                  <option value="ida_y_vuelta">Ida y Vuelta</option>
-                </select>
-              </label>
             </template>
 
             <!-- MODO PROVEEDOR / OTROS -->
@@ -660,6 +691,15 @@ watch(formState, (newVal) => {
                 />
               </label>
             </template>
+
+            <label class="field-group md:col-span-2">
+              <span class="field-label">Sentido del Envío</span>
+              <select v-model="formState.sentido_movimiento" class="form-input">
+                <option value="ida">Ida</option>
+                <option value="vuelta">Vuelta</option>
+                <option value="ida_y_vuelta">Ida y Vuelta</option>
+              </select>
+            </label>
 
             <label class="field-group">
               <span class="field-label">Provincia Destino</span>
@@ -818,15 +858,6 @@ watch(formState, (newVal) => {
           <span class="field-label">Paciente Referido <span class="text-red-500">*</span></span>
           <input v-model="formState.paciente_referido" type="text" class="form-input" placeholder="Nombre completo del paciente" />
         </label>
-
-        <label class="field-group md:col-span-2">
-          <span class="field-label">Sentido del Envío</span>
-          <select v-model="formState.sentido_movimiento" class="form-input">
-            <option value="ida">Ida</option>
-            <option value="vuelta">Vuelta</option>
-            <option value="ida_y_vuelta">Ida y Vuelta</option>
-          </select>
-        </label>
       </template>
 
       <!-- MODO PROVEEDOR / OTROS -->
@@ -845,6 +876,15 @@ watch(formState, (newVal) => {
           />
         </label>
       </template>
+
+      <label class="field-group md:col-span-2">
+        <span class="field-label">Sentido del Envío</span>
+        <select v-model="formState.sentido_movimiento" class="form-input">
+          <option value="ida">Ida</option>
+          <option value="vuelta">Vuelta</option>
+          <option value="ida_y_vuelta">Ida y Vuelta</option>
+        </select>
+      </label>
 
       <label class="field-group">
         <span class="field-label">Provincia Destino</span>

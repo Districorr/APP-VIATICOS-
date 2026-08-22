@@ -4,14 +4,14 @@ import { computed } from 'vue';
 import { formatDate, formatCurrency } from '../../utils/formatters.js';
 import { Menu, MenuButton, MenuItem, MenuItems } from '@headlessui/vue';
 import { 
-  CheckCircleIcon, ClockIcon, XCircleIcon, PencilIcon, TrashIcon, EyeIcon, EllipsisVerticalIcon 
+  CheckCircleIcon, ClockIcon, XCircleIcon, PencilIcon, TrashIcon, EyeIcon, EllipsisVerticalIcon, BanknotesIcon 
 } from '@heroicons/vue/24/solid';
 
 const props = defineProps({
   rendicion: { type: Object, required: true }
 });
 
-const emit = defineEmits(['revisar', 'ver-gastos', 'editar', 'eliminar']);
+const emit = defineEmits(['revisar', 'ver-gastos', 'editar', 'eliminar', 'agregar-fondos']);
 
 const cardClasses = computed(() => {
   const estado = props.rendicion.estado_aprobacion;
@@ -96,6 +96,11 @@ const formattedCierreDate = computed(() => {
               <MenuItem v-slot="{ active }">
                 <button @click="$emit('editar', rendicion.id)" class="menu-item" :class="{ 'bg-indigo-500 text-white': active, 'text-gray-900': !active }">
                   <PencilIcon class="mr-2 h-5 w-5" /> Editar
+                </button>
+              </MenuItem>
+              <MenuItem v-if="!rendicion.cerrado_en" v-slot="{ active }">
+                <button @click="$emit('agregar-fondos', rendicion)" class="menu-item" :class="{ 'bg-emerald-500 text-white': active, 'text-emerald-700': !active }">
+                  <BanknotesIcon class="mr-2 h-5 w-5" /> Agregar Fondos
                 </button>
               </MenuItem>
             </div>

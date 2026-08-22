@@ -370,7 +370,31 @@ function inicializarFormState() {
   const hoy = new Date();
   hoy.setMinutes(hoy.getMinutes() - hoy.getTimezoneOffset());
   const fechaHoyISO = hoy.toISOString().split('T')[0];
-  const camposFijos = { fecha_gasto: fechaHoyISO, monto_total: 0, monto_iva: 0, moneda: 'ARS', descripcion_general: '', numero_factura: '', viaje_id: null, caja_id: null, tipo_gasto_id: null, adelanto_especifico_aplicado: null, factura_url: null, provincia: null, provincia_id: null, provincia_origen_id: null, localidad_origen_id: null, provincia_destino_id: null, localidad_destino_id: null };
+  const camposFijos = {
+    fecha_gasto: fechaHoyISO,
+    monto_total: 0,
+    monto_iva: 0,
+    moneda: 'ARS',
+    descripcion_general: '',
+    numero_factura: '',
+    viaje_id: null,
+    caja_id: null,
+    tipo_gasto_id: null,
+    adelanto_especifico_aplicado: null,
+    factura_url: null,
+    provincia: null,
+    provincia_id: null,
+    provincia_origen_id: null,
+    localidad_origen_id: null,
+    provincia_destino_id: null,
+    localidad_destino_id: null,
+    tipo_logistica: 'cirugia',
+    tipo_movimiento_encomienda: 'Envío',
+    sentido_movimiento: 'ida',
+    cantidad_bultos: 1,
+    numero_guia: '',
+    observacion_logistica: '',
+  };
   const camposDeIdNormalizados = { cliente_id: null, transporte_id: null, proveedor_id: null };
   const otrosCamposDinamicos = {};
   [...camposObligatorios.value, ...camposOpcionales.value].forEach(campo => {

@@ -353,6 +353,13 @@ async function loadGastoCompleto() {
 }
 
 function validateForm() {
+  if (!formState.tipo_movimiento_encomienda) {
+    formState.tipo_movimiento_encomienda = 'Envío';
+  }
+  if (!formState.sentido_movimiento) {
+    formState.sentido_movimiento = 'ida';
+  }
+
   if (!isEditableLogisticExpense.value) {
     errorMessage.value = 'Este gasto no corresponde al contexto de encomiendas/logística y no puede editarse desde esta pantalla.';
     return false;
@@ -382,6 +389,10 @@ function validateForm() {
   }
   if (formState.cantidad_bultos === null || formState.cantidad_bultos === undefined || Number(formState.cantidad_bultos) <= 0) {
     errorMessage.value = 'La Cantidad de Bultos es obligatoria y debe ser al menos 1.';
+    return false;
+  }
+  if (!formState.tipo_movimiento_encomienda) {
+    errorMessage.value = 'Debe seleccionar el Tipo de Movimiento.';
     return false;
   }
   const monto = Number(formState.monto_total);
@@ -618,15 +629,6 @@ watch(() => props.transportes, (items) => {
                 <span class="field-label">Paciente Referido <span class="text-red-500">*</span></span>
                 <input v-model="formState.paciente_referido" type="text" class="form-input" placeholder="Nombre completo del paciente" />
               </label>
-
-              <label class="field-group md:col-span-2">
-                <span class="field-label">Sentido del Envío</span>
-                <select v-model="formState.sentido_movimiento" class="form-input">
-                  <option value="ida">Ida</option>
-                  <option value="vuelta">Vuelta</option>
-                  <option value="ida_y_vuelta">Ida y Vuelta</option>
-                </select>
-              </label>
             </template>
 
             <!-- MODO PROVEEDOR / OTROS -->
@@ -645,6 +647,15 @@ watch(() => props.transportes, (items) => {
                 />
               </label>
             </template>
+
+            <label class="field-group md:col-span-2">
+              <span class="field-label">Sentido del Envío</span>
+              <select v-model="formState.sentido_movimiento" class="form-input">
+                <option value="ida">Ida</option>
+                <option value="vuelta">Vuelta</option>
+                <option value="ida_y_vuelta">Ida y Vuelta</option>
+              </select>
+            </label>
 
             <label class="field-group">
               <span class="field-label">Provincia Destino</span>

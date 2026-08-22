@@ -9,11 +9,21 @@ import vSelect from 'vue-select';
 import 'vue-select/dist/vue-select.css';
 import SummaryCard from '../components/SummaryCard.vue';
 import IconRenderer from '../components/IconRenderer.vue';
+import AgregarFondosModal from '../components/AgregarFondosModal.vue';
 
 const router = useRouter();
 const route = useRoute();
 const userProfile = inject('userProfile', ref(null));
 const { generateCanvaStylePDF } = useReportGenerator();
+
+const showFondosModal = ref(false);
+
+const handleFondosAgregados = async () => {
+  await fetchInitialData();
+  await fetchGastos();
+  feedbackMessage.value = 'Fondos agregados correctamente a la rendición.';
+  setTimeout(() => { feedbackMessage.value = ''; }, 4000);
+};
 
 const gastos = ref([]);
 const viajeSeleccionadoInfo = ref(null);
@@ -277,7 +287,44 @@ const toggleRowExpansion = (gastoId) => {
   expandedRows.value = newSet;
 };
 
-const totalGastado = computed(() => gastos.value.reduce((sum, g) => sum + (g.monto_total || 0), 0));
+const isIngresoGasto = (g) => {
+  if (g.es_ingreso_fondos === true) return true;
+  if (g.datos_adicionales && typeof g.datos_adicionales === 'object') {
+    if (g.datos_adicionales.es_ingreso_fondos === true || g.datos_adicionales.tipo_registro === 'ingreso_fondos') return true;
+  }
+  const nombreTipo = (g.tipos_gasto_config?.nombre_tipo_gasto || g.nombre_tipo_gasto || '').toLowerCase();
+  return nombreTipo.includes('ingreso de fondos') || nombreTipo.includes('recarga de fondos');
+};
+
+const parseComentariosYRecargasLocal = (comentariosRaw) => {
+  if (!comentariosRaw || typeof comentariosRaw !== 'string') return [];
+  const lines = comentariosRaw.split('\n').map(l => l.trim()).filter(Boolean);
+  const result = [];
+  for (const line of lines) {
+    const dateMatch = line.match(/^\[(.*?)\]\s*(.*)$/);
+    if (dateMatch) {
+      const fecha = dateMatch[1].trim();
+      const rest = dateMatch[2].trim();
+      const montoMatch = rest.match(/^(?:Fondos agregados|Recarga de Fondos|Adicional)?:?\s*(?:\+\$?([\d.,]+))?\s*(?:-\s*(.*))?$/i);
+      if (montoMatch && (montoMatch[1] || montoMatch[2])) {
+        const rawMonto = montoMatch[1];
+        const rawMotivo = montoMatch[2];
+        const rawMontoNum = rawMonto ? parseFloat(rawMonto.replace(/\./g, '').replace(',', '.')) : 0;
+        const motivoStr = rawMotivo && rawMotivo.trim() ? rawMotivo.trim() : (rest || 'Recarga de fondos realizada');
+        result.push({ fecha, montoNumeric: rawMontoNum, motivo: motivoStr });
+      } else {
+        result.push({ fecha, montoNumeric: 0, motivo: rest });
+      }
+    }
+  }
+  return result;
+};
+
+const totalGastado = computed(() => {
+  return gastos.value
+    .filter(g => !isIngresoGasto(g))
+    .reduce((sum, g) => sum + (parseFloat(g.monto_total) || 0), 0);
+});
 const adelantoTotal = computed(() => viajeSeleccionadoInfo.value?.monto_adelanto || 0);
 const saldoActualRendicion = computed(() => adelantoTotal.value - totalGastado.value);
 const isViajeActualCerrado = computed(() => !!viajeSeleccionadoInfo.value?.cerrado_en);
@@ -342,8 +389,51 @@ const fetchGastos = async () => {
     
     if (error) throw error;
     
-    // La vista devuelve 'id', no 'gasto_id', así que el mapeo ya no es necesario
-    gastos.value = data || [];
+    const rawGastos = data ? [...data] : [];
+    
+    // Sintetizar visualmente Ingreso de Fondos si existen recargas o adelanto inicial sin registro en gastos
+    const recargasEnComentarios = parseComentariosYRecargasLocal(viajeSeleccionadoInfo.value?.comentarios_aprobacion);
+    const tieneGastoIngresoEnDB = rawGastos.some(g => isIngresoGasto(g));
+
+    if (!tieneGastoIngresoEnDB) {
+      if (recargasEnComentarios.length > 0) {
+        recargasEnComentarios.forEach((r, idx) => {
+          rawGastos.unshift({
+            id: `sintetizado-recarga-${idx}`,
+            viaje_id: filtroViajeId.value,
+            fecha_gasto: new Date().toISOString(),
+            descripcion_general: `Ingreso de Fondos: ${r.motivo}`,
+            monto_total: r.montoNumeric > 0 ? r.montoNumeric : (viajeSeleccionadoInfo.value?.monto_adelanto || 0),
+            es_ingreso_fondos: true,
+            tipos_gasto_config: {
+              nombre_tipo_gasto: 'Ingreso de Fondos',
+              icono_svg: '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2a10 10 0 1 0 10 10A10 10 0 0 0 12 2zm1 14.5a1 1 0 0 1-2 0v-1.07A3.5 3.5 0 0 1 8.5 12a1 1 0 0 1 2 0 1.5 1.5 0 0 0 3 0 1.5 1.5 0 0 0-1.5-1.5h-1a3.5 3.5 0 0 1-3.5-3.5 3.5 3.5 0 0 1 2.5-3.38V7.5a1 1 0 0 1 2 0v1.07A3.5 3.5 0 0 1 15.5 12a1 1 0 0 1-2 0 1.5 1.5 0 0 0 3 0 1.5 1.5 0 0 0 1.5 1.5h1a3.5 3.5 0 0 1 3.5 3.5 3.5 3.5 0 0 1-2.5 3.38z"/></svg>',
+              color_accent: '#10B981'
+            },
+            grupos_gastos: { id: 'grupo-ingresos', nombre_grupo: 'Ingresos de Fondos' },
+            datos_adicionales: { es_ingreso_fondos: true, observacion_recarga: r.motivo }
+          });
+        });
+      } else if (viajeSeleccionadoInfo.value?.monto_adelanto > 0) {
+        rawGastos.unshift({
+          id: 'sintetizado-adelanto-inicial',
+          viaje_id: filtroViajeId.value,
+          fecha_gasto: viajeSeleccionadoInfo.value.fecha_inicio || new Date().toISOString(),
+          descripcion_general: 'Adelanto Inicial de Rendición',
+          monto_total: parseFloat(viajeSeleccionadoInfo.value.monto_adelanto) || 0,
+          es_ingreso_fondos: true,
+          tipos_gasto_config: {
+            nombre_tipo_gasto: 'Ingreso de Fondos',
+            icono_svg: '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2a10 10 0 1 0 10 10A10 10 0 0 0 12 2zm1 14.5a1 1 0 0 1-2 0v-1.07A3.5 3.5 0 0 1 8.5 12a1 1 0 0 1 2 0 1.5 1.5 0 0 0 3 0 1.5 1.5 0 0 0-1.5-1.5h-1a3.5 3.5 0 0 1-3.5-3.5 3.5 3.5 0 0 1 2.5-3.38V7.5a1 1 0 0 1 2 0v1.07A3.5 3.5 0 0 1 15.5 12a1 1 0 0 1-2 0 1.5 1.5 0 0 0 3 0 1.5 1.5 0 0 0 1.5 1.5h1a3.5 3.5 0 0 1 3.5 3.5 3.5 3.5 0 0 1-2.5 3.38z"/></svg>',
+            color_accent: '#10B981'
+          },
+          grupos_gastos: { id: 'grupo-ingresos', nombre_grupo: 'Ingresos de Fondos' },
+          datos_adicionales: { es_ingreso_fondos: true }
+        });
+      }
+    }
+
+    gastos.value = rawGastos;
 
   } catch (error) {
     errorMessage.value = 'No se pudieron cargar los gastos: ' + error.message;
@@ -507,6 +597,13 @@ const generarRendicionPDFWrapper = () => {
                 </div>
               </transition>
             </div>
+
+            <button v-if="viajeSeleccionadoInfo && !isViajeActualCerrado" @click="showFondosModal = true" class="px-3.5 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-md font-semibold text-sm shadow-sm transition-all flex items-center gap-1.5" title="Agregar Fondos a esta Rendición">
+              <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
+                <path fill-rule="evenodd" d="M10 3a1 1 0 011 1v5h5a1 1 0 110 2h-5v5a1 1 0 11-2 0v-5H4a1 1 0 110-2h5V4a1 1 0 011-1z" clip-rule="evenodd" />
+              </svg>
+              Agregar Fondos
+            </button>
             <button v-if="viajeSeleccionadoInfo && !isViajeActualCerrado" @click="cerrarRendicion" :disabled="isClosingRendicion || gastos.length === 0" class="btn-danger flex items-center">
               <svg v-if="!isClosingRendicion" xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 mr-2" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M5 9V7a5 5 0 0110 0v2a2 2 0 012 2v5a2 2 0 01-2 2H5a2 2 0 01-2-2v-5a2 2 0 012-2zm8-2v2H7V7a3 3 0 016 0z" clip-rule="evenodd" /></svg>
               <svg v-if="isClosingRendicion" class="animate-spin h-5 w-5 mr-2" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path></svg>
@@ -635,11 +732,11 @@ const generarRendicionPDFWrapper = () => {
                       <td v-if="isConciliacionMode" class="table-cell text-center" @click.stop><input type="checkbox" :checked="gasto.es_revisado" @change="toggleRevisado(gasto)" class="checkbox-sm" :disabled="isViajeActualCerrado"></td>
                       <td class="table-cell text-center"><IconRenderer :icon-data="gasto.tipos_gasto_config?.icono_svg" :color="gasto.tipos_gasto_config?.color_accent" /></td>
                       <td class="table-cell font-semibold text-gray-700 w-28">{{ formatDate(gasto.fecha_gasto) }}</td>
-                      <td class="table-cell w-40">{{ gasto.tipos_gasto_config?.nombre_tipo_gasto }}</td>
+                      <td class="table-cell w-40 font-semibold" :class="isIngresoGasto(gasto) ? 'text-emerald-700' : ''">{{ gasto.tipos_gasto_config?.nombre_tipo_gasto || (isIngresoGasto(gasto) ? 'Ingreso de Fondos' : '-') }}</td>
                       <td class="table-cell font-medium text-gray-900 max-w-sm truncate">{{ gasto.descripcion_general }}</td>
                       <td class="table-cell w-36">{{ gasto.provincia_gasto?.nombre || '-' }}</td>
                       <td class="table-cell w-28">{{ gasto.numero_factura || '-' }}</td>
-                      <td class="table-cell text-right font-bold text-gray-800 w-36">{{ formatCurrency(gasto.monto_total) }}</td>
+                      <td class="table-cell text-right w-36" :class="isIngresoGasto(gasto) ? 'text-emerald-600 font-black text-base' : 'text-gray-800 font-bold'">{{ (isIngresoGasto(gasto) ? '+ ' : '') + formatCurrency(gasto.monto_total) }}</td>
                       <td class="table-cell text-center w-28" @click.stop>
                         <div class="flex justify-center items-center gap-2">
                           <a v-if="gasto.factura_url" :href="gasto.factura_url" target="_blank" class="btn-icon-action btn-icon-link" aria-label="Ver factura"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" fill="currentColor" class="w-4 h-4"><path d="M4.25 2A2.25 2.25 0 0 0 2 4.25v7.5A2.25 2.25 0 0 0 4.25 14h7.5A2.25 2.25 0 0 0 14 11.75V7.5a.75.75 0 0 0-1.5 0v4.25a.75.75 0 0 1-.75.75h-7.5a.75.75 0 0 1-.75-.75v-7.5a.75.75 0 0 1 .75-.75h3.5a.75.75 0 0 0 0-1.5h-3.5Z" /><path d="M10 .75a.75.75 0 0 1 .75.75v3.5a.75.75 0 0 1-1.5 0V2.56L6.03 6.28a.75.75 0 0 1-1.06-1.06L8.69 1.5H7.25a.75.75 0 0 1 0-1.5h3.5Z" /></svg></a>
@@ -712,7 +809,7 @@ const generarRendicionPDFWrapper = () => {
                     <p class="font-semibold text-gray-800">{{ gasto.tipos_gasto_config?.nombre_tipo_gasto || 'Gasto' }}</p>
                     <p class="text-sm text-gray-600 truncate">{{ gasto.descripcion_general }}</p>
                   </div>
-                  <p class="font-bold text-lg text-gray-800 flex-shrink-0 ml-2">{{ formatCurrency(gasto.monto_total) }}</p>
+                  <p class="font-bold text-lg flex-shrink-0 ml-2" :class="isIngresoGasto(gasto) ? 'text-emerald-600 font-black' : 'text-gray-800'">{{ (isIngresoGasto(gasto) ? '+ ' : '') + formatCurrency(gasto.monto_total) }}</p>
                 </div>
                 <div v-if="expandedRows.has(gasto.id)" class="mt-3 pt-3 border-t border-gray-100">
                   <div class="space-y-2 text-sm">
@@ -791,6 +888,14 @@ const generarRendicionPDFWrapper = () => {
         </div>
       </div>
     </div>
+
+    <!-- Modal para Agregar Fondos -->
+    <AgregarFondosModal
+      :is-open="showFondosModal"
+      :rendicion="viajeSeleccionadoInfo"
+      @close="showFondosModal = false"
+      @fondos-agregados="handleFondosAgregados"
+    />
   </div>
 </template>
 

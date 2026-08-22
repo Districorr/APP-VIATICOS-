@@ -4,6 +4,7 @@ import { supabase } from '../../supabaseClient';
 import { useRouter } from 'vue-router'; 
 import { formatDate, formatCurrency } from '../../utils/formatters.js';
 import AdminRendicionCard from '../../components/admin/AdminRendicionCard.vue';
+import AgregarFondosModal from '../../components/AgregarFondosModal.vue';
 import { Menu, MenuButton, MenuItem, MenuItems } from '@headlessui/vue';        
 import { EllipsisVerticalIcon, CheckCircleIcon, XCircleIcon, TrashIcon, ArrowUpIcon, ArrowDownIcon } from '@heroicons/vue/24/solid';
 
@@ -15,6 +16,19 @@ const loading = ref(true);
 const error = ref('');
 const activeTab = ref('pendientes');
 const viewMode = ref('cards');
+
+// --- ESTADO FONDOS MODAL ---
+const showFondosModal = ref(false);
+const viajeParaFondos = ref(null);
+
+const abrirModalFondos = (viaje) => {
+  viajeParaFondos.value = viaje;
+  showFondosModal.value = true;
+};
+
+const handleFondosAgregados = async () => {
+  await fetchData();
+};
 
 // --- ESTADOS PARA FILTROS Y ORDENAMIENTO ---
 const filters = ref({
@@ -339,7 +353,7 @@ watch(activeTab, () => {
       <transition-group v-if="viewMode === 'cards'" tag="div" name="list" class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6">
         <div v-for="viaje in filteredAndSortedList" :key="viaje.id" class="relative">
           <input type="checkbox" :checked="selectedRendiciones.has(viaje.id)" @change="handleSelectionChange({ id: viaje.id, checked: $event.target.checked })" class="absolute top-4 left-4 h-5 w-5 rounded text-indigo-600 focus:ring-indigo-500 border-gray-300 z-10">
-          <AdminRendicionCard :rendicion="viaje" @revisar="abrirModalRevisar" @ver-gastos="verGastosDelViaje" @editar="editarViaje" @eliminar="abrirModalEliminar" />
+          <AdminRendicionCard :rendicion="viaje" @revisar="abrirModalRevisar" @ver-gastos="verGastosDelViaje" @editar="editarViaje" @eliminar="abrirModalEliminar" @agregar-fondos="abrirModalFondos" />
         </div>
       </transition-group>
       
@@ -381,6 +395,7 @@ watch(activeTab, () => {
                       <div class="px-1 py-1"><MenuItem v-if="viaje.estado_aprobacion === 'pendiente_aprobacion'" v-slot="{ active }"><button :class="[active ? 'bg-indigo-500 text-white' : 'text-gray-900', 'group flex w-full items-center rounded-md px-2 py-2 text-sm']" @click="abrirModalRevisar(viaje)">Revisar</button></MenuItem></div>
                       <div class="px-1 py-1"><MenuItem v-slot="{ active }"><button :class="[active ? 'bg-indigo-500 text-white' : 'text-gray-900', 'group flex w-full items-center rounded-md px-2 py-2 text-sm']" @click="verGastosDelViaje(viaje.id)">Ver Gastos</button></MenuItem></div>
                       <div class="px-1 py-1"><MenuItem v-slot="{ active }"><button :class="[active ? 'bg-indigo-500 text-white' : 'text-gray-900', 'group flex w-full items-center rounded-md px-2 py-2 text-sm']" @click="editarViaje(viaje.id)">Editar</button></MenuItem></div>
+                      <div class="px-1 py-1"><MenuItem v-if="!viaje.cerrado_en" v-slot="{ active }"><button :class="[active ? 'bg-emerald-500 text-white' : 'text-emerald-700', 'group flex w-full items-center rounded-md px-2 py-2 text-sm']" @click="abrirModalFondos(viaje)">Agregar Fondos</button></MenuItem></div>
                       <div class="px-1 py-1"><MenuItem v-slot="{ active }"><button :class="[active ? 'bg-red-500 text-white' : 'text-red-600', 'group flex w-full items-center rounded-md px-2 py-2 text-sm']" @click="abrirModalEliminar(viaje)">Eliminar</button></MenuItem></div>
                     </MenuItems>
                   </transition>
@@ -437,5 +452,13 @@ watch(activeTab, () => {
         </div>
       </div>
     </transition>
+
+    <!-- Modal para Agregar Fondos -->
+    <AgregarFondosModal
+      :is-open="showFondosModal"
+      :rendicion="viajeParaFondos"
+      @close="showFondosModal = false"
+      @fondos-agregados="handleFondosAgregados"
+    />
   </div>
 </template>
