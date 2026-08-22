@@ -794,29 +794,21 @@ async function handleSubmit() {
         if (notifError) console.warn("Gasto delegado guardado, pero falló la notificación:", notifError.message);
     }
 
+    const esCtaCte = isCuentaCorrienteEmpresa.value || origenGastoNormalizado === 'cuenta_corriente_empresa';
+
     let feedbackMessage = `Gasto ${isEditMode.value ? 'actualizado' : 'creado'} con éxito.`;
-    if (isCuentaCorrienteEmpresa.value || payload.origen_gasto === 'cuenta_corriente_empresa') {
+    if (esCtaCte) {
         feedbackMessage = 'Se ha guardado el gasto como cuenta corriente, por favor si necesitas más data, contacta con usuarios administradores, junior/cesar.';
     }
 
-    if (isDelegating.value) {
-        const receptor = opcionesSelect.value.usuariosParaDelegar.find(u => u.id === delegatedToUserId.value);
-        const nombreReceptor = receptor?.nombre_completo || 'el usuario seleccionado';
-        feedbackMessage = `Gasto delegado a ${nombreReceptor} con éxito.`;
-        redirectTo = { name: 'ViajesListUser' }; 
-    } else if (gastoGuardadoData?.caja_id) {
-        redirectTo = { name: 'CajaDiaria' };
-    } else if (gastoGuardadoData?.viaje_id) {
-        redirectTo = { name: 'GastosListUser', query: { viajeId: gastoGuardadoData.viaje_id } };
+    if (gastoGuardadoData) {
+        gastoGuardadoData.origen_gasto = origenGastoNormalizado;
     }
 
     successMessage.value = feedbackMessage;
     if (formState.provincia_id) localStorage.setItem('lastUsedProvinciaId', formState.provincia_id);
     if (formState.viaje_id) localStorage.setItem('lastUsedViajeId', formState.viaje_id);
 
-    setTimeout(() => {
-        router.push({ ...redirectTo, query: { ...redirectTo.query, feedback: feedbackMessage } });
-    }, 1500); 
     emit('gasto-guardado', gastoGuardadoData);
 
   } catch (e) {

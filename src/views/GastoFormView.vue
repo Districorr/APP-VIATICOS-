@@ -88,19 +88,19 @@ function seleccionarFormato(formato) {
 }
 
 function handleGastoGuardado(gastoGuardado) {
-  // --- INICIO DE MI MODIFICACIÓN: Redirección inteligente ---
-  // Reemplazamos el alert por un mensaje en la URL que la otra vista puede mostrar
-  const feedbackMessage = gastoIdToEdit.value ? 'Gasto actualizado con éxito.' : 'Gasto creado con éxito.';
-  
-  if (gastoGuardado?.caja_id) {
+  let feedbackMessage = gastoIdToEdit.value ? 'Gasto actualizado con éxito.' : 'Gasto creado con éxito.';
+  const isCtaCte = gastoGuardado?.origen_gasto === 'cuenta_corriente_empresa';
+
+  if (isCtaCte) {
+    feedbackMessage = 'Se ha guardado el gasto como cuenta corriente, por favor si necesitas más data, contacta con usuarios administradores, junior/cesar.';
+    router.push({ name: 'GastosListUser', query: { feedback: feedbackMessage } });
+  } else if (gastoGuardado?.caja_id) {
     router.push({ name: 'CajaDiaria', query: { feedback: feedbackMessage } });
   } else if (gastoGuardado?.viaje_id) {
     router.push({ name: 'GastosListUser', query: { viajeId: gastoGuardado.viaje_id, feedback: feedbackMessage } });
   } else {
-    // Fallback por si no tiene ni caja ni viaje (aunque no debería pasar)
-    router.push({ name: 'Dashboard', query: { feedback: feedbackMessage } });
+    router.push({ name: 'GastosListUser', query: { feedback: feedbackMessage } });
   }
-  // --- FIN DE MI MODIFICACIÓN ---
 }
 
 function handleCancelar() {
