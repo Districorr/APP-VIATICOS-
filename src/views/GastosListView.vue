@@ -530,24 +530,25 @@ const generarRendicionPDFWrapper = () => {
             <span class="sm:hidden">PDF</span>
           </button>
 
-          <!-- Botón "Agregar Fondos" como ÍCONO Verde -->
+          <!-- Botón "Agregar Fondos" como ÍCONO de Dinero -->
           <button 
             v-if="viajeSeleccionadoInfo && !isViajeActualCerrado" 
             @click="showFondosModal = true" 
             class="w-10 h-10 rounded-xl bg-emerald-600 hover:bg-emerald-700 active:scale-95 text-white shadow-xs transition-all flex items-center justify-center cursor-pointer shrink-0"
             title="Agregar Fondos a esta Rendición"
           >
-            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M12 6v6m0 0v6m0-6h6m-6 0H6"/></svg>
+            <!-- Ícono de Dinero / Billete -->
+            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
           </button>
 
-          <!-- Botón Cerrar Rendición -->
+          <!-- Botón Cerrar Rendición en Color ROJO -->
           <button 
             v-if="viajeSeleccionadoInfo && !isViajeActualCerrado" 
             @click="cerrarRendicion" 
             :disabled="isClosingRendicion || gastos.length === 0" 
-            class="px-4 py-2.5 bg-slate-900 hover:bg-slate-800 text-white rounded-xl font-bold text-xs shadow-sm transition-all flex items-center gap-2 cursor-pointer disabled:opacity-50"
+            class="px-4 py-2.5 bg-red-600 hover:bg-red-700 text-white rounded-xl font-bold text-xs shadow-xs transition-all flex items-center gap-2 cursor-pointer disabled:opacity-50"
           >
-            <svg v-if="!isClosingRendicion" class="w-4 h-4 text-slate-300" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg>
+            <svg v-if="!isClosingRendicion" class="w-4 h-4 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z"/></svg>
             <svg v-else class="animate-spin h-4 w-4 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path></svg>
             <span class="hidden sm:inline">{{ isClosingRendicion ? 'Cerrando...' : 'Cerrar Rendición' }}</span>
             <span class="sm:hidden">{{ isClosingRendicion ? '...' : 'Cerrar' }}</span>
@@ -653,19 +654,19 @@ const generarRendicionPDFWrapper = () => {
         <div class="hidden lg:block space-y-6">
           <div v-for="grupo in gastosRenderList.userGroups.concat(gastosRenderList.dateGroups)" :key="grupo.id" class="space-y-3">
             
-            <!-- Encabezado Oscuro de Grupo / Sección -->
-            <div class="bg-slate-900 text-white rounded-2xl p-3 px-4 shadow-sm border border-slate-800 flex items-center justify-between">
+            <!-- Encabezado Suave de Grupo / Sección -->
+            <div class="bg-slate-100/90 border border-slate-300/80 rounded-2xl p-3 px-4 shadow-xs flex items-center justify-between">
               <div class="flex items-center gap-3">
-                <span class="w-3 h-3 rounded-full bg-emerald-400 shadow-xs"></span>
-                <h2 class="text-xs font-black uppercase tracking-wider text-slate-100 font-mono">{{ grupo.name }}</h2>
-                <span class="px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-slate-800 text-emerald-400 border border-slate-700 font-mono">
+                <span class="w-3 h-3 rounded-full bg-emerald-600 shadow-xs"></span>
+                <h2 class="text-xs font-black uppercase tracking-wider text-slate-800 font-mono">{{ grupo.name }}</h2>
+                <span class="px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-white text-slate-800 border border-slate-300 font-mono">
                   {{ grupo.gastos.length }} {{ grupo.gastos.length === 1 ? 'comprobante' : 'comprobantes' }}
                 </span>
               </div>
 
               <div v-if="grupo.isGroup && !isViajeActualCerrado" class="flex items-center gap-2">
-                <button @click="handleRenameGroup(grupo.id)" class="px-2.5 py-1 text-xs font-bold text-slate-300 hover:text-white bg-slate-800 rounded-lg hover:bg-slate-700 transition-colors cursor-pointer">Renombrar</button>
-                <button @click="handleDeleteGroup(grupo.id, grupo.name)" class="px-2.5 py-1 text-xs font-bold text-red-400 hover:text-red-300 bg-red-950/60 rounded-lg hover:bg-red-900/80 transition-colors cursor-pointer">Eliminar</button>
+                <button @click="handleRenameGroup(grupo.id)" class="px-2.5 py-1 text-xs font-bold text-slate-700 hover:text-slate-900 bg-white border border-slate-300 rounded-lg hover:bg-slate-50 transition-colors cursor-pointer">Renombrar</button>
+                <button @click="handleDeleteGroup(grupo.id, grupo.name)" class="px-2.5 py-1 text-xs font-bold text-red-600 hover:text-red-700 bg-red-50 border border-red-200 rounded-lg hover:bg-red-100 transition-colors cursor-pointer">Eliminar</button>
               </div>
             </div>
 
@@ -750,12 +751,12 @@ const generarRendicionPDFWrapper = () => {
         <div class="lg:hidden space-y-5">
           <div v-for="grupo in gastosRenderList.userGroups.concat(gastosRenderList.dateGroups)" :key="grupo.id + '-mobile'" class="space-y-2.5">
             
-            <div class="bg-slate-900 text-white rounded-2xl p-3 px-4 shadow-xs border border-slate-800 flex items-center justify-between">
+            <div class="bg-slate-100/90 border border-slate-300/80 rounded-2xl p-3 px-4 shadow-xs flex items-center justify-between">
               <div class="flex items-center gap-2.5">
-                <span class="w-2.5 h-2.5 rounded-full bg-emerald-400"></span>
-                <span class="text-xs font-black text-slate-100 uppercase tracking-wider font-mono">{{ grupo.name }}</span>
+                <span class="w-2.5 h-2.5 rounded-full bg-emerald-600"></span>
+                <span class="text-xs font-black text-slate-800 uppercase tracking-wider font-mono">{{ grupo.name }}</span>
               </div>
-              <span class="text-[11px] font-bold text-emerald-400 bg-slate-800 px-2 py-0.5 rounded-full border border-slate-700 font-mono">{{ grupo.gastos.length }} ítems</span>
+              <span class="text-[11px] font-bold text-slate-800 bg-white px-2.5 py-0.5 rounded-full border border-slate-300 font-mono">{{ grupo.gastos.length }} ítems</span>
             </div>
 
             <div class="space-y-2">
