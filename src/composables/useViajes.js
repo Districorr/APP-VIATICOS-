@@ -80,28 +80,15 @@ export function useViajes() {
 
       if (updateErr) throw updateErr;
 
-      // Registrar también el movimiento en la tabla gastos como ingreso de fondos
+      // Limpiar de la tabla 'gastos' cualquier registro erróneo de ingreso para no alterar la sumatoria de egresos
       try {
         await supabase
           .from('gastos')
-          .insert([{
-            user_id: user.id,
-            creado_por_id: user.id,
-            viaje_id: viajeId,
-            formato_id: 1,
-            fecha_gasto: new Date().toISOString(),
-            descripcion_general: `Ingreso de Fondos: ${motivoTexto}`,
-            monto_total: numericMonto,
-            monto_iva: 0,
-            moneda: 'ARS',
-            datos_adicionales: {
-              es_ingreso_fondos: true,
-              tipo_registro: 'ingreso_fondos',
-              observacion_recarga: motivoTexto
-            }
-          }]);
-      } catch (gastoErr) {
-        console.warn("No se pudo registrar el ingreso en la tabla gastos (continuando):", gastoErr);
+          .delete()
+          .eq('viaje_id', viajeId)
+          .ilike('descripcion_general', 'Ingreso de Fondos%');
+      } catch (cleanErr) {
+        console.warn("Limpieza de registro de ingreso no realizada:", cleanErr);
       }
 
       return updatedViaje;

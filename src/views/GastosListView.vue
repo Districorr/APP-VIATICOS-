@@ -292,38 +292,12 @@ const isIngresoGasto = (g) => {
   if (g.datos_adicionales && typeof g.datos_adicionales === 'object') {
     if (g.datos_adicionales.es_ingreso_fondos === true || g.datos_adicionales.tipo_registro === 'ingreso_fondos') return true;
   }
-  const nombreTipo = (g.tipos_gasto_config?.nombre_tipo_gasto || g.nombre_tipo_gasto || '').toLowerCase();
-  return nombreTipo.includes('ingreso de fondos') || nombreTipo.includes('recarga de fondos');
-};
-
-const parseComentariosYRecargasLocal = (comentariosRaw) => {
-  if (!comentariosRaw || typeof comentariosRaw !== 'string') return [];
-  const lines = comentariosRaw.split('\n').map(l => l.trim()).filter(Boolean);
-  const result = [];
-  for (const line of lines) {
-    const dateMatch = line.match(/^\[(.*?)\]\s*(.*)$/);
-    if (dateMatch) {
-      const fecha = dateMatch[1].trim();
-      const rest = dateMatch[2].trim();
-      const montoMatch = rest.match(/^(?:Fondos agregados|Recarga de Fondos|Adicional)?:?\s*(?:\+\$?([\d.,]+))?\s*(?:-\s*(.*))?$/i);
-      if (montoMatch && (montoMatch[1] || montoMatch[2])) {
-        const rawMonto = montoMatch[1];
-        const rawMotivo = montoMatch[2];
-        const rawMontoNum = rawMonto ? parseFloat(rawMonto.replace(/\./g, '').replace(',', '.')) : 0;
-        const motivoStr = rawMotivo && rawMotivo.trim() ? rawMotivo.trim() : (rest || 'Recarga de fondos realizada');
-        result.push({ fecha, montoNumeric: rawMontoNum, motivo: motivoStr });
-      } else {
-        result.push({ fecha, montoNumeric: 0, motivo: rest });
-      }
-    }
-  }
-  return result;
+  const desc = (g.descripcion_general || '').toLowerCase();
+  return desc.includes('ingreso de fondos');
 };
 
 const totalGastado = computed(() => {
-  return gastos.value
-    .filter(g => !isIngresoGasto(g))
-    .reduce((sum, g) => sum + (parseFloat(g.monto_total) || 0), 0);
+  return gastos.value.reduce((sum, g) => sum + (parseFloat(g.monto_total) || 0), 0);
 });
 const adelantoTotal = computed(() => viajeSeleccionadoInfo.value?.monto_adelanto || 0);
 const saldoActualRendicion = computed(() => adelantoTotal.value - totalGastado.value);
@@ -389,51 +363,8 @@ const fetchGastos = async () => {
     
     if (error) throw error;
     
-    const rawGastos = data ? [...data] : [];
-    
-    // Sintetizar visualmente Ingreso de Fondos si existen recargas o adelanto inicial sin registro en gastos
-    const recargasEnComentarios = parseComentariosYRecargasLocal(viajeSeleccionadoInfo.value?.comentarios_aprobacion);
-    const tieneGastoIngresoEnDB = rawGastos.some(g => isIngresoGasto(g));
-
-    if (!tieneGastoIngresoEnDB) {
-      if (recargasEnComentarios.length > 0) {
-        recargasEnComentarios.forEach((r, idx) => {
-          rawGastos.unshift({
-            id: `sintetizado-recarga-${idx}`,
-            viaje_id: filtroViajeId.value,
-            fecha_gasto: new Date().toISOString(),
-            descripcion_general: `Ingreso de Fondos: ${r.motivo}`,
-            monto_total: r.montoNumeric > 0 ? r.montoNumeric : (viajeSeleccionadoInfo.value?.monto_adelanto || 0),
-            es_ingreso_fondos: true,
-            tipos_gasto_config: {
-              nombre_tipo_gasto: 'Ingreso de Fondos',
-              icono_svg: '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2a10 10 0 1 0 10 10A10 10 0 0 0 12 2zm1 14.5a1 1 0 0 1-2 0v-1.07A3.5 3.5 0 0 1 8.5 12a1 1 0 0 1 2 0 1.5 1.5 0 0 0 3 0 1.5 1.5 0 0 0-1.5-1.5h-1a3.5 3.5 0 0 1-3.5-3.5 3.5 3.5 0 0 1 2.5-3.38V7.5a1 1 0 0 1 2 0v1.07A3.5 3.5 0 0 1 15.5 12a1 1 0 0 1-2 0 1.5 1.5 0 0 0 3 0 1.5 1.5 0 0 0 1.5 1.5h1a3.5 3.5 0 0 1 3.5 3.5 3.5 3.5 0 0 1-2.5 3.38z"/></svg>',
-              color_accent: '#10B981'
-            },
-            grupos_gastos: { id: 'grupo-ingresos', nombre_grupo: 'Ingresos de Fondos' },
-            datos_adicionales: { es_ingreso_fondos: true, observacion_recarga: r.motivo }
-          });
-        });
-      } else if (viajeSeleccionadoInfo.value?.monto_adelanto > 0) {
-        rawGastos.unshift({
-          id: 'sintetizado-adelanto-inicial',
-          viaje_id: filtroViajeId.value,
-          fecha_gasto: viajeSeleccionadoInfo.value.fecha_inicio || new Date().toISOString(),
-          descripcion_general: 'Adelanto Inicial de Rendición',
-          monto_total: parseFloat(viajeSeleccionadoInfo.value.monto_adelanto) || 0,
-          es_ingreso_fondos: true,
-          tipos_gasto_config: {
-            nombre_tipo_gasto: 'Ingreso de Fondos',
-            icono_svg: '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2a10 10 0 1 0 10 10A10 10 0 0 0 12 2zm1 14.5a1 1 0 0 1-2 0v-1.07A3.5 3.5 0 0 1 8.5 12a1 1 0 0 1 2 0 1.5 1.5 0 0 0 3 0 1.5 1.5 0 0 0-1.5-1.5h-1a3.5 3.5 0 0 1-3.5-3.5 3.5 3.5 0 0 1 2.5-3.38V7.5a1 1 0 0 1 2 0v1.07A3.5 3.5 0 0 1 15.5 12a1 1 0 0 1-2 0 1.5 1.5 0 0 0 3 0 1.5 1.5 0 0 0 1.5 1.5h1a3.5 3.5 0 0 1 3.5 3.5 3.5 3.5 0 0 1-2.5 3.38z"/></svg>',
-            color_accent: '#10B981'
-          },
-          grupos_gastos: { id: 'grupo-ingresos', nombre_grupo: 'Ingresos de Fondos' },
-          datos_adicionales: { es_ingreso_fondos: true }
-        });
-      }
-    }
-
-    gastos.value = rawGastos;
+    // Filtrar estrictamente cualquier registro de ingreso para que la lista contenga únicamente gastos de la rendición
+    gastos.value = (data || []).filter(g => !isIngresoGasto(g));
 
   } catch (error) {
     errorMessage.value = 'No se pudieron cargar los gastos: ' + error.message;

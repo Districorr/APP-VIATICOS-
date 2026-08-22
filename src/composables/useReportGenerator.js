@@ -247,44 +247,28 @@ const generateCanvaStylePDF = async (viajeId) => {
     });
     lastY = doc.lastAutoTable.finalY + 4;
 
-    // Sintetizar grupo de Ingresos de Fondos si existen recargas o adelanto
-    const recargasListPDF = parseComentariosYRecargas(reporte.metadata?.comentarios);
-    const itemsIngresosPDF = [];
-
-    if (recargasListPDF.length > 0) {
-      recargasListPDF.forEach(r => {
-        const rawMontoNum = parseFloat(r.monto?.replace(/[^\d.,]/g, '').replace(/\./g, '').replace(',', '.')) || 0;
-        itemsIngresosPDF.push({
-          tipo_gasto: 'Ingreso de Fondos',
-          fecha: r.fecha || '--/--/----',
-          descripcion: r.motivo || 'Recarga de adelanto autorizada',
-          monto: rawMontoNum > 0 ? rawMontoNum : (reporte.resumen_financiero?.total_adelantos || 0),
-          es_ingreso: true,
-          detalles_adicionales: {}
-        });
-      });
-    } else if (reporte.resumen_financiero?.total_adelantos > 0) {
-      itemsIngresosPDF.push({
-        tipo_gasto: 'Ingreso de Fondos',
-        fecha: reporte.metadata?.periodo?.split(' ')[0] || '--/--/----',
-        descripcion: 'Adelanto Inicial de Rendición',
-        monto: reporte.resumen_financiero.total_adelantos,
-        es_ingreso: true,
-        detalles_adicionales: {}
+    // Recalcular total_gastos_bruto y saldo asegurando que solo se sumen egresos reales
+    let totalGastosReales = 0;
+    if (reporte.grupos && Array.isArray(reporte.grupos)) {
+      reporte.grupos.forEach(grupo => {
+        if (grupo.gastos && Array.isArray(grupo.gastos)) {
+          grupo.gastos.forEach(gasto => {
+            const desc = (gasto.descripcion || '').toLowerCase();
+            const tipo = (gasto.tipo_gasto || '').toLowerCase();
+            if (!desc.includes('ingreso de fondos') && !tipo.includes('ingreso de fondos')) {
+              totalGastosReales += (parseFloat(gasto.monto) || 0);
+            }
+          });
+        }
       });
     }
 
-    if (itemsIngresosPDF.length > 0 && Array.isArray(reporte.grupos)) {
-      const yaTieneGrupoIngresos = reporte.grupos.some(g => g.es_grupo_ingresos || (g.group_name && g.group_name.toLowerCase().includes('ingreso')));
-      if (!yaTieneGrupoIngresos) {
-        const totalIngresosMonto = itemsIngresosPDF.reduce((sum, i) => sum + (parseFloat(i.monto) || 0), 0);
-        reporte.grupos.unshift({
-          group_name: 'Ingresos de Fondos / Adelantos',
-          total_monto: totalIngresosMonto,
-          es_grupo_ingresos: true,
-          gastos: itemsIngresosPDF
-        });
-      }
+    if (totalGastosReales > 0) {
+      reporte.resumen_financiero.total_gastos_bruto = totalGastosReales;
+      const totalAdelantos = parseFloat(reporte.resumen_financiero.total_adelantos) || 0;
+      const nuevoSaldo = totalAdelantos - totalGastosReales;
+      reporte.resumen_financiero.saldo = nuevoSaldo;
+      reporte.resumen_financiero.etiqueta_saldo = nuevoSaldo < 0 ? 'A REPONER POR RESPONSABLE' : 'SALDO A FAVOR';
     }
 
     // --- BUCLE PRINCIPAL: UNA TABLA POR GRUPO ---
@@ -303,7 +287,7 @@ const generateCanvaStylePDF = async (viajeId) => {
         doc.rect(margin, lastY, pageWidth - margin * 2, groupTitleHeight, 'F');
         doc.setFontSize(9).setFont(undefined, 'bold').setTextColor(255, 255, 255);
         
-        const tituloGrupo = `${grupo.group_name || 'Grupo sin nombre'} | Total: ${grupo.es_grupo_ingresos ? '+ ' : ''}${formatCurrency(grupo.total_monto || 0)}`;
+        const tituloGrupo = `${grupo.group_name || 'Grupo sin nombre'} | Total: ${formatCurrency(grupo.total_monto || 0)}`;
         doc.text(tituloGrupo, margin + 2, lastY + 5);
 
         lastY += groupTitleHeight;
@@ -312,11 +296,10 @@ const generateCanvaStylePDF = async (viajeId) => {
         
         if (grupo.gastos && Array.isArray(grupo.gastos)) {
           grupo.gastos.forEach(gasto => {
-              const isIngresoItem = grupo.es_grupo_ingresos || gasto.es_ingreso;
               bodyData.push([
-                  { content: gasto.tipo_gasto || (isIngresoItem ? 'Ingreso de Fondos' : 'Gasto General'), styles: { fontStyle: 'bold', fontSize: 8, valign: 'middle' } },
+                  { content: gasto.tipo_gasto || 'Gasto General', styles: { fontStyle: 'bold', fontSize: 8, valign: 'middle' } },
                   { content: gasto.descripcion || 'Sin descripción', styles: { fontStyle: 'bold', fontSize: 8, valign: 'middle' } },
-                  { content: (isIngresoItem ? '+ ' : '') + formatCurrency(gasto.monto), styles: { fontStyle: 'bold', fontSize: 9, halign: 'right', valign: 'middle', textColor: isIngresoItem ? [0, 120, 0] : [40, 40, 40] } }
+                  { content: formatCurrency(gasto.monto), styles: { fontStyle: 'bold', fontSize: 9, halign: 'right', valign: 'middle' } }
               ]);
 
               const detalles = [];
@@ -359,13 +342,31 @@ const generateCanvaStylePDF = async (viajeId) => {
       }
     }
 
-    // --- SECCIÓN DE RESÚMENES (Sin cambios) ---
+    // --- SECCIÓN DE RESÚMENES ---
     const requiredHeightForSummaries = 40;
     if (lastY + requiredHeightForSummaries > pageHeight - margin) {
       doc.addPage();
       lastY = margin;
     } else {
       lastY += 5;
+    }
+
+    // Recuperar / Calcular "Gastos por Provincia" si la consulta SQL no devolvió datos
+    if (!reporte.estadisticas.por_provincia || reporte.estadisticas.por_provincia.length === 0) {
+      const provinciaMap = {};
+      if (reporte.grupos && Array.isArray(reporte.grupos)) {
+        reporte.grupos.forEach(grupo => {
+          if (grupo.gastos && Array.isArray(grupo.gastos)) {
+            grupo.gastos.forEach(gasto => {
+              const prov = gasto.detalles_adicionales?.provincia || gasto.provincia || gasto.provincia_nombre;
+              if (prov && prov !== ' - ' && prov !== 'Sin provincia') {
+                provinciaMap[prov] = (provinciaMap[prov] || 0) + (parseFloat(gasto.monto) || 0);
+              }
+            });
+          }
+        });
+      }
+      reporte.estadisticas.por_provincia = Object.entries(provinciaMap).map(([prov, monto]) => ({ provincia: prov, monto }));
     }
     
     const summaryTableConfig = { startY: lastY, theme: 'grid', headStyles: { fillColor: [40, 56, 104], fontSize: 8 }, styles: { fontSize: 7, cellPadding: 1.2 } };
