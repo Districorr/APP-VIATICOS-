@@ -163,56 +163,64 @@ const fetchViajesConGastos = async () => {
       throw new Error("Usuario no autenticado para fetchViajesConGastos.");
     }
 
-    const { data: viajesData, error: viajesError } = await supabase
-      .from('viajes')
-      .select('id, user_id, nombre_viaje, destino, fecha_inicio, fecha_fin, monto_adelanto, codigo_rendicion, cerrado_en, observacion_cierre, estado_aprobacion, comentarios_aprobacion') 
-      .eq('user_id', user.id)
-      .order('cerrado_en', { ascending: true, nullsFirst: true })
-      .order('fecha_inicio', { ascending: false });
+    const [viajesRes, gastosRes] = await Promise.all([
+      supabase
+        .from('viajes')
+        .select('id, user_id, nombre_viaje, destino, fecha_inicio, fecha_fin, monto_adelanto, codigo_rendicion, cerrado_en, observacion_cierre, estado_aprobacion, comentarios_aprobacion') 
+        .eq('user_id', user.id)
+        .order('cerrado_en', { ascending: true, nullsFirst: true })
+        .order('fecha_inicio', { ascending: false }),
+      supabase
+        .from('gastos')
+        .select('viaje_id, monto_total, adelanto_especifico_aplicado')
+        .eq('user_id', user.id)
+        .not('viaje_id', 'is', null)
+    ]);
 
-    if (viajesError) throw viajesError;
+    if (viajesRes.error) throw viajesRes.error;
+    if (gastosRes.error) throw gastosRes.error;
 
-    if (!viajesData || viajesData.length === 0) {
-      viajes.value = [];
-    } else {
-      const viajesConInfoDeGastos = await Promise.all(
-        viajesData.map(async (viaje) => {
-          const { data: gastosRelacionados, error: gastosError } = await supabase
-            .from('gastos')
-            .select('monto_total, adelanto_especifico_aplicado')
-            .eq('viaje_id', viaje.id)
-            .eq('user_id', user.id);
+    const viajesData = viajesRes.data || [];
+    const todosLosGastos = gastosRes.data || [];
 
-          if (gastosError) {
-            console.error(`Error obteniendo gastos para el viaje ID ${viaje.id}:`, gastosError.message);
-            return { ...viaje, total_gastado_bruto: 0, saldo_adelanto_viaje: viaje.monto_adelanto || 0 };
-          }
-
-          let totalGastadoBruto = 0;
-          let totalImpactoEnAdelanto = 0;
-
-          if (gastosRelacionados) {
-            gastosRelacionados.forEach(gasto => {
-              const costoReal = gasto.monto_total || 0;
-              const adelantoAplicado = gasto.adelanto_especifico_aplicado || 0;
-              totalGastadoBruto += costoReal;
-              totalImpactoEnAdelanto += (costoReal - adelantoAplicado);
-            });
-          }
-          
-          const saldoAdelanto = (viaje.monto_adelanto || 0) - totalImpactoEnAdelanto;
-
-          return { 
-            ...viaje, 
-            total_gastado_bruto: totalGastadoBruto, 
-            saldo_adelanto_viaje: saldoAdelanto 
-          };
-        })
-      );
-      viajes.value = viajesConInfoDeGastos;
+    const gastosPorViaje = {};
+    for (const g of todosLosGastos) {
+      if (!g.viaje_id) continue;
+      if (!gastosPorViaje[g.viaje_id]) {
+        gastosPorViaje[g.viaje_id] = [];
+      }
+      gastosPorViaje[g.viaje_id].push(g);
     }
+
+    viajes.value = viajesData.map((viaje) => {
+      const gastosRelacionados = gastosPorViaje[viaje.id] || [];
+      let totalGastadoBruto = 0;
+      let totalImpactoEnAdelanto = 0;
+
+      gastosRelacionados.forEach(gasto => {
+        const costoReal = gasto.monto_total || 0;
+        const adelantoAplicado = gasto.adelanto_especifico_aplicado || 0;
+        totalGastadoBruto += costoReal;
+        totalImpactoEnAdelanto += (costoReal - adelantoAplicado);
+      });
+
+      const saldoAdelanto = (viaje.monto_adelanto || 0) - totalImpactoEnAdelanto;
+
+      return { 
+        ...viaje, 
+        total_gastado_bruto: totalGastadoBruto, 
+        saldo_adelanto_viaje: saldoAdelanto 
+      };
+    });
+
   } catch (error) {
-    errorMessage.value = `No se pudieron cargar los viajes/períodos: ${error.message || 'Error desconocido.'}`;
+    console.error("Error al cargar viajes:", error);
+    const rawMsg = error?.message || '';
+    if (rawMsg.includes('Failed to fetch') || rawMsg.includes('fetch')) {
+      errorMessage.value = 'No se pudieron cargar los viajes/períodos: Error de conexión con el servidor (Failed to fetch). Verifica tu conexión a internet o intenta recargar.';
+    } else {
+      errorMessage.value = `No se pudieron cargar los viajes/períodos: ${rawMsg || 'Error desconocido.'}`;
+    }
     viajes.value = [];
   } finally {
     loading.value = false;

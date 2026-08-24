@@ -320,7 +320,7 @@ const editarGasto = (gasto) => {
     setTimeout(() => feedbackMessage.value = '', 4000);
     return;
   }
-  router.push({ name: 'GastoFormEdit', params: { id: gasto.id } });
+  router.push({ name: 'GastoFormEdit', params: { id: gasto.id }, query: { viajeId: filtroViajeId.value } });
 };
 
 const fetchInitialData = async () => {
@@ -345,6 +345,9 @@ const fetchInitialData = async () => {
       loading.value = false;
       gastos.value = [];
       viajeSeleccionadoInfo.value = null;
+    }
+    if (filtroViajeId.value) {
+      localStorage.setItem('lastUsedViajeId', filtroViajeId.value);
     }
   } catch (error) {
     errorMessage.value = "Error al cargar datos iniciales: " + error.message;
@@ -399,6 +402,9 @@ onMounted(async () => {
 });
 
 watch(filtroViajeId, (newId, oldId) => {
+  if (newId) {
+    localStorage.setItem('lastUsedViajeId', newId);
+  }
   if (newId && newId !== oldId) {
     selectedGastos.value.clear();
     if (String(route.query.viajeId || '') !== String(newId)) {

@@ -3,16 +3,18 @@
 import { ref, onMounted, computed, onUnmounted } from 'vue';
 import { supabase } from '../supabaseClient.js';
 import { formatCurrency, formatDate } from '../utils/formatters.js';
-import { useRouter } from 'vue-router';
+import { useRouter, useRoute } from 'vue-router';
 import HistorialMovimientosCaja from '../components/HistorialMovimientosCaja.vue';
 import { useReportGenerator } from '../composables/useReportGenerator.js';
 import HistorialSolicitudesCaja from '../components/HistorialSolicitudesCaja.vue';
 
 const router = useRouter();
+const route = useRoute();
 const { generateCajaReportePDF } = useReportGenerator(); 
 
 const loading = ref(true);
 const errorMessage = ref('');
+const feedbackMessage = ref('');
 const cajaChica = ref(null);
 const solicitudes = ref([]);
 const loadingSolicitudes = ref(true);
@@ -132,7 +134,13 @@ onUnmounted(() => {
   if (cajaChannel) supabase.removeChannel(cajaChannel);
 });
 
-onMounted(cargarCajaChica);
+onMounted(() => {
+  if (route.query.feedback) {
+    feedbackMessage.value = route.query.feedback;
+    setTimeout(() => { feedbackMessage.value = ''; }, 7000);
+  }
+  cargarCajaChica();
+});
 
 function registrarGastoDesdeCaja() {
   if (cajaChica.value) {
@@ -224,6 +232,16 @@ async function handleGenerateReport() {
 </script>
 <template>
   <div class="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+    
+    <!-- Banner Flotante de Feedback / Notificación -->
+    <transition enter-active-class="transform ease-out duration-300 transition" enter-from-class="translate-y-2 opacity-0 sm:translate-y-0 sm:translate-x-2" enter-to-class="translate-y-0 opacity-100 sm:translate-x-0" leave-active-class="transition ease-in duration-100" leave-from-class="opacity-100" leave-to-class="opacity-0">
+      <div v-if="feedbackMessage" class="fixed top-5 right-5 z-50 max-w-md w-full bg-slate-900 text-white px-5 py-4 rounded-2xl shadow-2xl border border-slate-800 flex items-start gap-3.5">
+        <div class="w-6 h-6 rounded-full bg-emerald-500/20 text-emerald-400 flex items-center justify-center font-bold text-xs shrink-0 mt-0.5">✓</div>
+        <div class="flex-grow text-xs font-semibold leading-relaxed">{{ feedbackMessage }}</div>
+        <button @click="feedbackMessage = ''" class="text-slate-400 hover:text-white transition-colors cursor-pointer text-xs font-bold px-1">✕</button>
+      </div>
+    </transition>
+
     <h1 class="text-3xl font-bold text-gray-900 mb-6">Gestión de Caja Diaria</h1>
 
     <div v-if="loading" class="text-center py-12">

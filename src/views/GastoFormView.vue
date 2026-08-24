@@ -14,12 +14,10 @@ const formatosPermitidos = ref([]);
 const formatoSeleccionadoId = ref(null);
 const nombreFormatoSeleccionado = ref('');
 
-// --- INICIO DE MI MODIFICACIÓN ---
 // CORRECCIÓN: Ahora el ID del gasto a editar se obtiene de la ruta usando 'id'
 const gastoIdToEdit = ref(route.params.id || null); 
 const viajeIdPredeterminadoQuery = ref(route.query.viajeId || null);
 const cajaIdPredeterminadaQuery = ref(route.query.caja_id || null); // Añadido para soportar gastos de caja
-// --- FIN DE MI MODIFICACIÓN ---
 
 const formatoIdDelGastoAEditar = ref(null);
 
@@ -88,19 +86,40 @@ function seleccionarFormato(formato) {
 }
 
 function handleGastoGuardado(gastoGuardado) {
-  let feedbackMessage = gastoIdToEdit.value ? 'Gasto actualizado con éxito.' : 'Gasto creado con éxito.';
+  const isEdit = !!gastoIdToEdit.value;
   const isCtaCte = gastoGuardado?.origen_gasto === 'cuenta_corriente_empresa';
   const viajeIdTarget = gastoGuardado?.viaje_id || viajeIdPredeterminadoQuery.value || localStorage.getItem('lastUsedViajeId');
 
+  let feedbackMessage = '';
   if (isCtaCte) {
-    feedbackMessage = 'Se ha guardado el gasto como cuenta corriente, por favor si necesitas más data, contacta con usuarios administradores, junior/cesar.';
-    router.push({ name: 'GastosListUser', query: { feedback: feedbackMessage } });
+    feedbackMessage = '¡Se ha guardado el gasto como cuenta corriente exitosamente!';
+  } else if (isEdit) {
+    feedbackMessage = '¡El gasto fue actualizado exitosamente!';
+  } else {
+    feedbackMessage = '¡El gasto fue cargado exitosamente!';
+  }
+
+  if (gastoGuardado?.monto_total) {
+    const montoFormateado = new Intl.NumberFormat('es-AR', { style: 'currency', currency: 'ARS' }).format(gastoGuardado.monto_total);
+    const desc = gastoGuardado.descripcion_general ? ` (${gastoGuardado.descripcion_general})` : '';
+    if (!isCtaCte) {
+      feedbackMessage = isEdit 
+        ? `¡El gasto por ${montoFormateado}${desc} fue actualizado exitosamente!`
+        : `¡El gasto por ${montoFormateado}${desc} fue cargado exitosamente!`;
+    }
+  }
+
+  const query = { feedback: feedbackMessage };
+  if (isCtaCte) {
+    if (viajeIdTarget) query.viajeId = viajeIdTarget;
+    router.push({ name: 'GastosListUser', query });
   } else if (gastoGuardado?.caja_id) {
     router.push({ name: 'CajaDiaria', query: { feedback: feedbackMessage } });
   } else if (viajeIdTarget) {
-    router.push({ name: 'GastosListUser', query: { viajeId: viajeIdTarget, feedback: feedbackMessage } });
+    query.viajeId = viajeIdTarget;
+    router.push({ name: 'GastosListUser', query });
   } else {
-    router.push({ name: 'GastosListUser', query: { feedback: feedbackMessage } });
+    router.push({ name: 'GastosListUser', query });
   }
 }
 
