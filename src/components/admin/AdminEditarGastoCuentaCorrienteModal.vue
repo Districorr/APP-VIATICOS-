@@ -66,6 +66,15 @@ function aplicarSugerencia(key, value) {
   }
 }
 
+watch(() => formState.tipo_logistica, (newTipo) => {
+  if (newTipo === 'cirugia') {
+    const foundCirugia = proveedoresOptions.value.find(p => Number(p.code || p.id) === 14 || (p.label || '').toLowerCase().includes('cirug'));
+    formState.proveedor_id = foundCirugia ? (foundCirugia.code || foundCirugia.id || 14) : 14;
+  } else if (Number(formState.proveedor_id) === 14) {
+    formState.proveedor_id = null;
+  }
+});
+
 const gastoId = computed(() => props.gasto?.id || props.gasto?.gasto_id || null);
 
 const getRowValue = (keys, fallback = null) => {
@@ -109,9 +118,17 @@ async function cargarOpciones() {
     }
 
     if (props.proveedores && props.proveedores.length > 0) {
-      proveedoresOptions.value = [...props.proveedores];
+      const provs = [...props.proveedores];
+      if (!provs.some(p => Number(p.code || p.id) === 14)) {
+        provs.unshift({ code: 14, label: 'LOGISTICA CIRUGIA' });
+      }
+      proveedoresOptions.value = provs;
     } else if (proveedoresRes.data) {
-      proveedoresOptions.value = proveedoresRes.data.map(p => ({ code: p.id, label: p.nombre }));
+      const provs = proveedoresRes.data.map(p => ({ code: p.id, label: p.nombre }));
+      if (!provs.some(p => Number(p.code || p.id) === 14)) {
+        provs.unshift({ code: 14, label: 'LOGISTICA CIRUGIA' });
+      }
+      proveedoresOptions.value = provs;
     }
 
     if (provinciasRes.data) provinciasOptions.value = provinciasRes.data.map(p => ({ code: p.id, label: p.nombre }));
@@ -312,7 +329,7 @@ function hydrateForm(gasto) {
   formState.monto_total = gasto?.monto_total ?? getRowValue(['monto_total', 'monto', 'total'], '');
   formState.descripcion_general = gasto?.descripcion_general ?? getRowValue(['descripcion_general', 'descripcion', 'detalle'], '');
   const rawProvId = extractEntityId(gasto?.proveedor_id ?? getRowValue(['proveedor_id'], null));
-  formState.proveedor_id = rawProvId === 14 ? null : rawProvId;
+  formState.proveedor_id = tipoLogistica === 'cirugia' ? (rawProvId || 14) : rawProvId;
   formState.transporte_id = extractEntityId(gasto?.transporte_id ?? getRowValue(['transporte_id'], null));
   formState.cliente_id = extractEntityId(gasto?.cliente_id ?? getRowValue(['cliente_id'], null));
   formState.paciente_referido = gasto?.paciente_referido ?? getRowValue(['paciente_referido', 'paciente', 'nombre_paciente'], '');
@@ -381,6 +398,9 @@ function validateForm() {
       errorMessage.value = 'Para Logística de Cirugía debe ingresar el Paciente Referido.';
       return false;
     }
+    if (!formState.proveedor_id) {
+      formState.proveedor_id = 14;
+    }
   } else {
     if (!extractEntityId(formState.proveedor_id)) {
       errorMessage.value = 'Para Proveedor / Otros debe seleccionar el Proveedor Vinculado.';
@@ -410,10 +430,11 @@ async function saveGasto() {
   saving.value = true;
   try {
     const isCirugia = formState.tipo_logistica === 'cirugia';
+    const provToResolve = isCirugia ? (formState.proveedor_id || 14) : formState.proveedor_id;
     const [finalClienteId, finalTransporteId, finalProveedorId] = await Promise.all([
       isCirugia ? resolverClienteId(formState.cliente_id) : Promise.resolve(null),
       resolverTransporteId(formState.transporte_id),
-      !isCirugia ? resolverProveedorId(formState.proveedor_id) : Promise.resolve(null)
+      resolverProveedorId(provToResolve)
     ]);
 
     const datosAdicionales = {
@@ -433,7 +454,7 @@ async function saveGasto() {
       descripcion_general: formState.descripcion_general?.trim() || `Despacho ${formState.tipo_movimiento_encomienda}`,
       monto_total: Number(formState.monto_total),
       transporte_id: finalTransporteId || null,
-      proveedor_id: formState.tipo_logistica === 'cirugia' ? null : (finalProveedorId || null),
+      proveedor_id: finalProveedorId || (isCirugia ? 14 : null),
       cliente_id: formState.tipo_logistica === 'cirugia' ? (finalClienteId || null) : null,
       provincia_id: formState.provincia_id || null,
       localidad_destino_id: formState.localidad_destino_id || null,
@@ -628,6 +649,12 @@ watch(() => props.transportes, (items) => {
               <label class="field-group">
                 <span class="field-label">Paciente Referido <span class="text-red-500">*</span></span>
                 <input v-model="formState.paciente_referido" type="text" class="form-input" placeholder="Nombre completo del paciente" />
+              </label>
+
+              <label class="field-group md:col-span-2">
+                <span class="field-label">Proveedor Imputado</span>
+                <input type="text" class="form-input bg-slate-100 font-bold text-indigo-700 cursor-not-allowed" value="LOGISTICA CIRUGIA" disabled />
+                <span class="text-[11px] text-slate-500">Asignado automáticamente para envíos de logística de cirugía.</span>
               </label>
             </template>
 

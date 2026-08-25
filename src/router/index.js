@@ -74,6 +74,12 @@ const routes = [
     meta: { requiresAuth: true, title: 'Nuevo Gasto' }
   },
   {
+    path: '/gastos/cargar-bultos', 
+    name: 'CargaBultos', 
+    component: () => import('../views/CargaBultosView.vue'),
+    meta: { requiresAuth: true, title: 'Cargar Bultos' }
+  },
+  {
     path: '/gastos/editar/:id',
     name: 'GastoFormEdit', 
     component: () => import('../views/GastoFormView.vue'),

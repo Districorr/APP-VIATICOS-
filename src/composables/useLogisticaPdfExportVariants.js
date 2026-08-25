@@ -771,12 +771,17 @@ export function useLogisticaPdfExportVariants() {
       const bCount = getBultosCount(item);
 
       // Encomiendas
-      if (!encGroups[encName]) encGroups[encName] = { nombre: encName, cant: 0, bultos: 0, ctaCte: 0, pagoDirecto: 0, total: 0 };
+      if (!encGroups[encName]) encGroups[encName] = { nombre: encName, cant: 0, bultos: 0, ctaCte: 0, pagoDirecto: 0, total: 0, zonasMap: {} };
       encGroups[encName].cant += 1;
       encGroups[encName].bultos += bCount;
       if (item.origen_gasto === 'cuenta_corriente_empresa') encGroups[encName].ctaCte += val;
       else encGroups[encName].pagoDirecto += val;
       encGroups[encName].total += val;
+
+      const dest = getDestinoLimpio(item);
+      if (dest && dest !== '—') {
+        encGroups[encName].zonasMap[dest] = (encGroups[encName].zonasMap[dest] || 0) + 1;
+      }
 
       // Proveedores
       if (!provGroups[provName]) provGroups[provName] = { nombre: provName, cant: 0, bultos: 0, ctaCte: 0, pagoDirecto: 0, total: 0 };
@@ -787,7 +792,17 @@ export function useLogisticaPdfExportVariants() {
       provGroups[provName].total += val;
     });
 
-    const sortedEncomiendas = Object.values(encGroups).sort((a, b) => b.total - a.total);
+    const sortedEncomiendas = Object.values(encGroups).map(e => {
+      let topZona = '—';
+      let maxC = 0;
+      for (const [z, c] of Object.entries(e.zonasMap || {})) {
+        if (c > maxC) {
+          maxC = c;
+          topZona = z;
+        }
+      }
+      return { ...e, zonaConcurrida: topZona };
+    }).sort((a, b) => b.total - a.total);
     const sortedProvs = Object.values(provGroups).sort((a, b) => b.total - a.total);
 
     let topEncName = sortedEncomiendas.length > 0 ? sortedEncomiendas[0].nombre : '—';
@@ -880,12 +895,13 @@ export function useLogisticaPdfExportVariants() {
       secNum++;
       currentY += 3;
 
-      const encHeaders = [['N°', 'Encomienda / Empresa Logística', 'Bultos', 'Participación', 'Cuenta Corriente ($)', 'Pago Directo ($)', 'Total Consolidado ($)']];
+      const encHeaders = [['N°', 'Encomienda / Empresa Logística', 'Zona Concurrida', 'Bultos', 'Participación', 'Cuenta Corriente ($)', 'Pago Directo ($)', 'Total Consolidado ($)']];
       const encRows = sortedEncomiendas.map((e, idx) => {
         const sharePct = totalConsolidado > 0 ? ((e.total / totalConsolidado) * 100).toFixed(1) + '%' : '0%';
         return [
           String(idx + 1),
           e.nombre,
+          e.zonaConcurrida,
           String(e.bultos),
           sharePct,
           formatCurrency(e.ctaCte),
@@ -897,6 +913,7 @@ export function useLogisticaPdfExportVariants() {
       const encFoot = [[
         '#',
         `TOTAL CONSOLIDADO POR ENCOMIENDA (${sortedEncomiendas.length} empresas)`,
+        '—',
         `${totalBultos} bultos`,
         '100.0%',
         formatCurrency(totalCtaCte),
@@ -914,13 +931,14 @@ export function useLogisticaPdfExportVariants() {
         headStyles: { fillColor: [30, 41, 59], textColor: [255, 255, 255], fontStyle: 'bold', fontSize: 7.5 },
         footStyles: { fillColor: [241, 245, 249], textColor: [15, 23, 42], fontStyle: 'bold', fontSize: 7.5, lineWidth: { top: 0.4 }, lineColor: [30, 41, 59] },
         columnStyles: {
-          0: { cellWidth: 10, halign: 'center' },
-          1: { cellWidth: 95, fontStyle: 'bold' },
-          2: { cellWidth: 25, halign: 'center', fontStyle: 'bold' },
-          3: { cellWidth: 27, halign: 'center', fontStyle: 'bold' },
-          4: { cellWidth: 40, halign: 'right' },
-          5: { cellWidth: 40, halign: 'right' },
-          6: { cellWidth: 40, halign: 'right', fontStyle: 'bold' }
+          0: { cellWidth: 8, halign: 'center' },
+          1: { cellWidth: 62, fontStyle: 'bold' },
+          2: { cellWidth: 36, textColor: [71, 85, 105] },
+          3: { cellWidth: 20, halign: 'center', fontStyle: 'bold' },
+          4: { cellWidth: 24, halign: 'center', fontStyle: 'bold' },
+          5: { cellWidth: 42, halign: 'right' },
+          6: { cellWidth: 42, halign: 'right' },
+          7: { cellWidth: 43, halign: 'right', fontStyle: 'bold' }
         },
         margin: { left: 10, right: 10 }
       });

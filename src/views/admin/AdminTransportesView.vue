@@ -79,14 +79,26 @@ async function fetchMasterData() {
 onMounted(fetchMasterData);
 
 // --- Funciones CRUD ---
+const searchEmpresaGestion = ref('');
+
+const transportesFiltradosGestion = computed(() => {
+  const q = searchEmpresaGestion.value.toLowerCase().trim();
+  if (!q) return transportes.value;
+  return transportes.value.filter(t => (t.nombre || '').toLowerCase().includes(q));
+});
+
 function abrirFormularioParaCrear() {
   esModoEdicion.value = false;
-  form.value = { id: null, nombre: '' };
+  form.value = { id: null, nombre: '', tarifa_por_bulto: 0 };
   mostrarFormulario.value = true;
 }
 function abrirFormularioParaEditar(transporte) {
   esModoEdicion.value = true;
-  form.value = { ...transporte };
+  form.value = {
+    id: transporte.id,
+    nombre: transporte.nombre || '',
+    tarifa_por_bulto: Number(transporte.tarifa_por_bulto || 0)
+  };
   mostrarFormulario.value = true;
 }
 function cerrarFormulario() {
@@ -99,19 +111,36 @@ async function handleGuardado() {
   }
   loading.value = true;
   try {
-    const payload = { nombre: form.value.nombre.trim() };
-    const { error } = esModoEdicion.value ? await supabase.from('transportes').update(payload).eq('id', form.value.id) : await supabase.from('transportes').insert(payload);
-    if (error) throw error;
+    const payload = {
+      nombre: form.value.nombre.trim(),
+      tarifa_por_bulto: Number(form.value.tarifa_por_bulto) || 0
+    };
+    let res = esModoEdicion.value
+      ? await supabase.from('transportes').update(payload).eq('id', form.value.id)
+      : await supabase.from('transportes').insert([payload]);
+
+    if (res.error && (res.error.code === 'PGRST204' || (res.error.message || '').includes('tarifa_por_bulto'))) {
+      delete payload.tarifa_por_bulto;
+      res = esModoEdicion.value
+        ? await supabase.from('transportes').update(payload).eq('id', form.value.id)
+        : await supabase.from('transportes').insert([payload]);
+
+      if (res.error) throw res.error;
+      alert(`Se guardó el nombre "${payload.nombre}". Nota: Recuerda ejecutar la sentencia SQL en Supabase para habilitar guardar tarifas fijas en la base de datos.`);
+    } else if (res.error) {
+      throw res.error;
+    }
+
     cerrarFormulario();
     await fetchMasterData();
   } catch (e) {
-    alert(`Error: ${e.message}`);
+    alert(`Error al guardar: ${e.message}`);
   } finally {
     loading.value = false;
   }
 }
 async function eliminarTransporte(transporteId) {
-  if (!confirm("¿Seguro?")) return;
+  if (!confirm("¿Estás seguro de eliminar esta empresa de transporte?")) return;
   try {
     const { error } = await supabase.from('transportes').delete().eq('id', transporteId);
     if (error) throw error;
@@ -561,9 +590,109 @@ L.Icon.Default.mergeOptions({
       </div>
     </div>
 
-    <!-- Contenido de la Pestaña: GESTIONAR TRANSPORTES (sin cambios) -->
-    <div v-if="activeTab === 'gestion'">
-      <!-- ... (código de la pestaña de gestión sin cambios) ... -->
+    <!-- Contenido de la Pestaña: GESTIONAR TRANSPORTES -->
+    <div v-if="activeTab === 'gestion'" class="space-y-6">
+      <div class="bg-white rounded-2xl border border-slate-200 shadow-sm p-6 space-y-4">
+        <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-slate-100 pb-4">
+          <div>
+            <h2 class="text-lg font-bold text-slate-900">Gestión de Empresas de Transporte</h2>
+            <p class="text-xs text-slate-500">Crea, edita y administra el catálogo de transportes disponibles.</p>
+          </div>
+
+          <div class="flex items-center gap-3">
+            <input
+              v-model="searchEmpresaGestion"
+              type="text"
+              class="form-input text-xs w-64"
+              placeholder="Buscar empresa..."
+            />
+            <button
+              type="button"
+              class="btn bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-xs px-4 py-2 rounded-xl flex items-center gap-1.5 cursor-pointer shadow-xs"
+              @click="abrirFormularioParaCrear"
+            >
+              <span>+ Nueva empresa</span>
+            </button>
+          </div>
+        </div>
+
+        <div class="overflow-x-auto rounded-xl border border-slate-200">
+          <table class="min-w-full divide-y divide-slate-200 text-xs">
+            <thead class="bg-slate-50">
+              <tr>
+                <th class="px-4 py-3 text-left font-bold text-slate-500 uppercase tracking-wider w-16"># ID</th>
+                <th class="px-4 py-3 text-left font-bold text-slate-500 uppercase tracking-wider">Empresa de Transporte</th>
+                <th class="px-4 py-3 text-right font-bold text-slate-500 uppercase tracking-wider">Tarifa por Bulto ($)</th>
+                <th class="px-4 py-3 text-center font-bold text-slate-500 uppercase tracking-wider">Registrado En</th>
+                <th class="px-4 py-3 text-right font-bold text-slate-500 uppercase tracking-wider w-36">Acciones</th>
+              </tr>
+            </thead>
+            <tbody class="bg-white divide-y divide-slate-100">
+              <tr v-if="transportesFiltradosGestion.length === 0">
+                <td colspan="5" class="px-4 py-8 text-center text-slate-400 font-medium">No se encontraron empresas de transporte.</td>
+              </tr>
+              <tr v-for="t in transportesFiltradosGestion" :key="t.id" class="hover:bg-slate-50">
+                <td class="px-4 py-3 font-mono font-bold text-slate-400">#{{ t.id }}</td>
+                <td class="px-4 py-3 font-bold text-slate-900">{{ t.nombre }}</td>
+                <td class="px-4 py-3 text-right font-extrabold text-indigo-700">
+                  {{ Number(t.tarifa_por_bulto) > 0 ? new Intl.NumberFormat('es-AR', { style: 'currency', currency: 'ARS' }).format(t.tarifa_por_bulto) : '$0 (Sin tarifa)' }}
+                </td>
+                <td class="px-4 py-3 text-center text-slate-500 font-mono">
+                  {{ t.created_at ? new Date(t.created_at).toLocaleDateString('es-AR') : '—' }}
+                </td>
+                <td class="px-4 py-3 text-right">
+                  <div class="flex items-center justify-end gap-2">
+                    <button
+                      type="button"
+                      class="px-2.5 py-1 text-xs font-bold text-indigo-600 hover:bg-indigo-50 rounded-lg border border-indigo-200 transition-colors cursor-pointer"
+                      @click="abrirFormularioParaEditar(t)"
+                    >
+                      ✏️ Editar
+                    </button>
+                    <button
+                      type="button"
+                      class="px-2.5 py-1 text-xs font-bold text-rose-600 hover:bg-rose-50 rounded-lg border border-rose-200 transition-colors cursor-pointer"
+                      @click="eliminarTransporte(t.id)"
+                    >
+                      🗑️ Eliminar
+                    </button>
+                  </div>
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
+    <!-- MODAL DE CREACIÓN / EDICIÓN -->
+    <div v-if="mostrarFormulario" class="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 p-4" @click.self="cerrarFormulario">
+      <div class="w-full max-w-md rounded-2xl bg-white p-6 shadow-2xl space-y-4 border border-slate-200">
+        <div class="flex items-center justify-between border-b border-slate-100 pb-3">
+          <h3 class="text-base font-bold text-slate-900">{{ esModoEdicion ? 'Editar Empresa de Transporte' : 'Nueva Empresa de Transporte' }}</h3>
+          <button type="button" class="text-slate-400 hover:text-slate-700 cursor-pointer" @click="cerrarFormulario">✕</button>
+        </div>
+
+        <form @submit.prevent="handleGuardado" class="space-y-4">
+          <div>
+            <label class="block text-xs font-bold uppercase tracking-wider text-slate-700 mb-1">Nombre de la Empresa <span class="text-rose-500">*</span></label>
+            <input v-model="form.nombre" type="text" required class="form-input text-xs" placeholder="Ej: Alan Miguel Damjanov..." />
+          </div>
+
+          <div>
+            <label class="block text-xs font-bold uppercase tracking-wider text-slate-700 mb-1">Tarifa Automática por Bulto ($)</label>
+            <input v-model.number="form.tarifa_por_bulto" type="number" min="0" step="1000" class="form-input text-xs font-extrabold text-indigo-700" placeholder="20000" />
+            <p class="text-[11px] text-slate-500 mt-1">Valor utilizado para auto-calcular el importe en Cargar Bultos. Usar 0 si no posee tarifa fija.</p>
+          </div>
+
+          <div class="flex items-center justify-end gap-3 pt-3 border-t border-slate-100">
+            <button type="button" class="btn-secondary text-xs font-bold py-2 px-4 rounded-xl cursor-pointer" :disabled="loading" @click="cerrarFormulario">Cancelar</button>
+            <button type="submit" class="btn-primary text-xs font-extrabold py-2 px-5 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white cursor-pointer" :disabled="loading">
+              {{ loading ? 'Guardando...' : 'Guardar Cambios' }}
+            </button>
+          </div>
+        </form>
+      </div>
     </div>
   </div>
 </template>

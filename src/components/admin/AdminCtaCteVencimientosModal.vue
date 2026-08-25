@@ -181,7 +181,7 @@ const resumenPorEncomienda = computed(() => {
   items.value.forEach(item => {
     const name = item.transporte?.nombre || 'SIN ENCOMIENDA / N/A';
     if (!map[name]) {
-      map[name] = { nombre: name, cantOps: 0, bultos: 0, ctaCte: 0, pagoDirecto: 0, total: 0 };
+      map[name] = { nombre: name, cantOps: 0, bultos: 0, ctaCte: 0, pagoDirecto: 0, total: 0, zonasMap: {} };
     }
     const val = Number(item.monto_total || 0);
     const bCount = getBultosCount(item);
@@ -193,8 +193,25 @@ const resumenPorEncomienda = computed(() => {
       map[name].pagoDirecto += val;
     }
     map[name].total += val;
+
+    const extra = item.datos_adicionales || {};
+    const dest = (extra.destino_texto || item.localidad_destino?.nombre || item.provincia_nombre || item.provincia?.nombre || '').trim();
+    if (dest && !dest.toLowerCase().includes('sin destino') && !dest.toLowerCase().includes('sin provincia')) {
+      map[name].zonasMap[dest] = (map[name].zonasMap[dest] || 0) + 1;
+    }
   });
-  return Object.values(map).sort((a, b) => b.total - a.total);
+
+  return Object.values(map).map(e => {
+    let topZ = '—';
+    let maxC = 0;
+    for (const [z, count] of Object.entries(e.zonasMap || {})) {
+      if (count > maxC) {
+        maxC = count;
+        topZ = z;
+      }
+    }
+    return { ...e, zonaConcurrida: topZ };
+  }).sort((a, b) => b.total - a.total);
 });
 
 const resumenPorProveedor = computed(() => {
@@ -436,6 +453,7 @@ watch([selectedMonth, includePagoInmediato], () => {
                     <tr>
                       <th class="px-3 py-2.5 text-center text-xs font-bold uppercase tracking-wider text-slate-500 w-10">N°</th>
                       <th class="px-4 py-2.5 text-left text-xs font-bold uppercase tracking-wider text-slate-500">Encomienda / Empresa Logística</th>
+                      <th class="px-3 py-2.5 text-left text-xs font-bold uppercase tracking-wider text-slate-500">Zona Concurrida</th>
                       <th class="px-4 py-2.5 text-center text-xs font-bold uppercase tracking-wider text-slate-500">Bultos</th>
                       <th class="px-4 py-2.5 text-center text-xs font-bold uppercase tracking-wider text-slate-500">% Participación</th>
                       <th class="px-4 py-2.5 text-right text-xs font-bold uppercase tracking-wider text-slate-500">Cta. Corriente</th>
@@ -447,6 +465,7 @@ watch([selectedMonth, includePagoInmediato], () => {
                     <tr v-for="(enc, idx) in resumenPorEncomienda" :key="enc.nombre" class="hover:bg-slate-50">
                       <td class="px-3 py-2.5 text-center font-bold text-slate-400 w-10">{{ idx + 1 }}</td>
                       <td class="px-4 py-2.5 font-bold text-slate-800">{{ enc.nombre }}</td>
+                      <td class="px-3 py-2.5 text-slate-600 font-medium truncate max-w-[130px]">{{ enc.zonaConcurrida }}</td>
                       <td class="px-4 py-2.5 text-center font-mono text-slate-900 font-bold">{{ enc.bultos }}</td>
                       <td class="px-4 py-2.5 text-center font-mono text-indigo-600 font-bold">{{ totalAmount > 0 ? ((enc.total / totalAmount) * 100).toFixed(1) + '%' : '0%' }}</td>
                       <td class="px-4 py-2.5 text-right font-medium text-slate-700">{{ formatCurrency(enc.ctaCte) }}</td>
@@ -456,7 +475,7 @@ watch([selectedMonth, includePagoInmediato], () => {
                   </tbody>
                   <tfoot class="bg-slate-100 font-bold text-xs text-slate-900 border-t-2 border-slate-300">
                     <tr>
-                      <td class="px-4 py-3" colspan="2">TOTAL CONSOLIDADO ({{ resumenPorEncomienda.length }} empresas)</td>
+                      <td class="px-4 py-3" colspan="3">TOTAL CONSOLIDADO ({{ resumenPorEncomienda.length }} empresas)</td>
                       <td class="px-4 py-3 text-center font-mono font-extrabold text-indigo-700">{{ totalBultos }} bultos</td>
                       <td class="px-4 py-3 text-center font-mono text-indigo-700">100.0%</td>
                       <td class="px-4 py-3 text-right text-slate-800">{{ formatCurrency(totalCtaCte) }}</td>
@@ -524,6 +543,7 @@ watch([selectedMonth, includePagoInmediato], () => {
                         <tr>
                           <th class="px-3 py-2 text-center text-xs font-bold uppercase tracking-wider text-slate-500 w-10">N°</th>
                           <th class="px-4 py-2 text-left text-xs font-bold uppercase tracking-wider text-slate-500">Encomienda</th>
+                          <th class="px-3 py-2 text-left text-xs font-bold uppercase tracking-wider text-slate-500">Zona Concurrida</th>
                           <th class="px-4 py-2 text-center text-xs font-bold uppercase tracking-wider text-slate-500">Bultos</th>
                           <th class="px-4 py-2 text-center text-xs font-bold uppercase tracking-wider text-slate-500">% Participación</th>
                           <th class="px-4 py-2 text-right text-xs font-bold uppercase tracking-wider text-slate-500">Cta. Corriente</th>
@@ -535,6 +555,7 @@ watch([selectedMonth, includePagoInmediato], () => {
                         <tr v-for="(enc, idx) in resumenPorEncomienda" :key="enc.nombre" class="hover:bg-slate-50">
                           <td class="px-3 py-2 text-center font-bold text-slate-400 w-10">{{ idx + 1 }}</td>
                           <td class="px-4 py-2 font-bold text-slate-800">{{ enc.nombre }}</td>
+                          <td class="px-3 py-2 text-slate-600 font-medium truncate max-w-[130px]">{{ enc.zonaConcurrida }}</td>
                           <td class="px-4 py-2 text-center font-mono text-slate-900 font-bold">{{ enc.bultos }}</td>
                           <td class="px-4 py-2 text-center font-mono text-indigo-600 font-bold">{{ totalAmount > 0 ? ((enc.total / totalAmount) * 100).toFixed(1) + '%' : '0%' }}</td>
                           <td class="px-4 py-2 text-right font-medium text-slate-700">{{ formatCurrency(enc.ctaCte) }}</td>

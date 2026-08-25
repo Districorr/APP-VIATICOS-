@@ -167,11 +167,14 @@ async function fetchDatosLogistica() {
     ]);
 
     if (clientesRes.data) clientesOptions.value = clientesRes.data.map(c => ({ id: c.id, label: c.nombre_cliente }));
-    if (transportesRes.data) transportesOptions.value = transportesRes.data.map(t => ({ id: t.id, label: t.nombre, created_at: t.created_at }));
+    if (transportesRes.data) transportesOptions.value = transportesRes.data.map(t => ({ id: t.id, code: t.id, value: t.id, label: t.nombre, nombre: t.nombre, tarifa_por_bulto: t.tarifa_por_bulto || 0, created_at: t.created_at }));
     if (proveedoresRes.data) {
       const provs = proveedoresRes.data.map(p => ({ id: p.id, label: p.nombre }));
       if (!provs.some(p => Number(p.id) === 14)) {
         provs.unshift({ id: 14, label: 'LOGISTICA CIRUGIA' });
+      }
+      if (!provs.some(p => (p.label || '').toLowerCase().trim() === 'sin proveedor')) {
+        provs.push({ id: 'sin_proveedor', label: 'SIN PROVEEDOR' });
       }
       proveedoresOptions.value = provs;
     }
@@ -215,43 +218,65 @@ async function fetchDatosLogistica() {
 const searchEmpresaTransporte = ref('');
 const isEmpresaModalOpen = ref(false);
 const isEmpresaEdicion = ref(false);
-const empresaForm = reactive({ id: null, nombre: '' });
 const savingEmpresa = ref(false);
+const empresaForm = reactive({
+  id: null,
+  nombre: '',
+  tarifa_por_bulto: 0,
+});
 
 function abrirCrearEmpresa() {
   isEmpresaEdicion.value = false;
   empresaForm.id = null;
   empresaForm.nombre = '';
+  empresaForm.tarifa_por_bulto = 0;
   isEmpresaModalOpen.value = true;
 }
 
 function abrirEditarEmpresa(transporte) {
   isEmpresaEdicion.value = true;
-  empresaForm.id = transporte.id;
-  empresaForm.nombre = transporte.label || transporte.nombre || '';
+  empresaForm.id = transporte.id || transporte.code;
+  empresaForm.nombre = transporte.nombre || transporte.label || '';
+  empresaForm.tarifa_por_bulto = Number(transporte.tarifa_por_bulto || 0);
   isEmpresaModalOpen.value = true;
 }
 
 async function guardarEmpresaTransporte() {
   if (!empresaForm.nombre?.trim()) {
-    showNotification('Campo requerido', 'Debe ingresar el nombre del transporte.', 'error');
+    showNotification('Campo Requerido', 'Debe ingresar el nombre de la empresa de transporte.', 'error');
     return;
   }
+
   savingEmpresa.value = true;
   try {
-    const payload = { nombre: empresaForm.nombre.trim() };
-    const { error } = isEmpresaEdicion.value
+    const payload = {
+      nombre: empresaForm.nombre.trim(),
+      tarifa_por_bulto: Number(empresaForm.tarifa_por_bulto) || 0,
+    };
+
+    let res = isEmpresaEdicion.value && empresaForm.id
       ? await supabase.from('transportes').update(payload).eq('id', empresaForm.id)
       : await supabase.from('transportes').insert([payload]);
 
-    if (error) throw error;
+    if (res.error && (res.error.code === 'PGRST204' || (res.error.message || '').includes('tarifa_por_bulto'))) {
+      delete payload.tarifa_por_bulto;
+      res = isEmpresaEdicion.value && empresaForm.id
+        ? await supabase.from('transportes').update(payload).eq('id', empresaForm.id)
+        : await supabase.from('transportes').insert([payload]);
 
-    showNotification('Empresa guardada', `Se ${isEmpresaEdicion.value ? 'actualizó' : 'creó'} la empresa de transporte.`, 'success');
+      if (res.error) throw res.error;
+      showNotification('Nombre Actualizado (Atención)', `Se guardó "${payload.nombre}". Ejecuta el script SQL en Supabase para activar tarifas en la BD.`, 'warning');
+    } else if (res.error) {
+      throw res.error;
+    } else {
+      showNotification('Empresa Guardada', `Se guardó "${payload.nombre}" con tarifa de ${formatCurrency(payload.tarifa_por_bulto)} por bulto.`, 'success');
+    }
+
     isEmpresaModalOpen.value = false;
     await fetchDatosLogistica();
   } catch (e) {
     console.error('Error guardando empresa de transporte:', e);
-    showNotification('Error', e.message || 'No se pudo guardar la empresa.', 'error');
+    showNotification('Error', `No se pudo guardar la empresa: ${e.message}`, 'error');
   } finally {
     savingEmpresa.value = false;
   }
@@ -562,11 +587,24 @@ const movimientosFiltrados = computed(() => {
     const matchesPaciente = !filters.paciente || pacienteName.toLowerCase().includes(filters.paciente.toLowerCase().trim());
     const LOGISTICA_CIRUGIA_ID = 14;
     const isCirugiaFilter = Number(filters.proveedorId) === LOGISTICA_CIRUGIA_ID;
-    const matchesProveedor = !filters.proveedorId
-      ? true
-      : isCirugiaFilter
-        ? (Number(g.proveedor_id) === LOGISTICA_CIRUGIA_ID || (!g.proveedor_id && (extra.tipo_logistica === 'cirugia' || (g.descripcion_general || '').toLowerCase().includes('cirug'))))
-        : String(g.proveedor_id) === String(filters.proveedorId);
+
+    const selectedProvOpt = proveedoresOptions.value.find(p => String(p.id) === String(filters.proveedorId));
+    const selectedProvName = (selectedProvOpt?.label || '').toLowerCase().trim();
+    const isSinProveedorFilter = selectedProvName === 'sin proveedor' || String(filters.proveedorId) === 'sin_proveedor';
+
+    let matchesProveedor = true;
+    if (filters.proveedorId) {
+      if (isCirugiaFilter) {
+        matchesProveedor = Number(g.proveedor_id) === LOGISTICA_CIRUGIA_ID ||
+          (!g.proveedor_id && (extra.tipo_logistica === 'cirugia' || (g.descripcion_general || '').toLowerCase().includes('cirug')));
+      } else if (isSinProveedorFilter) {
+        matchesProveedor = !g.proveedor_id ||
+          String(g.proveedor_id) === String(filters.proveedorId) ||
+          (g.proveedores?.nombre || '').toLowerCase().trim() === 'sin proveedor';
+      } else {
+        matchesProveedor = String(g.proveedor_id) === String(filters.proveedorId);
+      }
+    }
     const matchesProvincia = !filters.provinciaId || String(g.provincia_id) === String(filters.provinciaId);
     const matchesLocalidad = !filters.localidadId || String(g.localidad_destino_id) === String(filters.localidadId);
     const matchesGuia = !filters.numeroGuia || guiaText.toLowerCase().includes(filters.numeroGuia.toLowerCase().trim());
@@ -697,11 +735,16 @@ const resumenTransportesAntonio = computed(() => {
     if (g.provincias?.nombre) mapa[tName].provincias.add(g.provincias.nombre);
   });
 
-  return Object.values(mapa).map(t => ({
-    ...t,
-    promedio: t.movimientos > 0 ? t.montoTotal / t.movimientos : 0,
-    zonas: Array.from(t.provincias).join(', ') || 'Sin zona especificada',
-  })).sort((a, b) => b.montoTotal - a.montoTotal);
+  return Object.values(mapa).map(t => {
+    const opt = transportesOptions.value.find(o => (o.nombre || o.label || '').toLowerCase().trim() === t.nombre.toLowerCase().trim());
+    return {
+      ...t,
+      id: opt ? opt.id : null,
+      tarifa_por_bulto: opt ? Number(opt.tarifa_por_bulto || 0) : 0,
+      promedio: t.movimientos > 0 ? t.montoTotal / t.movimientos : 0,
+      zonas: Array.from(t.provincias).join(', ') || 'Sin zona especificada',
+    };
+  }).sort((a, b) => b.montoTotal - a.montoTotal);
 });
 
 // Lógica para proyección mensual validada
@@ -1060,6 +1103,10 @@ onMounted(fetchDatosLogistica);
           <span>+ Registrar movimiento</span>
         </button>
 
+        <button type="button" class="btn-action-primary !bg-indigo-700 hover:!bg-indigo-800" @click="router.push({ name: 'CargaBultos' })">
+          <span>📦 Cargar bultos</span>
+        </button>
+
         <button type="button" class="btn-action-secondary" @click="abrirCrearEmpresa">
           <BuildingOffice2Icon class="h-4 w-4 text-indigo-600" />
           <span>+ Nueva empresa</span>
@@ -1375,9 +1422,14 @@ onMounted(fetchDatosLogistica);
               <tr v-else-if="movimientosPaginados.length === 0">
                 <td colspan="10" class="px-4 py-8 text-center text-slate-500">No se encontraron movimientos registrados para los criterios seleccionados.</td>
               </tr>
-              <tr v-for="g in movimientosPaginados" :key="g.id" class="hover:bg-slate-50 transition-colors">
+              <tr
+                v-for="g in movimientosPaginados"
+                :key="g.id"
+                class="hover:bg-indigo-50/50 transition-colors cursor-pointer group"
+                @click="verDetalleGasto(g)"
+              >
                 <td class="whitespace-nowrap px-4 py-3 text-xs text-slate-600">{{ formatDate(g.fecha_gasto) }}</td>
-                <td class="px-4 py-3 font-bold text-slate-900">{{ g.transportes?.nombre || 'Sin Transporte' }}</td>
+                <td class="px-4 py-3 font-bold text-slate-900 group-hover:text-indigo-600 transition-colors">{{ g.transportes?.nombre || 'Sin Transporte' }}</td>
                 <td class="px-4 py-3">
                   <span class="inline-flex items-center rounded-full bg-slate-100 px-2.5 py-0.5 text-[11px] font-bold text-slate-800">
                     {{ g.datos_adicionales?.tipo_movimiento_encomienda || 'Envío' }}
@@ -1401,15 +1453,15 @@ onMounted(fetchDatosLogistica);
                 <td class="px-4 py-3 capitalize text-slate-600">{{ g.datos_adicionales?.sentido_movimiento || 'ida' }}</td>
                 <td class="px-4 py-3 text-slate-600">{{ g.datos_adicionales?.destino_texto || g.localidad_destino?.nombre || g.provincias?.nombre || g.provincia?.nombre || 'Sin destino' }}</td>
                 <td class="whitespace-nowrap px-4 py-3 text-right font-bold text-slate-900">{{ formatCurrency(g.monto_total) }}</td>
-                <td class="whitespace-nowrap px-4 py-3 text-center">
+                <td class="whitespace-nowrap px-4 py-3 text-center" @click.stop>
                   <div class="flex items-center justify-center gap-1.5">
-                    <button type="button" class="rounded p-1 text-slate-500 hover:bg-slate-100 hover:text-slate-900" title="Ver detalle completo" @click="verDetalleGasto(g)">
+                    <button type="button" class="rounded p-1 text-slate-500 hover:bg-slate-200 hover:text-slate-900 cursor-pointer" title="Ver detalle completo" @click.stop="verDetalleGasto(g)">
                       <EyeIcon class="h-4 w-4" />
                     </button>
-                    <button type="button" class="rounded p-1 text-indigo-600 hover:bg-indigo-50" title="Editar movimiento" @click="abrirEdicion(g)">
+                    <button type="button" class="rounded p-1 text-indigo-600 hover:bg-indigo-100 cursor-pointer" title="Editar movimiento" @click.stop="abrirEdicion(g)">
                       <PencilSquareIcon class="h-4 w-4" />
                     </button>
-                    <button type="button" class="rounded p-1 text-rose-600 hover:bg-rose-50 hover:text-rose-700" title="Eliminar movimiento" @click="eliminarGasto(g)">
+                    <button type="button" class="rounded p-1 text-rose-600 hover:bg-rose-100 hover:text-rose-700 cursor-pointer" title="Eliminar movimiento" @click.stop="eliminarGasto(g)">
                       <TrashIcon class="h-4 w-4" />
                     </button>
                   </div>
@@ -1431,7 +1483,8 @@ onMounted(fetchDatosLogistica);
         <div
           v-for="g in movimientosPaginados"
           :key="g.id"
-          class="flex flex-col justify-between rounded-2xl border border-slate-200 bg-white p-4 shadow-2xs hover:border-indigo-300 transition-all"
+          class="flex flex-col justify-between rounded-2xl border border-slate-200 bg-white p-4 shadow-2xs hover:border-indigo-400 hover:shadow-md transition-all cursor-pointer group"
+          @click="verDetalleGasto(g)"
         >
           <div>
             <div class="flex items-center justify-between border-b border-slate-100 pb-2.5">
@@ -1600,6 +1653,12 @@ onMounted(fetchDatosLogistica);
             </div>
 
             <div class="mt-4 space-y-2 text-xs">
+              <div class="flex justify-between items-center text-slate-600">
+                <span>Tarifa / bulto:</span>
+                <strong class="text-indigo-700 font-extrabold bg-indigo-50 px-2 py-0.5 rounded">
+                  {{ t.tarifa_por_bulto > 0 ? formatCurrency(t.tarifa_por_bulto) : '$0 (Sin fija)' }}
+                </strong>
+              </div>
               <div class="flex justify-between text-slate-600">
                 <span>Bultos informados:</span>
                 <strong class="text-slate-900">{{ t.movsConBultos > 0 ? `${t.bultosInformados} bultos` : 'Sin datos' }}</strong>
@@ -1615,6 +1674,16 @@ onMounted(fetchDatosLogistica);
               <div class="flex justify-between text-slate-600 pt-1 border-t border-slate-100">
                 <span>{{ getProyeccionTexto(t).label }}</span>
                 <strong class="text-indigo-600">{{ getProyeccionTexto(t).val }}</strong>
+              </div>
+              <div class="pt-2 flex justify-end">
+                <button
+                  type="button"
+                  class="text-[11px] font-bold text-indigo-600 hover:text-indigo-800 hover:underline flex items-center gap-1 cursor-pointer"
+                  @click.stop="abrirEditarEmpresa(t)"
+                >
+                  <PencilSquareIcon class="h-3.5 w-3.5" />
+                  <span>Editar Tarifa</span>
+                </button>
               </div>
             </div>
           </div>
@@ -2231,17 +2300,151 @@ onMounted(fetchDatosLogistica);
           <button type="button" class="text-slate-400 hover:text-slate-700" @click="isEmpresaModalOpen = false">✕</button>
         </div>
 
-        <div class="space-y-3">
-          <label class="block text-xs font-bold uppercase text-slate-600">Nombre de la Empresa <span class="text-red-500">*</span></label>
-          <input v-model="empresaForm.nombre" type="text" class="form-input" placeholder="Ej: Vía Cargo, OCA, Credifin..." @keyup.enter="guardarEmpresaTransporte" />
+        <div class="space-y-4">
+          <div>
+            <label class="block text-xs font-bold uppercase tracking-wider text-slate-700 mb-1">Nombre de la Empresa <span class="text-rose-500">*</span></label>
+            <input v-model="empresaForm.nombre" type="text" class="form-input text-xs" placeholder="Ej: Vía Cargo, OCA, Expreso Ledesma..." @keyup.enter="guardarEmpresaTransporte" />
+          </div>
+
+          <div>
+            <label class="block text-xs font-bold uppercase tracking-wider text-slate-700 mb-1">Tarifa Automática por Bulto ($)</label>
+            <input v-model.number="empresaForm.tarifa_por_bulto" type="number" min="0" step="1000" class="form-input text-xs font-extrabold text-indigo-700" placeholder="Ej: 30000" />
+            <p class="text-[11px] text-slate-500 mt-1">Valor utilizado para auto-calcular el importe en Cargar Bultos. Usar 0 si no posee tarifa fija.</p>
+          </div>
         </div>
 
         <div class="flex items-center justify-end gap-3 pt-3 border-t border-slate-100">
           <button type="button" class="btn-secondary" :disabled="savingEmpresa" @click="isEmpresaModalOpen = false">Cancelar</button>
           <button type="button" class="btn-primary" :disabled="savingEmpresa" @click="guardarEmpresaTransporte">
-            {{ savingEmpresa ? 'Guardando...' : (isEmpresaEdicion ? 'Actualizar' : 'Crear Empresa') }}
+            {{ savingEmpresa ? 'Guardando...' : (isEmpresaEdicion ? 'Guardar Cambios' : 'Crear Empresa') }}
           </button>
         </div>
+      </div>
+    </div>
+
+    <!-- MODAL DE DETALLE COMPLETO DE MOVIMIENTO LOGÍSTICO -->
+    <div v-if="isDetalleModalOpen && gastoSeleccionadoDetalle" class="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 p-4 backdrop-blur-xs" @click.self="isDetalleModalOpen = false">
+      <div class="w-full max-w-2xl rounded-3xl bg-white p-6 shadow-2xl space-y-5 border border-slate-200 animate-fade-in">
+        
+        <!-- Encabezado Modal -->
+        <div class="flex items-start justify-between border-b border-slate-100 pb-4">
+          <div class="flex items-center gap-3.5">
+            <div class="flex h-12 w-12 items-center justify-center rounded-2xl bg-indigo-50 text-indigo-600 font-bold border border-indigo-100 shadow-inner shrink-0">
+              <TruckIcon class="h-6 w-6" />
+            </div>
+            <div>
+              <div class="flex items-center gap-2">
+                <span class="inline-flex items-center rounded-full bg-indigo-100 px-2.5 py-0.5 text-xs font-extrabold text-indigo-800">
+                  {{ gastoSeleccionadoDetalle.datos_adicionales?.tipo_movimiento_encomienda || 'Envío' }}
+                </span>
+                <span class="text-xs text-slate-400 font-mono">#ID {{ gastoSeleccionadoDetalle.id }}</span>
+              </div>
+              <h3 class="text-lg font-extrabold text-slate-900 mt-0.5">
+                {{ gastoSeleccionadoDetalle.transportes?.nombre || 'Sin Transporte' }}
+              </h3>
+              <p class="text-xs text-slate-500 font-medium">
+                Fecha del Movimiento: {{ formatDate(gastoSeleccionadoDetalle.fecha_gasto) }}
+              </p>
+            </div>
+          </div>
+
+          <div class="text-right">
+            <span class="block text-[10px] font-bold uppercase tracking-wider text-slate-400">Importe Total</span>
+            <span class="text-2xl font-black text-indigo-700">{{ formatCurrency(gastoSeleccionadoDetalle.monto_total) }}</span>
+          </div>
+        </div>
+
+        <!-- Grilla de Detalles -->
+        <div class="grid grid-cols-1 sm:grid-cols-2 gap-3.5 text-xs">
+          
+          <div class="rounded-2xl border border-slate-200/80 bg-slate-50/70 p-3.5 space-y-1">
+            <span class="text-[10px] font-extrabold uppercase tracking-wider text-slate-400 block">📦 Bultos Informados</span>
+            <span class="text-sm font-extrabold text-slate-900 block">
+              {{ gastoSeleccionadoDetalle.datos_adicionales?.cantidad_bultos ? `${gastoSeleccionadoDetalle.datos_adicionales.cantidad_bultos} bulto(s)` : 'No especificado' }}
+            </span>
+            <span v-if="gastoSeleccionadoDetalle.datos_adicionales?.precio_unitario_prefijado" class="text-[11px] text-indigo-600 font-semibold block">
+              Tarifa: {{ formatCurrency(gastoSeleccionadoDetalle.datos_adicionales.precio_unitario_prefijado) }} / bulto
+            </span>
+          </div>
+
+          <div class="rounded-2xl border border-slate-200/80 bg-slate-50/70 p-3.5 space-y-1">
+            <span class="text-[10px] font-extrabold uppercase tracking-wider text-slate-400 block">🔄 Sentido del Movimiento</span>
+            <span class="text-sm font-extrabold text-slate-900 capitalize block">
+              {{ gastoSeleccionadoDetalle.datos_adicionales?.sentido_movimiento || 'Ida' }}
+            </span>
+          </div>
+
+          <div class="rounded-2xl border border-slate-200/80 bg-slate-50/70 p-3.5 space-y-1">
+            <span class="text-[10px] font-extrabold uppercase tracking-wider text-slate-400 block">📍 Destino del Envío</span>
+            <span class="text-sm font-bold text-slate-900 block">
+              {{ gastoSeleccionadoDetalle.datos_adicionales?.destino_texto || gastoSeleccionadoDetalle.localidad_destino?.nombre || gastoSeleccionadoDetalle.provincias?.nombre || gastoSeleccionadoDetalle.provincia?.nombre || 'Sin destino especificado' }}
+            </span>
+          </div>
+
+          <div class="rounded-2xl border border-slate-200/80 bg-slate-50/70 p-3.5 space-y-1">
+            <span class="text-[10px] font-extrabold uppercase tracking-wider text-slate-400 block">📄 N° de Guía / Remito</span>
+            <span class="text-sm font-bold text-slate-900 block font-mono">
+              {{ gastoSeleccionadoDetalle.numero_factura || 'Sin número registrado' }}
+            </span>
+          </div>
+
+          <div class="rounded-2xl border border-slate-200/80 bg-slate-50/70 p-3.5 space-y-1">
+            <span class="text-[10px] font-extrabold uppercase tracking-wider text-slate-400 block">🏥 Cliente / Obra Social</span>
+            <span class="text-sm font-bold text-indigo-900 block">
+              {{ gastoSeleccionadoDetalle.clientes?.nombre_cliente || 'No especificado' }}
+            </span>
+          </div>
+
+          <div class="rounded-2xl border border-slate-200/80 bg-slate-50/70 p-3.5 space-y-1">
+            <span class="text-[10px] font-extrabold uppercase tracking-wider text-slate-400 block">👤 Paciente Referido</span>
+            <span class="text-sm font-bold text-slate-900 block">
+              {{ gastoSeleccionadoDetalle.paciente_referido || 'No aplica / Sin paciente' }}
+            </span>
+          </div>
+
+          <div class="rounded-2xl border border-slate-200/80 bg-slate-50/70 p-3.5 space-y-1 sm:col-span-2">
+            <span class="text-[10px] font-extrabold uppercase tracking-wider text-slate-400 block">🏢 Proveedor Vinculado</span>
+            <span class="text-sm font-bold text-slate-900 block">
+              {{ gastoSeleccionadoDetalle.proveedores?.nombre || 'Sin proveedor' }}
+            </span>
+          </div>
+
+          <div v-if="gastoSeleccionadoDetalle.descripcion_general" class="rounded-2xl border border-slate-200/80 bg-slate-50/70 p-3.5 space-y-1 sm:col-span-2">
+            <span class="text-[10px] font-extrabold uppercase tracking-wider text-slate-400 block">📝 Descripción Operativa</span>
+            <p class="text-xs font-semibold text-slate-800 leading-relaxed">
+              {{ gastoSeleccionadoDetalle.descripcion_general }}
+            </p>
+          </div>
+
+          <div v-if="gastoSeleccionadoDetalle.datos_adicionales?.observacion_logistica" class="rounded-2xl border border-amber-200/80 bg-amber-50/70 p-3.5 space-y-1 sm:col-span-2">
+            <span class="text-[10px] font-extrabold uppercase tracking-wider text-amber-700 block">💬 Observación Logística</span>
+            <p class="text-xs font-semibold text-amber-950 leading-relaxed">
+              {{ gastoSeleccionadoDetalle.datos_adicionales.observacion_logistica }}
+            </p>
+          </div>
+
+        </div>
+
+        <!-- Pie del Modal -->
+        <div class="flex items-center justify-between border-t border-slate-100 pt-4">
+          <button
+            type="button"
+            class="inline-flex items-center gap-1.5 rounded-xl border border-indigo-200 bg-indigo-50 px-4 py-2 text-xs font-extrabold text-indigo-700 hover:bg-indigo-100 transition-colors cursor-pointer"
+            @click="isDetalleModalOpen = false; abrirEdicion(gastoSeleccionadoDetalle)"
+          >
+            <PencilSquareIcon class="h-4 w-4" />
+            <span>Editar este movimiento</span>
+          </button>
+
+          <button
+            type="button"
+            class="rounded-xl bg-slate-900 px-5 py-2 text-xs font-bold text-white hover:bg-slate-800 transition-colors cursor-pointer"
+            @click="isDetalleModalOpen = false"
+          >
+            Cerrar
+          </button>
+        </div>
+
       </div>
     </div>
 

@@ -39,7 +39,7 @@ const formState = reactive({
   destino_texto: '',
   cliente_id: null,
   paciente_referido: '',
-  proveedor_id: null,
+  proveedor_id: 14,
   cantidad_bultos: 1,
   sentido_movimiento: 'ida',
   tipo_movimiento_encomienda: 'Envío',
@@ -66,6 +66,15 @@ function aplicarSugerencia(key, value) {
   }
 }
 
+watch(() => formState.tipo_logistica, (newTipo) => {
+  if (newTipo === 'cirugia') {
+    const foundCirugia = proveedoresOptions.value.find(p => Number(p.value || p.code || p.id) === 14 || (p.label || '').toLowerCase().includes('cirug'));
+    formState.proveedor_id = foundCirugia ? (foundCirugia.value || foundCirugia.code || foundCirugia.id || 14) : 14;
+  } else if (Number(formState.proveedor_id) === 14) {
+    formState.proveedor_id = null;
+  }
+}, { immediate: true });
+
 async function cargarOpciones() {
   loadingOptions.value = true;
   try {
@@ -79,7 +88,13 @@ async function cargarOpciones() {
 
     if (clientesRes.data) clientesOptions.value = clientesRes.data.map(c => ({ code: c.id, value: c.id, label: c.nombre_cliente }));
     if (transportesRes.data) transportesOptions.value = transportesRes.data.map(t => ({ code: t.id, value: t.id, label: t.nombre }));
-    if (proveedoresRes.data) proveedoresOptions.value = proveedoresRes.data.map(p => ({ code: p.id, value: p.id, label: p.nombre }));
+    if (proveedoresRes.data) {
+      const provs = proveedoresRes.data.map(p => ({ code: p.id, value: p.id, label: p.nombre }));
+      if (!provs.some(p => Number(p.code || p.value || p.id) === 14)) {
+        provs.unshift({ code: 14, value: 14, label: 'LOGISTICA CIRUGIA' });
+      }
+      proveedoresOptions.value = provs;
+    }
     if (provinciasRes.data) provinciasOptions.value = provinciasRes.data.map(p => ({ code: p.id, value: p.id, label: p.nombre }));
     if (tiposRes.data) tiposGastoOptions.value = tiposRes.data;
   } catch (e) {
@@ -277,7 +292,7 @@ function resetForm() {
   formState.destino_texto = '';
   formState.cliente_id = null;
   formState.paciente_referido = '';
-  formState.proveedor_id = null;
+  formState.proveedor_id = formState.tipo_logistica === 'cirugia' ? 14 : null;
   formState.cantidad_bultos = 1;
   formState.sentido_movimiento = 'ida';
   formState.tipo_movimiento_encomienda = 'Envío';
@@ -326,6 +341,9 @@ async function handleGuardar() {
       errorMessage.value = 'Para Logística de Cirugía debe ingresar el Paciente Referido.';
       return;
     }
+    if (!formState.proveedor_id) {
+      formState.proveedor_id = 14;
+    }
   } else {
     if (!formState.proveedor_id) {
       errorMessage.value = 'Para Proveedor / Otros debe seleccionar el Proveedor Vinculado.';
@@ -356,10 +374,11 @@ async function handleGuardar() {
     if (!userId) throw new Error('Usuario no autenticado.');
 
     const isCirugia = formState.tipo_logistica === 'cirugia';
+    const provToResolve = isCirugia ? (formState.proveedor_id || 14) : formState.proveedor_id;
     const [finalClienteId, finalTransporteId, finalProveedorId] = await Promise.all([
       isCirugia ? resolverClienteId(formState.cliente_id) : Promise.resolve(null),
       resolverTransporteId(formState.transporte_id),
-      !isCirugia ? resolverProveedorId(formState.proveedor_id) : Promise.resolve(null)
+      resolverProveedorId(provToResolve)
     ]);
 
     let tipoGastoId = 22; // Fallback Estándar (Despacho / Envíos)
@@ -391,7 +410,7 @@ async function handleGuardar() {
       monto_total: monto,
       cliente_id: isCirugia ? finalClienteId : null,
       transporte_id: finalTransporteId,
-      proveedor_id: isCirugia ? null : finalProveedorId,
+      proveedor_id: finalProveedorId || (isCirugia ? 14 : null),
       provincia_id: formState.provincia_id || null,
       localidad_destino_id: formState.localidad_destino_id || null,
       numero_factura: formState.numero_guia?.trim() || null,
@@ -672,6 +691,12 @@ watch(formState, (newVal) => {
               <label class="field-group">
                 <span class="field-label">Paciente Referido <span class="text-red-500">*</span></span>
                 <input v-model="formState.paciente_referido" type="text" class="form-input" placeholder="Nombre completo del paciente" />
+              </label>
+
+              <label class="field-group md:col-span-2">
+                <span class="field-label">Proveedor Imputado</span>
+                <input type="text" class="form-input bg-slate-100 font-bold text-indigo-700 cursor-not-allowed" value="LOGISTICA CIRUGIA" disabled />
+                <span class="text-[11px] text-slate-500">Asignado automáticamente para envíos de logística de cirugía.</span>
               </label>
             </template>
 

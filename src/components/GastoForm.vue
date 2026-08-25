@@ -662,10 +662,11 @@ async function handleSubmit() {
     const provinciaDestinoIdFinal = formState.provincia_destino_id?.value || formState.provincia_destino_id;
 
     const isCirugia = isLogisticaType.value && (formState.tipo_logistica || 'cirugia') === 'cirugia';
+    const provToResolve = (isLogisticaType.value && isCirugia) ? (formState.proveedor_id || 14) : formState.proveedor_id;
 
     const [finalClienteId, finalProveedorId, finalTransporteId, finalLocalidadOrigenId, finalLocalidadDestinoId] = await Promise.all([
       (isLogisticaType.value && !isCirugia) ? Promise.resolve(null) : resolverEntidadId(formState.cliente_id, 'clientes'),
-      (isLogisticaType.value && isCirugia) ? Promise.resolve(null) : resolverEntidadId(formState.proveedor_id, 'proveedores'),
+      resolverEntidadId(provToResolve, 'proveedores'),
       resolverEntidadId(formState.transporte_id, 'transportes'),
       showTransporteFields.value ? resolverEntidadId(formState.localidad_origen_id, 'localidades', provinciaOrigenIdFinal) : Promise.resolve(null),
       showTransporteFields.value ? resolverEntidadId(formState.localidad_destino_id, 'localidades', provinciaDestinoIdFinal) : Promise.resolve(null)
@@ -726,7 +727,7 @@ async function handleSubmit() {
       tipo_gasto_id: formState.tipo_gasto_id,
       cliente_id: isLogisticaType.value ? (isCirugia ? finalClienteId : null) : finalClienteId,
       transporte_id: finalTransporteId,
-      proveedor_id: isLogisticaType.value ? (isCirugia ? null : finalProveedorId) : finalProveedorId,
+      proveedor_id: isLogisticaType.value ? (isCirugia ? (finalProveedorId || 14) : finalProveedorId) : finalProveedorId,
       
       provincia_id: provinciaIdFinalGasto,
       provincia: nombreProvincia,
