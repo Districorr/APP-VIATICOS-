@@ -257,6 +257,18 @@ const filters = reactive({
   conBultos: 'todos', // 'todos' | 'con_bultos' | 'sin_bultos'
 });
 
+function verTodoElHistorico() {
+  filters.fechaDesde = '';
+  filters.fechaHasta = '';
+  showNotification('Período Ajustado', 'Mostrando todo el historial de movimientos de transporte.', 'info');
+}
+
+function verMesActual() {
+  filters.fechaDesde = firstDayMonthStr;
+  filters.fechaHasta = todayStr;
+  showNotification('Período Ajustado', 'Filtrando por el mes en curso.', 'info');
+}
+
 // Opciones de Selectores para Filtros
 const clientesOptions = ref([]);
 const transportesOptions = ref([]);
@@ -339,10 +351,13 @@ async function fetchDatosLogistica() {
       };
     }).filter(g => {
       const extra = g.datos_adicionales || {};
-      return extra.modulo === 'logistica' 
+      return g.transporte_id != null
+        || g.proveedor_id != null
+        || extra.modulo === 'logistica' 
         || g.origen_gasto === 'cuenta_corriente_empresa'
         || g.tipo_gasto_id === 22
-        || extra.origen_carga === 'encomiendas_carga_multiple';
+        || extra.origen_carga === 'encomiendas_carga_multiple'
+        || extra.cantidad_bultos != null;
     });
 
     gastosLogistica.value = logistica;
@@ -1227,12 +1242,29 @@ onMounted(fetchDatosLogistica);
         </div>
 
         <!-- Indicador/Filtro de Período Inicializado con el 1º del Mes y Fecha Actual -->
-        <div class="flex items-center gap-2 rounded-xl border border-slate-200 bg-slate-50 p-2 text-xs">
+        <div class="flex flex-wrap items-center gap-2 rounded-xl border border-slate-200 bg-slate-50 p-2 text-xs">
           <CalendarDaysIcon class="h-4 w-4 text-slate-500" />
           <span class="font-bold text-slate-600">Período:</span>
           <input v-model="filters.fechaDesde" type="date" class="rounded border border-slate-300 bg-white px-2 py-1 text-xs" />
           <span class="text-slate-400">a</span>
           <input v-model="filters.fechaHasta" type="date" class="rounded border border-slate-300 bg-white px-2 py-1 text-xs" />
+
+          <button
+            v-if="filters.fechaDesde || filters.fechaHasta"
+            type="button"
+            @click="verTodoElHistorico"
+            class="rounded-lg bg-indigo-50 border border-indigo-200 px-2.5 py-1 text-xs font-bold text-indigo-700 hover:bg-indigo-100 transition-colors cursor-pointer"
+          >
+            🌐 Ver todo el historial
+          </button>
+          <button
+            v-else
+            type="button"
+            @click="verMesActual"
+            class="rounded-lg bg-slate-200 border border-slate-300 px-2.5 py-1 text-xs font-bold text-slate-700 hover:bg-slate-300 transition-colors cursor-pointer"
+          >
+            📅 Ver mes actual
+          </button>
         </div>
       </div>
 

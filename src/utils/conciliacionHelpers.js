@@ -61,7 +61,14 @@ export function calculateConciliacionSummary(guias = []) {
     totalBultos += bultosVal;
 
     // Cliente / Obra Social
-    const clienteNombre = (g.clientes?.nombre_cliente || g.cliente_nombre || g.cliente || extra.obra_social || 'Sin Cliente Asignado').trim();
+    const clienteNombre = (
+      g.clientes?.nombre_cliente || 
+      g.cliente_nombre || 
+      g.cliente || 
+      extra.obra_social || 
+      extra.cliente || 
+      (g.paciente_referido ? `Pte: ${g.paciente_referido}` : 'Consumo Interno / Sin Cliente')
+    ).trim();
     if (!clienteMap[clienteNombre]) {
       clienteMap[clienteNombre] = { nombre: clienteNombre, totalCost: 0, totalBultos: 0, totalGuias: 0 };
     }
@@ -69,8 +76,15 @@ export function calculateConciliacionSummary(guias = []) {
     clienteMap[clienteNombre].totalBultos += bultosVal;
     clienteMap[clienteNombre].totalGuias += 1;
 
-    // Médico Cirujano / Referencia
-    const medicoNombre = (g.paciente_referido || extra.medico_cirujano || extra.medico || g.medico || 'Sin Médico Específico').trim();
+    // Médico Cirujano / Referente / Paciente
+    const medicoNombre = (
+      g.paciente_referido || 
+      extra.medico_cirujano || 
+      extra.medico || 
+      extra.referente || 
+      g.medico || 
+      'General / Sin Referente'
+    ).trim();
     if (!medicoMap[medicoNombre]) {
       medicoMap[medicoNombre] = { nombre: medicoNombre, totalCost: 0, totalBultos: 0, totalGuias: 0 };
     }
@@ -79,7 +93,14 @@ export function calculateConciliacionSummary(guias = []) {
     medicoMap[medicoNombre].totalGuias += 1;
 
     // Transporte / Courier
-    const rawTransporte = g.transportes?.nombre || g.transporte_nombre || g.transporte || g.proveedores?.nombre || 'LOGISTICA CIRUGIA';
+    const rawTransporte = (
+      g.transportes?.nombre || 
+      g.transporte_nombre || 
+      g.transporte || 
+      g.proveedores?.nombre || 
+      g.proveedor?.nombre || 
+      'LOGISTICA CIRUGIA'
+    );
     const transporteNorm = normalizeProveedor(rawTransporte);
     if (!transporteMap[transporteNorm]) {
       transporteMap[transporteNorm] = { nombre: transporteNorm, totalCost: 0, totalBultos: 0, totalGuias: 0 };
