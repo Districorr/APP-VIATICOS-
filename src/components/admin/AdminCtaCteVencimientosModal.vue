@@ -64,25 +64,7 @@ const loadCtaCteExpenses = async () => {
   try {
     let query = supabase
       .from('gastos')
-      .select(`
-        id,
-        fecha_gasto,
-        monto_total,
-        descripcion_general,
-        numero_factura,
-        origen_gasto,
-        tipo_gasto_id,
-        transporte_id,
-        proveedor_id,
-        viaje_id,
-        caja_id,
-        datos_adicionales,
-        proveedor:proveedores(id, nombre),
-        transporte:transportes(id, nombre),
-        provincias:provincias(id, nombre),
-        localidad_destino:localidades(id, nombre),
-        perfil:perfiles!user_id(nombre_completo)
-      `)
+      .select('*')
       .gte('fecha_gasto', originPeriod.value.start)
       .lte('fecha_gasto', originPeriod.value.end)
       .order('fecha_gasto', { ascending: true });
@@ -91,24 +73,34 @@ const loadCtaCteExpenses = async () => {
       query = query.eq('origen_gasto', 'cuenta_corriente_empresa');
     }
 
-    const [gastosRes, transportesRes] = await Promise.all([
+    const [gastosRes, transportesRes, proveedoresRes, provinciasRes, localidadesRes] = await Promise.all([
       query,
-      supabase.from('transportes').select('id, nombre')
+      supabase.from('transportes').select('id, nombre'),
+      supabase.from('proveedores').select('id, nombre'),
+      supabase.from('provincias').select('id, nombre'),
+      supabase.from('localidades').select('id, nombre')
     ]);
 
     if (gastosRes.error) throw gastosRes.error;
     const data = gastosRes.data || [];
     const transportesList = transportesRes.data || [];
+    const proveedoresList = proveedoresRes.data || [];
+    const provinciasList = provinciasRes.data || [];
+    const localidadesList = localidadesRes.data || [];
+
+    const transportesMap = new Map(transportesList.map(t => [t.id, t]));
+    const proveedoresMap = new Map(proveedoresList.map(p => [p.id, p]));
+    const provinciasMap = new Map(provinciasList.map(p => [p.id, p]));
+    const localidadesMap = new Map(localidadesList.map(l => [l.id, l]));
 
     // Filtrar estrictamente para incluir solo gastos que correspondan al módulo de Logística / Encomiendas
     const filteredData = data.filter(item => {
-      if (!includePagoInmediato.value) return true; // Ya filtrado por eq('origen_gasto', 'cuenta_corriente_empresa')
+      if (!includePagoInmediato.value) return true;
       
       const extra = item.datos_adicionales || {};
       return (
         item.origen_gasto === 'cuenta_corriente_empresa' ||
         item.transporte_id != null ||
-        item.transporte?.id != null ||
         item.tipo_gasto_id === 22 ||
         extra.modulo === 'logistica' ||
         extra.origen_carga === 'encomiendas_carga_multiple'
@@ -117,7 +109,11 @@ const loadCtaCteExpenses = async () => {
 
     // Mapear y autodetectar empresas de transporte y cirugías en la descripción
     items.value = filteredData.map(item => {
-      let t = item.transporte;
+      let t = item.transporte_id ? transportesMap.get(item.transporte_id) : null;
+      let p = item.proveedor_id ? proveedoresMap.get(item.proveedor_id) : null;
+      let prov = item.provincia_id ? provinciasMap.get(item.provincia_id) : null;
+      let loc = item.localidad_destino_id ? localidadesMap.get(item.localidad_destino_id) : null;
+
       const desc = item.descripcion_general || '';
       const descUpper = desc.toUpperCase();
 
@@ -129,15 +125,17 @@ const loadCtaCteExpenses = async () => {
         }
       }
 
-      const isSinProv = !item.proveedor || item.proveedor.id === 4 || item.proveedor.nombre?.toLowerCase() === 'sin proveedor';
-      const prov = (isSinProv && isSurgeryDescription(desc))
+      const isSinProv = !p || p.id === 4 || (p.nombre || '').toLowerCase() === 'sin proveedor';
+      const finalProv = (isSinProv && isSurgeryDescription(desc))
         ? { id: 14, nombre: 'LOGISTICA CIRUGIA' }
-        : item.proveedor;
+        : p;
 
       return {
         ...item,
         transporte: t,
-        proveedor: prov
+        proveedor: finalProv,
+        provincias: prov,
+        localidad_destino: loc
       };
     });
   } catch (e) {
