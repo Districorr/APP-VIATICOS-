@@ -4,12 +4,11 @@ import {
   XMarkIcon,
   MapPinIcon,
   TruckIcon,
-  CameraIcon,
+  DocumentCheckIcon,
   ArchiveBoxIcon,
   ArrowDownTrayIcon,
   SparklesIcon,
-  CheckCircleIcon,
-  ExclamationTriangleIcon
+  CheckCircleIcon
 } from '@heroicons/vue/24/outline';
 import { normalizeProveedor } from '../../../utils/logisticaHelpers.js';
 import { formatCurrency, formatPercent } from '../../../utils/conciliacionHelpers.js';
@@ -68,12 +67,12 @@ const stats = computed(() => {
     // Monto
     totalMonto += Number(g.monto_total) || 0;
 
-    // Respaldo fotográfico / comprobante
-    const tieneFoto = Boolean(g.comprobante_url || extra.foto_remito_url || extra.foto_envio || extra.url_comprobante || g.comprobante);
-    if (tieneFoto) guiasConRespaldo++;
+    // Respaldo de Comprobante / Factura Digital
+    const tieneComprobante = Boolean(g.comprobante_url || extra.foto_remito_url || extra.foto_envio || extra.url_comprobante || g.comprobante || g.numero_factura);
+    if (tieneComprobante) guiasConRespaldo++;
 
-    // Destino / Institución
-    const dest = (extra.destino_texto || g.localidad_destino?.nombre || g.provincias?.nombre || 'Destino general').trim();
+    // Destino / Provincia
+    const dest = (extra.destino_texto || g.localidad_destino?.nombre || g.provincias?.nombre || 'Destino General').trim();
     destinosMap[dest] = (destinosMap[dest] || 0) + 1;
 
     // Transporte
@@ -82,7 +81,7 @@ const stats = computed(() => {
     transportesMap[normT] = (transportesMap[normT] || 0) + 1;
   });
 
-  // Determinar zona más concurrida
+  // Determinar destino / provincia principal
   const topDestinoEntry = Object.entries(destinosMap).sort((a, b) => b[1] - a[1])[0];
   const zonaConcurrida = topDestinoEntry ? topDestinoEntry[0] : 'Destino General';
   const zonaConcurridaCount = topDestinoEntry ? topDestinoEntry[1] : 0;
@@ -93,7 +92,7 @@ const stats = computed(() => {
   const transportePrincipalCount = topTransporteEntry ? topTransporteEntry[1] : 0;
   const transportePrincipalPorcentaje = (transportePrincipalCount / totalGuias) * 100;
 
-  // % respaldo fotográfico
+  // % respaldo de comprobantes
   const porcentajeRespaldo = (guiasConRespaldo / totalGuias) * 100;
 
   return {
@@ -126,13 +125,13 @@ function descargarPDF() {
             <SparklesIcon class="h-6 w-6 text-indigo-300" />
           </div>
           <div>
-            <h3 class="text-lg font-bold">Reporte Consolidado de Envíos y Evidencias</h3>
-            <p class="text-xs text-indigo-200">Análisis inteligente de zona concurrida, transportes y respaldos fotográficos</p>
+            <h3 class="text-lg font-bold">Reporte Consolidado de Transporte y Envíos</h3>
+            <p class="text-xs text-indigo-200">Análisis ejecutivo de destinos principales, transportes y comprobantes adjuntos</p>
           </div>
         </div>
         <button
           @click="emit('close')"
-          class="rounded-lg p-1 text-slate-400 hover:bg-white/10 hover:text-white transition-colors"
+          class="rounded-lg p-1 text-slate-400 hover:bg-white/10 hover:text-white transition-colors cursor-pointer"
         >
           <XMarkIcon class="h-6 w-6" />
         </button>
@@ -144,10 +143,10 @@ function descargarPDF() {
         <!-- MATRIZ DE 4 TARJETAS KPI ESTADÍSTICAS -->
         <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
           
-          <!-- TARJETA 1: ZONA / INSTITUCIÓN MÁS CONCURRIDA -->
+          <!-- TARJETA 1: DESTINO / PROVINCIA PRINCIPAL -->
           <div class="rounded-xl border border-slate-200 bg-white p-5 shadow-xs hover:border-indigo-300 transition-all">
             <div class="flex items-center justify-between">
-              <span class="text-xs font-bold uppercase tracking-wider text-slate-500">Zona / Institución Destacada</span>
+              <span class="text-xs font-bold uppercase tracking-wider text-slate-500">Destino / Provincia Principal</span>
               <div class="rounded-lg bg-indigo-50 p-2 text-indigo-600">
                 <MapPinIcon class="h-5 w-5" />
               </div>
@@ -164,9 +163,9 @@ function descargarPDF() {
           </div>
 
           <!-- TARJETA 2: TRANSPORTE PRINCIPAL -->
-          <div class="rounded-xl border border-slate-200 bg-white p-5 shadow-xs hover:border-indigo-300 transition-all">
+          <div class="rounded-xl border border-slate-200 bg-white p-5 shadow-xs hover:border-purple-300 transition-all">
             <div class="flex items-center justify-between">
-              <span class="text-xs font-bold uppercase tracking-wider text-slate-500">Transporte Principal</span>
+              <span class="text-xs font-bold uppercase tracking-wider text-slate-500">Transporte / Courier Líder</span>
               <div class="rounded-lg bg-purple-50 p-2 text-purple-600">
                 <TruckIcon class="h-5 w-5" />
               </div>
@@ -182,12 +181,12 @@ function descargarPDF() {
             </div>
           </div>
 
-          <!-- TARJETA 3: RESPALDO FOTOGRÁFICO -->
+          <!-- TARJETA 3: COMPROBANTES Y FACTURAS ADJUNTAS -->
           <div class="rounded-xl border border-slate-200 bg-white p-5 shadow-xs hover:border-emerald-300 transition-all">
             <div class="flex items-center justify-between">
-              <span class="text-xs font-bold uppercase tracking-wider text-slate-500">Respaldo Fotográfico</span>
+              <span class="text-xs font-bold uppercase tracking-wider text-slate-500">Comprobantes y Facturas</span>
               <div class="rounded-lg bg-emerald-50 p-2 text-emerald-600">
-                <CameraIcon class="h-5 w-5" />
+                <DocumentCheckIcon class="h-5 w-5" />
               </div>
             </div>
             <div class="mt-3">
@@ -195,10 +194,10 @@ function descargarPDF() {
                 <p class="text-2xl font-black text-emerald-600">
                   {{ formatPercent(stats.porcentajeRespaldo) }}
                 </p>
-                <span class="text-xs text-slate-500 font-medium">con evidencia</span>
+                <span class="text-xs text-slate-500 font-medium">con comprobante</span>
               </div>
               
-              <!-- BARRITA DE PROGRESO DE RESPALDO -->
+              <!-- BARRITA DE PROGRESO -->
               <div class="mt-2.5 h-2 w-full rounded-full bg-slate-100 overflow-hidden">
                 <div
                   class="h-full rounded-full bg-emerald-500 transition-all duration-500"
@@ -206,12 +205,12 @@ function descargarPDF() {
                 ></div>
               </div>
               <p class="mt-1.5 text-[11px] text-slate-500 text-right">
-                {{ stats.guiasConRespaldo }} de {{ stats.totalGuias }} guías respaldadas
+                {{ stats.guiasConRespaldo }} de {{ stats.totalGuias }} movimientos respaldados
               </p>
             </div>
           </div>
 
-          <!-- TARJETA 4: BULTOS Y VOLUMEN ACUMULADO -->
+          <!-- TARJETA 4: BULTOS Y GASTO ACUMULADO -->
           <div class="rounded-xl border border-slate-200 bg-white p-5 shadow-xs hover:border-sky-300 transition-all">
             <div class="flex items-center justify-between">
               <span class="text-xs font-bold uppercase tracking-wider text-slate-500">Bultos Movilizados</span>
@@ -240,7 +239,7 @@ function descargarPDF() {
           <CheckCircleIcon class="h-5 w-5 text-indigo-600 shrink-0 mt-0.5" />
           <div>
             <span class="font-bold">Síntesis operacional:</span>
-            Se procesaron {{ stats.totalGuias }} envíos. La zona de mayor concurrencia detectada es <strong class="text-indigo-950">{{ stats.zonaConcurrida }}</strong>, mientras que <strong class="text-indigo-950">{{ stats.transportePrincipal }}</strong> encabeza los traslados. El {{ formatPercent(stats.porcentajeRespaldo) }} de los movimientos cuenta con documentación digital o fotográfica de respaldo.
+            Se procesaron {{ stats.totalGuias }} envíos logísticos. El destino principal detectado es <strong class="text-indigo-950">{{ stats.zonaConcurrida }}</strong>, mientras que <strong class="text-indigo-950">{{ stats.transportePrincipal }}</strong> encabeza los despachos. El {{ formatPercent(stats.porcentajeRespaldo) }} de los movimientos cuenta con comprobante digital o factura adjunta.
           </div>
         </div>
 
@@ -251,7 +250,7 @@ function descargarPDF() {
         <button
           type="button"
           @click="emit('close')"
-          class="rounded-xl border border-slate-300 bg-white px-4 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-50 transition-colors shadow-xs"
+          class="rounded-xl border border-slate-300 bg-white px-4 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-50 transition-colors shadow-xs cursor-pointer"
         >
           Cerrar
         </button>

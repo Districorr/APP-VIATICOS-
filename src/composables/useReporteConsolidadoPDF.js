@@ -25,11 +25,11 @@ export function useReporteConsolidadoPDF() {
     doc.setTextColor(255, 255, 255);
     doc.setFont('helvetica', 'bold');
     doc.setFontSize(15);
-    doc.text('DISTRICORR - Reporte Consolidado de Envíos y Logística', 14, 13);
+    doc.text('DISTRICORR - Reporte Consolidado de Transporte y Envíos', 14, 13);
 
     doc.setFont('helvetica', 'normal');
     doc.setFontSize(8.5);
-    doc.text(`Generado el: ${fechaEmision} | Auditoría General de Operaciones`, 14, 20);
+    doc.text(`Generado el: ${fechaEmision} | Auditoría General de Operaciones y Comprobantes`, 14, 20);
 
     let yPos = 34;
 
@@ -39,11 +39,11 @@ export function useReporteConsolidadoPDF() {
     doc.roundedRect(14, yPos, 88, 26, 3, 3, 'FD');
     doc.roundedRect(108, yPos, 88, 26, 3, 3, 'FD');
 
-    // Tarjeta 1: Zona Concurrida
+    // Tarjeta 1: Destino Principal
     doc.setTextColor(51, 65, 85);
     doc.setFont('helvetica', 'bold');
     doc.setFontSize(8.5);
-    doc.text('ZONA / INSTITUCIÓN MÁS CONCURRIDA', 18, yPos + 6);
+    doc.text('DESTINO / PROVINCIA PRINCIPAL', 18, yPos + 6);
     doc.setFontSize(11);
     doc.setTextColor(15, 23, 42);
     doc.text(stats.zonaConcurrida ? stats.zonaConcurrida.substring(0, 32) : 'No especificada', 18, yPos + 14);
@@ -52,11 +52,11 @@ export function useReporteConsolidadoPDF() {
     doc.setTextColor(100, 116, 139);
     doc.text(`Volumen: ${stats.zonaConcurridaCount || 0} envíos registrados`, 18, yPos + 21);
 
-    // Tarjeta 2: Transporte Principal
+    // Tarjeta 2: Transporte Líder
     doc.setFont('helvetica', 'bold');
     doc.setFontSize(8.5);
     doc.setTextColor(51, 65, 85);
-    doc.text('TRANSPORTE PRINCIPAL', 112, yPos + 6);
+    doc.text('TRANSPORTE / COURIER LÍDER', 112, yPos + 6);
     doc.setFontSize(11);
     doc.setTextColor(79, 70, 229);
     doc.text(stats.transportePrincipal ? stats.transportePrincipal.substring(0, 32) : 'N/A', 112, yPos + 14);
@@ -72,31 +72,31 @@ export function useReporteConsolidadoPDF() {
     doc.roundedRect(14, yPos, 88, 26, 3, 3, 'FD');
     doc.roundedRect(108, yPos, 88, 26, 3, 3, 'FD');
 
-    // Tarjeta 3: Respaldo Fotográfico
+    // Tarjeta 3: Comprobantes Adjuntos
     doc.setFont('helvetica', 'bold');
     doc.setFontSize(8.5);
     doc.setTextColor(51, 65, 85);
-    doc.text('RESPALDO FOTOGRÁFICO / EVIDENCIAS', 18, yPos + 6);
+    doc.text('COMPROBANTES Y FACTURAS ADJUNTAS', 18, yPos + 6);
     doc.setFontSize(12);
     doc.setTextColor(16, 185, 129); // Emerald
     doc.text(`${formatPercent(stats.porcentajeRespaldo || 0)}`, 18, yPos + 14);
     doc.setFontSize(8);
     doc.setFont('helvetica', 'normal');
     doc.setTextColor(100, 116, 139);
-    doc.text(`${stats.guiasConRespaldo || 0} de ${stats.totalGuias || 0} envíos con fotos/comprobantes`, 18, yPos + 21);
+    doc.text(`${stats.guiasConRespaldo || 0} de ${stats.totalGuias || 0} envíos con comprobante`, 18, yPos + 21);
 
-    // Tarjeta 4: Bultos Totales
+    // Tarjeta 4: Bultos y Gasto Acumulado
     doc.setFont('helvetica', 'bold');
     doc.setFontSize(8.5);
     doc.setTextColor(51, 65, 85);
-    doc.text('BULTOS TOTALES MOVILIZADOS', 112, yPos + 6);
+    doc.text('BULTOS Y GASTO ACUMULADO', 112, yPos + 6);
     doc.setFontSize(12);
     doc.setTextColor(15, 23, 42);
     doc.text(`${stats.totalBultos || 0} bultos`, 112, yPos + 14);
     doc.setFontSize(8);
     doc.setFont('helvetica', 'normal');
     doc.setTextColor(100, 116, 139);
-    doc.text(`Acumulado $ ${formatCurrency(stats.totalMonto || 0)}`, 112, yPos + 21);
+    doc.text(`Costo acum.: ${formatCurrency(stats.totalMonto || 0)}`, 112, yPos + 21);
 
     yPos += 36;
 
@@ -104,12 +104,12 @@ export function useReporteConsolidadoPDF() {
     doc.setFont('helvetica', 'bold');
     doc.setFontSize(10.5);
     doc.setTextColor(30, 41, 59);
-    doc.text('Muestreo Histórico de Envíos y Evidencias Registradas', 14, yPos);
+    doc.text('Muestreo Histórico de Envíos y Comprobantes Registrados', 14, yPos);
     yPos += 4;
 
     const rows = guias.slice(0, 40).map(g => {
       const extra = g.datos_adicionales || {};
-      const tieneFoto = g.comprobante_url || extra.foto_remito_url || extra.foto_envio || extra.url_comprobante ? 'SÍ' : 'NO';
+      const tieneComp = (g.comprobante_url || extra.foto_remito_url || extra.foto_envio || extra.url_comprobante || g.comprobante || g.numero_factura) ? 'SÍ' : 'NO';
       const bultos = extra.cantidad_bultos !== undefined && extra.cantidad_bultos !== null ? extra.cantidad_bultos : '-';
       const cliente = g.clientes?.nombre_cliente || g.paciente_referido || 'Consumo interno';
       const destino = extra.destino_texto || g.localidad_destino?.nombre || g.provincias?.nombre || 'General';
@@ -122,14 +122,14 @@ export function useReporteConsolidadoPDF() {
         cliente.substring(0, 24),
         destino.substring(0, 22),
         bultos,
-        tieneFoto,
+        tieneComp,
         formatCurrency(g.monto_total || 0)
       ];
     });
 
     doc.autoTable({
       startY: yPos,
-      head: [['Fecha', 'Transporte', 'Cliente / Paciente', 'Destino / Institución', 'Bultos', 'Foto', 'Monto ($)']],
+      head: [['Fecha', 'Transporte', 'Cliente / Referencia', 'Destino', 'Bultos', 'Comprob.', 'Monto ($)']],
       body: rows,
       theme: 'grid',
       headStyles: {
@@ -148,8 +148,8 @@ export function useReporteConsolidadoPDF() {
         2: { cellWidth: 45 },
         3: { cellWidth: 40 },
         4: { cellWidth: 15, halign: 'center' },
-        5: { cellWidth: 14, halign: 'center' },
-        6: { cellWidth: 24, halign: 'right' }
+        5: { cellWidth: 16, halign: 'center' },
+        6: { cellWidth: 22, halign: 'right' }
       },
       margin: { left: 14, right: 14 }
     });
@@ -162,7 +162,7 @@ export function useReporteConsolidadoPDF() {
       doc.setFontSize(8);
       doc.setTextColor(148, 163, 184);
       doc.line(14, 282, 196, 282);
-      doc.text('DISTRICORR - Reporte Consolidado de Evidencias Logísticas', 14, 287);
+      doc.text('DISTRICORR - Reporte Consolidado de Envíos y Comprobantes Logísticos', 14, 287);
       doc.text(`Página ${i} de ${pageCount}`, 196, 287, { align: 'right' });
     }
 
