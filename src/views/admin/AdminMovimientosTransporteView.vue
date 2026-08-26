@@ -2490,12 +2490,12 @@ onMounted(fetchDatosLogistica);
               <Bar :data="chartFrecuenciaData" :options="chartAnalisisOptions" v-if="chartFrecuenciaData.labels.length > 0" />
               <p v-else class="text-center text-slate-400 py-16 text-xs">No hay datos para graficar.</p>
             </div>
-          </div>
         </div>
       </div>
+    </div>
 
-      <!-- PESTAÑA DE CONCILIACIÓN DE FLETES -->
-      <div v-if="activeTab === 'conciliacion'" class="space-y-6">
+    <!-- PESTAÑA DE CONCILIACIÓN DE FLETES -->
+    <div v-if="activeTab === 'conciliacion'" class="space-y-6">
         
         <!-- TARJETAS KPI EN LA CABECERA DE CONCILIACIÓN -->
         <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
