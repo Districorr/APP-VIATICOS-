@@ -66,8 +66,25 @@ export function normalizeProveedor(name) {
   return cleanName;
 }
 
+// Paleta de colores elegantes, suaves y de alto contraste
+const PALETTE = [
+  'bg-indigo-100 text-indigo-900 border-indigo-300 font-bold',
+  'bg-sky-100 text-sky-900 border-sky-300 font-bold',
+  'bg-teal-100 text-teal-900 border-teal-300 font-bold',
+  'bg-emerald-100 text-emerald-900 border-emerald-300 font-bold',
+  'bg-amber-100 text-amber-900 border-amber-300 font-bold',
+  'bg-orange-100 text-orange-900 border-orange-300 font-bold',
+  'bg-rose-100 text-rose-900 border-rose-300 font-bold',
+  'bg-purple-100 text-purple-900 border-purple-300 font-bold',
+  'bg-fuchsia-100 text-fuchsia-900 border-fuchsia-300 font-bold',
+  'bg-cyan-100 text-cyan-900 border-cyan-300 font-bold',
+  'bg-violet-100 text-violet-900 border-violet-300 font-bold',
+  'bg-blue-100 text-blue-900 border-blue-300 font-bold',
+];
+
 /**
- * Devuelve clases CSS de Tailwind para pintar Badges/Chips según la empresa de transporte.
+ * Devuelve clases CSS de Tailwind para pintar Badges/Chips vistosos según la empresa de transporte.
+ * Garantiza alto contraste y legibilidad para todas las empresas (Full Pack, Integral Pack, Alcorta, etc.)
  * 
  * @param {string} name 
  * @returns {string} Clases Tailwind CSS para el badge
@@ -77,18 +94,38 @@ export function getProveedorBadgeColor(name) {
 
   switch (norm) {
     case 'LOGISTICA CIRUGIA':
-      return 'bg-indigo-100 text-indigo-800 border-indigo-200 dark:bg-indigo-950/40 dark:text-indigo-300 dark:border-indigo-800/40';
+      return 'bg-indigo-100 text-indigo-900 border-indigo-300 font-bold';
     case 'ANDREANI':
-      return 'bg-amber-100 text-amber-800 border-amber-200 dark:bg-amber-950/40 dark:text-amber-300 dark:border-amber-800/40';
+      return 'bg-amber-100 text-amber-900 border-amber-300 font-bold';
     case 'OCA':
-      return 'bg-sky-100 text-sky-800 border-sky-200 dark:bg-sky-950/40 dark:text-sky-300 dark:border-sky-800/40';
+      return 'bg-sky-100 text-sky-900 border-sky-300 font-bold';
     case 'CADETERIA':
-      return 'bg-emerald-100 text-emerald-800 border-emerald-200 dark:bg-emerald-950/40 dark:text-emerald-300 dark:border-emerald-800/40';
+      return 'bg-emerald-100 text-emerald-900 border-emerald-300 font-bold';
     case 'SAN EXPEDITO':
-      return 'bg-rose-100 text-rose-800 border-rose-200 dark:bg-rose-950/40 dark:text-rose-300 dark:border-rose-800/40';
+      return 'bg-rose-100 text-rose-900 border-rose-300 font-bold';
     case 'VIA CARGO':
-      return 'bg-purple-100 text-purple-800 border-purple-200 dark:bg-purple-950/40 dark:text-purple-300 dark:border-purple-800/40';
-    default:
-      return 'bg-slate-100 text-slate-700 border-slate-200 dark:bg-slate-800 dark:text-slate-300 dark:border-slate-700';
+      return 'bg-purple-100 text-purple-900 border-purple-300 font-bold';
+    case 'FULL PACK':
+      return 'bg-cyan-100 text-cyan-900 border-cyan-300 font-bold';
+    case 'INTEGRAL PACK':
+      return 'bg-teal-100 text-teal-900 border-teal-300 font-bold';
+    case 'ALCORTA':
+      return 'bg-orange-100 text-orange-900 border-orange-300 font-bold';
+    case 'RAY PACK':
+      return 'bg-fuchsia-100 text-fuchsia-900 border-fuchsia-300 font-bold';
+    case 'ELISA':
+      return 'bg-violet-100 text-violet-900 border-violet-300 font-bold';
+    case 'EL PRACTICO PACK':
+    case 'EL PRACTICO':
+      return 'bg-blue-100 text-blue-900 border-blue-300 font-bold';
+    default: {
+      // Hash determinista para asignar un color suave y legible a cualquier transporte dinámico
+      let hash = 0;
+      for (let i = 0; i < norm.length; i++) {
+        hash = norm.charCodeAt(i) + ((hash << 5) - hash);
+      }
+      const index = Math.abs(hash) % PALETTE.length;
+      return PALETTE[index];
+    }
   }
 }
