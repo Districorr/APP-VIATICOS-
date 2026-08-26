@@ -15,7 +15,7 @@ export function normalizeProveedor(name) {
   
   const cleanName = name.trim().toUpperCase();
 
-  // Sinónimos de Logística Cirugía
+  // Sinónimos de Logística Cirugía y Proveedor por defecto
   const logisticaCirugiaSynonyms = [
     'EMA PACK',
     'EMA',
@@ -26,10 +26,19 @@ export function normalizeProveedor(name) {
     'LOGISTICA CIRUGIA',
     'EMAPACK',
     'EMA-PACK',
-    'LOGISTICA DE CIRUGIAS'
+    'LOGISTICA DE CIRUGIAS',
+    'SIN PROVEEDOR',
+    'SIN_PROVEEDOR',
+    'SIN PROVEEDOR ASIGNADO',
+    'SIN PROVEEDOR/OTROS',
+    'SIN PROVEEDOR/OTRO',
+    'N/A',
+    'SIN DATO',
+    '—',
+    '-'
   ];
 
-  if (logisticaCirugiaSynonyms.includes(cleanName)) {
+  if (!cleanName || logisticaCirugiaSynonyms.includes(cleanName)) {
     return 'LOGISTICA CIRUGIA';
   }
 

@@ -341,11 +341,19 @@ async function fetchDatosLogistica() {
     const localidadesMap = new Map((localidadesRes.data || []).map(l => [l.id, l]));
 
     const logistica = gastosList.map(g => {
+      let p = g.proveedor_id ? proveedoresMap.get(g.proveedor_id) : null;
+      const pNorm = normalizeProveedor(p?.nombre);
+      p = { id: p?.id || 14, nombre: pNorm };
+
+      let t = g.transporte_id ? transportesMap.get(g.transporte_id) : null;
+      const tNorm = normalizeProveedor(t?.nombre || pNorm);
+      t = { id: t?.id || p.id || 14, nombre: tNorm };
+
       return {
         ...g,
         clientes: g.cliente_id ? clientesMap.get(g.cliente_id) : null,
-        transportes: g.transporte_id ? transportesMap.get(g.transporte_id) : null,
-        proveedores: g.proveedor_id ? proveedoresMap.get(g.proveedor_id) : null,
+        transportes: t,
+        proveedores: p,
         provincias: g.provincia_id ? provinciasMap.get(g.provincia_id) : null,
         localidad_destino: g.localidad_destino_id ? localidadesMap.get(g.localidad_destino_id) : null,
       };
@@ -1634,7 +1642,11 @@ onMounted(fetchDatosLogistica);
                     </span>
                   </div>
                 </td>
-                <td class="px-4 py-3 text-slate-600">{{ g.proveedores?.nombre || 'Sin proveedor' }}</td>
+                <td class="px-4 py-3 font-bold">
+                  <span class="inline-block px-2.5 py-0.5 text-xs font-bold rounded-full border" :class="getProveedorBadgeColor(g.proveedores?.nombre)">
+                    {{ normalizeProveedor(g.proveedores?.nombre) }}
+                  </span>
+                </td>
                 <td class="px-4 py-3 text-center font-bold text-indigo-700">
                   <span v-if="g.datos_adicionales?.cantidad_bultos !== undefined && g.datos_adicionales?.cantidad_bultos !== null && g.datos_adicionales?.cantidad_bultos !== ''">
                     {{ g.datos_adicionales.cantidad_bultos }}

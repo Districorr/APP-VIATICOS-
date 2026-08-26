@@ -1,6 +1,7 @@
 import jsPDF from 'jspdf';
 import 'jspdf-autotable';
 import { formatCurrency, formatDate } from '../utils/formatters';
+import { normalizeProveedor } from '../utils/logisticaHelpers';
 
 export function useLogisticaPdfExportVariants() {
   /**
@@ -193,7 +194,7 @@ export function useLogisticaPdfExportVariants() {
       const tableHeaders = [['Fecha', 'Transporte', 'Referencia Operativa', 'Destino', 'Importe']];
       const tableRows = movimientos.map(g => [
         formatDate(g.fecha_gasto),
-        g.transportes?.nombre || '—',
+        normalizeProveedor(g.transportes?.nombre || g.proveedores?.nombre),
         getReferenciaOperacionalLimpia(g),
         getDestinoLimpio(g),
         formatCurrency(g.monto_total)
@@ -228,11 +229,11 @@ export function useLogisticaPdfExportVariants() {
         const cliente = (g.clientes?.nombre_cliente || '').trim();
         const paciente = (g.paciente_referido || extra.paciente_referido || '').trim();
         const cpStr = cliente && paciente ? `${cliente} (Pte: ${paciente})` : (cliente || (paciente ? `Pte: ${paciente}` : '—'));
-        const provStr = (g.proveedores?.nombre || '').toUpperCase().includes('LOGISTICA') ? '—' : (g.proveedores?.nombre || '—');
+        const provStr = normalizeProveedor(g.proveedores?.nombre || g.transportes?.nombre);
 
         return [
           formatDate(g.fecha_gasto),
-          g.transportes?.nombre || '—',
+          normalizeProveedor(g.transportes?.nombre || g.proveedores?.nombre),
           provStr,
           cpStr,
           extra.tipo_movimiento_encomienda || 'Envio',
@@ -765,8 +766,8 @@ export function useLogisticaPdfExportVariants() {
     const provGroups = {};
 
     items.forEach(item => {
-      const encName = item.transporte?.nombre || 'SIN ENCOMIENDA / N/A';
-      const provName = item.proveedor?.nombre || 'SIN PROVEEDOR';
+      const encName = normalizeProveedor(item.transporte?.nombre || item.proveedor?.nombre);
+      const provName = normalizeProveedor(item.proveedor?.nombre || item.transporte?.nombre);
       const val = Number(item.monto_total || 0);
       const bCount = getBultosCount(item);
 
