@@ -4,6 +4,7 @@ import vSelect from 'vue-select';
 import 'vue-select/dist/vue-select.css';
 import { supabase } from '../../../supabaseClient.js';
 import { useLogisticaDescriptionParser } from '../../../composables/useLogisticaDescriptionParser.js';
+import { normalizeProveedor } from '../../../utils/logisticaHelpers.js';
 
 const props = defineProps({
   modelValue: { type: Boolean, default: false },
@@ -114,7 +115,7 @@ function handleCreateCliente(label) {
 }
 
 function handleCreateTransporte(label) {
-  const cleanLabel = (label || '').trim();
+  const cleanLabel = normalizeProveedor((label || '').trim());
   const opt = { code: cleanLabel, value: cleanLabel, label: cleanLabel, __isNew: true };
   if (!transportesOptions.value.some(o => o.code === cleanLabel || o.value === cleanLabel || o.label === cleanLabel)) {
     transportesOptions.value.push(opt);
@@ -123,7 +124,7 @@ function handleCreateTransporte(label) {
 }
 
 function handleCreateProveedor(label) {
-  const cleanLabel = (label || '').trim();
+  const cleanLabel = normalizeProveedor((label || '').trim());
   const opt = { code: cleanLabel, value: cleanLabel, label: cleanLabel, __isNew: true };
   if (!proveedoresOptions.value.some(o => o.code === cleanLabel || o.value === cleanLabel || o.label === cleanLabel)) {
     proveedoresOptions.value.push(opt);

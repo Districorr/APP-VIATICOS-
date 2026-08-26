@@ -42,8 +42,17 @@ import {
   BuildingOffice2Icon,
   ChartBarIcon,
   MapPinIcon,
+  ScaleIcon,
+  SparklesIcon,
+  CheckCircleIcon,
+  ClockIcon,
+  ExclamationTriangleIcon,
 } from '@heroicons/vue/24/outline';
 import { useLogisticaPdfExportVariants } from '../../composables/useLogisticaPdfExportVariants.js';
+import { normalizeProveedor, getProveedorBadgeColor } from '../../utils/logisticaHelpers.js';
+import { calculateConciliacionSummary, formatPercent } from '../../utils/conciliacionHelpers.js';
+import { useConciliacionPDF } from '../../composables/useConciliacionPDF.js';
+import ReporteConsolidadoModal from '../../components/admin/logistica/ReporteConsolidadoModal.vue';
 
 ChartJS.register(Title, ChartTooltip, Legend, BarElement, CategoryScale, LinearScale);
 
@@ -54,10 +63,141 @@ L.Icon.Default.mergeOptions({
   shadowUrl: 'leaflet/dist/images/marker-shadow.png',
 });
 
-const activeTab = ref('movimientos'); // 'movimientos' | 'transportes' | 'control_semanal' | 'ctacte'
+const activeTab = ref('movimientos'); // 'movimientos' | 'transportes' | 'control_semanal' | 'ctacte' | 'conciliacion' | 'analisis'
 const loading = ref(true);
 const gastosLogistica = ref([]);
 const notification = ref({});
+
+const isReporteConsolidadoOpen = ref(false);
+const { exportarPdfConciliacion } = useConciliacionPDF();
+
+// Pestaña Conciliación
+const conciliacionSubTab = ref('resumen'); // 'resumen' | 'detalle'
+const conciliacionFiltroTransporte = ref(null);
+const conciliacionFiltroEstado = ref('TODOS'); // 'TODOS' | 'CONCILIADO' | 'PENDIENTE' | 'EN_REVISION'
+const conciliacionSearch = ref('');
+const conciliacionFiltroClienteMedico = ref(null);
+
+const summaryConciliacion = computed(() => {
+  return calculateConciliacionSummary(movimientosFiltrados.value);
+});
+
+const guiasConciliacionFiltradasDetalle = computed(() => {
+  let list = movimientosFiltrados.value;
+
+  if (conciliacionFiltroClienteMedico.value) {
+    const q = conciliacionFiltroClienteMedico.value.toLowerCase();
+    list = list.filter(g => {
+      const c = (g.clientes?.nombre_cliente || '').toLowerCase();
+      const m = (g.paciente_referido || g.datos_adicionales?.medico_cirujano || '').toLowerCase();
+      return c.includes(q) || m.includes(q);
+    });
+  }
+
+  if (conciliacionFiltroTransporte.value) {
+    list = list.filter(g => {
+      const tNorm = normalizeProveedor(g.transportes?.nombre || g.proveedores?.nombre || '');
+      return tNorm === conciliacionFiltroTransporte.value;
+    });
+  }
+
+  if (conciliacionFiltroEstado.value !== 'TODOS') {
+    list = list.filter(g => {
+      const est = g.datos_adicionales?.estado_conciliacion || 'PENDIENTE';
+      return est === conciliacionFiltroEstado.value;
+    });
+  }
+
+  if (conciliacionSearch.value.trim()) {
+    const q = conciliacionSearch.value.toLowerCase().trim();
+    list = list.filter(g => {
+      const extra = g.datos_adicionales || {};
+      const c = (g.clientes?.nombre_cliente || '').toLowerCase();
+      const m = (g.paciente_referido || extra.medico_cirujano || '').toLowerCase();
+      const t = normalizeProveedor(g.transportes?.nombre || g.proveedores?.nombre || '').toLowerCase();
+      const guia = (g.numero_factura || extra.numero_guia || '').toLowerCase();
+      return c.includes(q) || m.includes(q) || t.includes(q) || guia.includes(q);
+    });
+  }
+
+  return list;
+});
+
+function filtrarConciliacionPorItem(nombre) {
+  conciliacionFiltroClienteMedico.value = nombre;
+  conciliacionSubTab.value = 'detalle';
+  showNotification('Filtro Aplicado', `Filtrando detalle por: "${nombre}"`, 'info');
+}
+
+function limpiarFiltroClienteMedico() {
+  conciliacionFiltroClienteMedico.value = null;
+}
+
+async function cambiarEstadoConciliacion(gasto, nuevoEstado) {
+  try {
+    const extra = { ...(gasto.datos_adicionales || {}), estado_conciliacion: nuevoEstado };
+    const { error } = await supabase
+      .from('gastos')
+      .update({ datos_adicionales: extra })
+      .eq('id', gasto.id);
+
+    if (error) throw error;
+
+    gasto.datos_adicionales = extra;
+    showNotification('Estado de Conciliación', `Movimiento actualizado a: ${nuevoEstado}`, 'success');
+  } catch (e) {
+    console.error('Error al actualizar estado de conciliación:', e);
+    showNotification('Error', `No se pudo cambiar el estado: ${e.message}`, 'error');
+  }
+}
+
+function generarPdfConciliacionFletes() {
+  const metadata = {
+    periodoText: `Período: ${filters.fechaDesde} al ${filters.fechaHasta}`
+  };
+  exportarPdfConciliacion(movimientosFiltrados.value, metadata);
+  showNotification('PDF Generado', 'Se descargó el reporte ejecutivo de conciliación de fletes.', 'success');
+}
+
+function exportarExcelConciliacionFletes() {
+  const summary = summaryConciliacion.value;
+  const rowsResumen = summary.byCliente.map(c => ({
+    'Cliente / Obra Social': c.nombre,
+    'Total Guías': c.totalGuias,
+    'Total Bultos': c.totalBultos,
+    'Total Gastado ($)': c.totalCost,
+    '% Participación': `${c.porcentaje.toFixed(1)}%`
+  }));
+
+  const rowsMedicos = summary.byMedico.map(m => ({
+    'Médico / Referente': m.nombre,
+    'Total Guías': m.totalGuias,
+    'Total Bultos': m.totalBultos,
+    'Total Gastado ($)': m.totalCost,
+    '% Participación': `${m.porcentaje.toFixed(1)}%`
+  }));
+
+  const rowsDetalle = guiasConciliacionFiltradasDetalle.value.map(g => {
+    const extra = g.datos_adicionales || {};
+    return {
+      'Fecha': formatDate(g.fecha_gasto),
+      'Nº Guía / Factura': g.numero_factura || extra.numero_guia || 'N/A',
+      'Transporte': normalizeProveedor(g.transportes?.nombre || g.proveedores?.nombre || 'LOGISTICA CIRUGIA'),
+      'Cliente / Obra Social': g.clientes?.nombre_cliente || 'N/A',
+      'Médico / Referente': g.paciente_referido || extra.medico_cirujano || 'N/A',
+      'Bultos': extra.cantidad_bultos ?? 0,
+      'Monto ($)': Number(g.monto_total) || 0,
+      'Estado Conciliación': extra.estado_conciliacion || 'PENDIENTE'
+    };
+  });
+
+  exportToExcel([
+    { name: 'Resumen Clientes', data: rowsResumen },
+    { name: 'Resumen Médicos', data: rowsMedicos },
+    { name: 'Detalle Guías', data: rowsDetalle }
+  ], `Conciliacion_Fletes_Districorr_${todayStr}`);
+  showNotification('Excel Exportado', 'Se exportó la conciliación de fletes a Excel.', 'success');
+}
 
 const isPdfMenuOpen = ref(false);
 const transporteExpandido = ref(null);
@@ -1098,6 +1238,11 @@ onMounted(fetchDatosLogistica);
 
       <!-- Barra de Botones de Acción Alineados -->
       <div class="flex flex-wrap items-center gap-2.5 border-t border-slate-100 pt-4">
+        <button type="button" class="btn-action-primary !bg-purple-600 hover:!bg-purple-700 shadow-sm" @click="isReporteConsolidadoOpen = true">
+          <SparklesIcon class="h-4 w-4" />
+          <span>📦 Reporte Consolidado</span>
+        </button>
+
         <button type="button" class="btn-action-primary" @click="isNuevoMovimientoOpen = true">
           <PlusIcon class="h-4 w-4" />
           <span>+ Registrar movimiento</span>
@@ -1206,6 +1351,16 @@ onMounted(fetchDatosLogistica);
         >
           <ArrowsRightLeftIcon class="h-5 w-5" />
           <span>Movimientos</span>
+        </button>
+
+        <button
+          type="button"
+          class="tab-button"
+          :class="activeTab === 'conciliacion' ? 'tab-active' : 'tab-inactive'"
+          @click="activeTab = 'conciliacion'"
+        >
+          <ScaleIcon class="h-5 w-5 text-indigo-600" />
+          <span>⚖️ Conciliación de Fletes</span>
         </button>
 
         <button
@@ -1429,7 +1584,11 @@ onMounted(fetchDatosLogistica);
                 @click="verDetalleGasto(g)"
               >
                 <td class="whitespace-nowrap px-4 py-3 text-xs text-slate-600">{{ formatDate(g.fecha_gasto) }}</td>
-                <td class="px-4 py-3 font-bold text-slate-900 group-hover:text-indigo-600 transition-colors">{{ g.transportes?.nombre || 'Sin Transporte' }}</td>
+                <td class="px-4 py-3 font-bold">
+                  <span class="inline-block px-2.5 py-0.5 text-xs font-bold rounded-full border" :class="getProveedorBadgeColor(g.transportes?.nombre || g.proveedores?.nombre)">
+                    {{ normalizeProveedor(g.transportes?.nombre || g.proveedores?.nombre) }}
+                  </span>
+                </td>
                 <td class="px-4 py-3">
                   <span class="inline-flex items-center rounded-full bg-slate-100 px-2.5 py-0.5 text-[11px] font-bold text-slate-800">
                     {{ g.datos_adicionales?.tipo_movimiento_encomienda || 'Envío' }}
@@ -2290,7 +2449,389 @@ onMounted(fetchDatosLogistica);
           </div>
         </div>
       </div>
+
+      <!-- PESTAÑA DE CONCILIACIÓN DE FLETES -->
+      <div v-if="activeTab === 'conciliacion'" class="space-y-6">
+        
+        <!-- TARJETAS KPI EN LA CABECERA DE CONCILIACIÓN -->
+        <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+          <div class="rounded-2xl border border-slate-200 bg-white p-5 shadow-xs">
+            <div class="flex items-center justify-between">
+              <span class="text-xs font-bold uppercase tracking-wider text-slate-500">Total Gastado en Fletes</span>
+              <div class="rounded-xl bg-indigo-50 p-2.5 text-indigo-600">
+                <BanknotesIcon class="h-6 w-6" />
+              </div>
+            </div>
+            <p class="mt-3 text-2xl font-black text-slate-900">
+              {{ formatCurrency(summaryConciliacion.totalCost) }}
+            </p>
+            <p class="mt-1 text-xs text-slate-500 font-medium">Acumulado en el período seleccionado</p>
+          </div>
+
+          <div class="rounded-2xl border border-slate-200 bg-white p-5 shadow-xs">
+            <div class="flex items-center justify-between">
+              <span class="text-xs font-bold uppercase tracking-wider text-slate-500">Guías / Remitos Procesados</span>
+              <div class="rounded-xl bg-sky-50 p-2.5 text-sky-600">
+                <ArrowsRightLeftIcon class="h-6 w-6" />
+              </div>
+            </div>
+            <p class="mt-3 text-2xl font-black text-slate-900">
+              {{ summaryConciliacion.totalGuias }}
+            </p>
+            <p class="mt-1 text-xs text-slate-500 font-medium">Envíos registrados en el sistema</p>
+          </div>
+
+          <div class="rounded-2xl border border-slate-200 bg-white p-5 shadow-xs">
+            <div class="flex items-center justify-between">
+              <span class="text-xs font-bold uppercase tracking-wider text-slate-500">Bultos Despachados</span>
+              <div class="rounded-xl bg-emerald-50 p-2.5 text-emerald-600">
+                <TruckIcon class="h-6 w-6" />
+              </div>
+            </div>
+            <p class="mt-3 text-2xl font-black text-slate-900">
+              {{ summaryConciliacion.totalBultos }}
+            </p>
+            <p class="mt-1 text-xs text-slate-500 font-medium">Total bultos informados</p>
+          </div>
+
+          <div class="rounded-2xl border border-slate-200 bg-white p-5 shadow-xs">
+            <div class="flex items-center justify-between">
+              <span class="text-xs font-bold uppercase tracking-wider text-slate-500">Transporte Líder</span>
+              <div class="rounded-xl bg-purple-50 p-2.5 text-purple-600">
+                <SparklesIcon class="h-6 w-6" />
+              </div>
+            </div>
+            <p class="mt-3 text-xl font-extrabold text-slate-900 truncate" :title="summaryConciliacion.transporteLider">
+              {{ summaryConciliacion.transporteLider }}
+            </p>
+            <p class="mt-1 text-xs text-slate-500 font-medium">Mayor volumen operado</p>
+          </div>
+        </div>
+
+        <!-- NAVEGACIÓN DE SUB-PESTAÑAS Y ACCIONES DE EXPORTACIÓN -->
+        <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 rounded-2xl border border-slate-200 bg-white p-4 shadow-xs">
+          <div class="flex items-center gap-2">
+            <button
+              type="button"
+              class="px-4 py-2 text-xs font-bold rounded-xl transition-all cursor-pointer"
+              :class="conciliacionSubTab === 'resumen' ? 'bg-indigo-600 text-white shadow-xs' : 'bg-slate-100 text-slate-700 hover:bg-slate-200'"
+              @click="conciliacionSubTab = 'resumen'"
+            >
+              📊 Resumen Consolidado
+            </button>
+
+            <button
+              type="button"
+              class="px-4 py-2 text-xs font-bold rounded-xl transition-all cursor-pointer"
+              :class="conciliacionSubTab === 'detalle' ? 'bg-indigo-600 text-white shadow-xs' : 'bg-slate-100 text-slate-700 hover:bg-slate-200'"
+              @click="conciliacionSubTab = 'detalle'"
+            >
+              📋 Detalle Guía por Guía ({{ guiasConciliacionFiltradasDetalle.length }})
+            </button>
+          </div>
+
+          <div class="flex items-center gap-2">
+            <button
+              type="button"
+              @click="exportarExcelConciliacionFletes"
+              class="btn-action-emerald text-xs"
+            >
+              <ArrowDownTrayIcon class="h-4 w-4" />
+              <span>Exportar Excel</span>
+            </button>
+
+            <button
+              type="button"
+              @click="generarPdfConciliacionFletes"
+              class="btn-action-rose text-xs"
+            >
+              <PrinterIcon class="h-4 w-4" />
+              <span>Exportar PDF Conciliación</span>
+            </button>
+          </div>
+        </div>
+
+        <!-- SUB-PESTAÑA 1: RESUMEN CONSOLIDADO -->
+        <div v-if="conciliacionSubTab === 'resumen'" class="space-y-6">
+          <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+            
+            <!-- TABLA 1: DESGLOSE POR CLIENTE / OBRA SOCIAL -->
+            <div class="rounded-2xl border border-slate-200 bg-white p-5 shadow-xs">
+              <div class="flex items-center justify-between mb-4">
+                <h3 class="text-sm font-extrabold text-slate-900 flex items-center gap-2">
+                  <BuildingOffice2Icon class="h-5 w-5 text-indigo-600" />
+                  <span>Desglose por Cliente / Obra Social</span>
+                </h3>
+                <span class="text-[11px] text-slate-400 font-medium">Hacé clic para filtrar detalle</span>
+              </div>
+
+              <div class="overflow-x-auto">
+                <table class="w-full text-left text-xs">
+                  <thead>
+                    <tr class="border-b border-slate-200 bg-slate-50 text-slate-500 font-bold uppercase">
+                      <th class="py-2.5 px-3">Cliente / Obra Social</th>
+                      <th class="py-2.5 px-3 text-center">Guías</th>
+                      <th class="py-2.5 px-3 text-center">Bultos</th>
+                      <th class="py-2.5 px-3 text-right">Total Gastado</th>
+                      <th class="py-2.5 px-3 text-right">% Part.</th>
+                    </tr>
+                  </thead>
+                  <tbody class="divide-y divide-slate-100 font-medium text-slate-700">
+                    <tr
+                      v-for="item in summaryConciliacion.byCliente"
+                      :key="item.nombre"
+                      @click="filtrarConciliacionPorItem(item.nombre)"
+                      class="hover:bg-indigo-50/60 cursor-pointer transition-colors"
+                    >
+                      <td class="py-3 px-3 font-bold text-slate-900">
+                        {{ item.nombre }}
+                      </td>
+                      <td class="py-3 px-3 text-center">
+                        <span class="rounded-md bg-slate-100 px-2 py-0.5 font-bold text-slate-700">{{ item.totalGuias }}</span>
+                      </td>
+                      <td class="py-3 px-3 text-center">
+                        <span class="rounded-md bg-slate-100 px-2 py-0.5 font-bold text-slate-700">{{ item.totalBultos }}</span>
+                      </td>
+                      <td class="py-3 px-3 text-right font-bold text-indigo-600">
+                        {{ formatCurrency(item.totalCost) }}
+                      </td>
+                      <td class="py-3 px-3 text-right">
+                        <div class="flex items-center justify-end gap-2">
+                          <span class="font-bold text-slate-700">{{ formatPercent(item.porcentaje) }}</span>
+                          <div class="h-2 w-16 rounded-full bg-slate-100 overflow-hidden">
+                            <div class="h-full rounded-full bg-indigo-600" :style="{ width: `${Math.min(item.porcentaje, 100)}%` }"></div>
+                          </div>
+                        </div>
+                      </td>
+                    </tr>
+                    <tr v-if="summaryConciliacion.byCliente.length === 0">
+                      <td colspan="5" class="py-6 text-center text-slate-400 italic">No hay registros para mostrar.</td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+            </div>
+
+            <!-- TABLA 2: DESGLOSE POR MÉDICO CIRUJANO / REFERENTE -->
+            <div class="rounded-2xl border border-slate-200 bg-white p-5 shadow-xs">
+              <div class="flex items-center justify-between mb-4">
+                <h3 class="text-sm font-extrabold text-slate-900 flex items-center gap-2">
+                  <UserIcon class="h-5 w-5 text-indigo-600" />
+                  <span>Desglose por Médico Cirujano / Referente</span>
+                </h3>
+                <span class="text-[11px] text-slate-400 font-medium">Hacé clic para filtrar detalle</span>
+              </div>
+
+              <div class="overflow-x-auto">
+                <table class="w-full text-left text-xs">
+                  <thead>
+                    <tr class="border-b border-slate-200 bg-slate-50 text-slate-500 font-bold uppercase">
+                      <th class="py-2.5 px-3">Médico / Referente</th>
+                      <th class="py-2.5 px-3 text-center">Guías</th>
+                      <th class="py-2.5 px-3 text-center">Bultos</th>
+                      <th class="py-2.5 px-3 text-right">Total Gastado</th>
+                      <th class="py-2.5 px-3 text-right">% Part.</th>
+                    </tr>
+                  </thead>
+                  <tbody class="divide-y divide-slate-100 font-medium text-slate-700">
+                    <tr
+                      v-for="item in summaryConciliacion.byMedico"
+                      :key="item.nombre"
+                      @click="filtrarConciliacionPorItem(item.nombre)"
+                      class="hover:bg-indigo-50/60 cursor-pointer transition-colors"
+                    >
+                      <td class="py-3 px-3 font-bold text-slate-900">
+                        {{ item.nombre }}
+                      </td>
+                      <td class="py-3 px-3 text-center">
+                        <span class="rounded-md bg-slate-100 px-2 py-0.5 font-bold text-slate-700">{{ item.totalGuias }}</span>
+                      </td>
+                      <td class="py-3 px-3 text-center">
+                        <span class="rounded-md bg-slate-100 px-2 py-0.5 font-bold text-slate-700">{{ item.totalBultos }}</span>
+                      </td>
+                      <td class="py-3 px-3 text-right font-bold text-indigo-600">
+                        {{ formatCurrency(item.totalCost) }}
+                      </td>
+                      <td class="py-3 px-3 text-right">
+                        <div class="flex items-center justify-end gap-2">
+                          <span class="font-bold text-slate-700">{{ formatPercent(item.porcentaje) }}</span>
+                          <div class="h-2 w-16 rounded-full bg-slate-100 overflow-hidden">
+                            <div class="h-full rounded-full bg-indigo-600" :style="{ width: `${Math.min(item.porcentaje, 100)}%` }"></div>
+                          </div>
+                        </div>
+                      </td>
+                    </tr>
+                    <tr v-if="summaryConciliacion.byMedico.length === 0">
+                      <td colspan="5" class="py-6 text-center text-slate-400 italic">No hay registros para mostrar.</td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+            </div>
+
+          </div>
+
+          <!-- TARJETAS SECUNDARIAS: DESGLOSE POR COURIER / TRANSPORTE -->
+          <div class="rounded-2xl border border-slate-200 bg-white p-5 shadow-xs space-y-4">
+            <h3 class="text-sm font-extrabold text-slate-900 flex items-center gap-2">
+              <TruckIcon class="h-5 w-5 text-purple-600" />
+              <span>Desglose por Empresa de Transporte / Courier</span>
+            </h3>
+
+            <div class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
+              <div
+                v-for="t in summaryConciliacion.byTransporte"
+                :key="t.nombre"
+                class="rounded-xl border border-slate-200 bg-slate-50/70 p-4 space-y-2"
+              >
+                <div class="flex items-center justify-between">
+                  <span
+                    class="px-2.5 py-0.5 text-xs font-bold rounded-full border"
+                    :class="getProveedorBadgeColor(t.nombre)"
+                  >
+                    {{ t.nombre }}
+                  </span>
+                  <span class="text-xs font-bold text-indigo-600">{{ formatPercent(t.porcentaje) }}</span>
+                </div>
+
+                <p class="text-lg font-extrabold text-slate-900">
+                  {{ formatCurrency(t.totalCost) }}
+                </p>
+
+                <div class="flex items-center justify-between text-xs text-slate-500 border-t border-slate-200/80 pt-2">
+                  <span>Guías: <strong>{{ t.totalGuias }}</strong></span>
+                  <span>Bultos: <strong>{{ t.totalBultos }}</strong></span>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- SUB-PESTAÑA 2: DETALLE GUÍA POR GUÍA -->
+        <div v-if="conciliacionSubTab === 'detalle'" class="space-y-4">
+          
+          <!-- BARRA DE FILTROS DEL DETALLE -->
+          <div class="flex flex-col md:flex-row md:items-center md:justify-between gap-3 rounded-2xl border border-slate-200 bg-white p-4 shadow-xs">
+            
+            <div class="relative flex-1">
+              <MagnifyingGlassIcon class="absolute left-3 top-2.5 h-4 w-4 text-slate-400" />
+              <input
+                v-model="conciliacionSearch"
+                type="text"
+                placeholder="Buscar por cliente, médico, paciente, número de guía o transporte..."
+                class="w-full rounded-xl border border-slate-300 pl-9 pr-4 py-2 text-xs focus:border-indigo-500 focus:outline-hidden"
+              />
+            </div>
+
+            <div class="flex items-center gap-2">
+              <span class="text-xs font-bold text-slate-600">Estado:</span>
+              <select
+                v-model="conciliacionFiltroEstado"
+                class="rounded-xl border border-slate-300 bg-white px-3 py-2 text-xs font-medium text-slate-700"
+              >
+                <option value="TODOS">TODOS LOS ESTADOS</option>
+                <option value="CONCILIADO">✅ CONCILIADO</option>
+                <option value="PENDIENTE">⏳ PENDIENTE</option>
+                <option value="EN_REVISION">🔍 EN REVISIÓN</option>
+              </select>
+            </div>
+
+            <div v-if="conciliacionFiltroClienteMedico" class="flex items-center gap-2 bg-indigo-50 border border-indigo-200 rounded-xl px-3 py-1.5 text-xs text-indigo-800">
+              <span>Filtro activo: <strong>"{{ conciliacionFiltroClienteMedico }}"</strong></span>
+              <button @click="limpiarFiltroClienteMedico" class="font-bold text-indigo-600 hover:text-indigo-900 cursor-pointer">✕</button>
+            </div>
+          </div>
+
+          <!-- TABLA DE DETALLE GUÍA POR GUÍA -->
+          <div class="rounded-2xl border border-slate-200 bg-white shadow-xs overflow-hidden">
+            <div class="overflow-x-auto">
+              <table class="w-full text-left text-xs">
+                <thead>
+                  <tr class="border-b border-slate-200 bg-slate-50 text-slate-600 font-bold uppercase tracking-wider">
+                    <th class="py-3 px-4">Fecha</th>
+                    <th class="py-3 px-4">Nº Guía / Factura</th>
+                    <th class="py-3 px-4">Transporte</th>
+                    <th class="py-3 px-4">Cliente / Obra Social</th>
+                    <th class="py-3 px-4">Médico / Referente</th>
+                    <th class="py-3 px-4">Destino</th>
+                    <th class="py-3 px-4 text-center">Bultos</th>
+                    <th class="py-3 px-4 text-right">Monto ($)</th>
+                    <th class="py-3 px-4 text-center">Estado Conciliación</th>
+                  </tr>
+                </thead>
+                <tbody class="divide-y divide-slate-100 font-medium text-slate-700">
+                  <tr
+                    v-for="g in guiasConciliacionFiltradasDetalle"
+                    :key="g.id"
+                    class="hover:bg-slate-50 transition-colors"
+                  >
+                    <td class="py-3 px-4 font-bold text-slate-800">
+                      {{ formatDate(g.fecha_gasto) }}
+                    </td>
+                    <td class="py-3 px-4 font-mono font-bold text-slate-900">
+                      {{ g.numero_factura || g.datos_adicionales?.numero_guia || 'Sin Guía' }}
+                    </td>
+                    <td class="py-3 px-4">
+                      <span
+                        class="inline-block px-2.5 py-0.5 text-xs font-bold rounded-full border"
+                        :class="getProveedorBadgeColor(g.transportes?.nombre || g.proveedores?.nombre)"
+                      >
+                        {{ normalizeProveedor(g.transportes?.nombre || g.proveedores?.nombre) }}
+                      </span>
+                    </td>
+                    <td class="py-3 px-4 font-semibold text-slate-900">
+                      {{ g.clientes?.nombre_cliente || 'Consumo Interno / Sin Cliente' }}
+                    </td>
+                    <td class="py-3 px-4 text-slate-600">
+                      {{ g.paciente_referido || g.datos_adicionales?.medico_cirujano || '-' }}
+                    </td>
+                    <td class="py-3 px-4 text-slate-500">
+                      {{ g.datos_adicionales?.destino_texto || g.localidad_destino?.nombre || g.provincias?.nombre || '-' }}
+                    </td>
+                    <td class="py-3 px-4 text-center font-bold text-slate-800">
+                      {{ g.datos_adicionales?.cantidad_bultos ?? 0 }}
+                    </td>
+                    <td class="py-3 px-4 text-right font-black text-slate-900">
+                      {{ formatCurrency(g.monto_total) }}
+                    </td>
+                    <td class="py-3 px-4 text-center">
+                      <select
+                        :value="g.datos_adicionales?.estado_conciliacion || 'PENDIENTE'"
+                        @change="e => cambiarEstadoConciliacion(g, e.target.value)"
+                        class="rounded-lg border px-2.5 py-1 text-xs font-bold transition-all cursor-pointer"
+                        :class="{
+                          'bg-emerald-50 text-emerald-800 border-emerald-300': (g.datos_adicionales?.estado_conciliacion === 'CONCILIADO'),
+                          'bg-amber-50 text-amber-800 border-amber-300': (!g.datos_adicionales?.estado_conciliacion || g.datos_adicionales?.estado_conciliacion === 'PENDIENTE'),
+                          'bg-purple-50 text-purple-800 border-purple-300': (g.datos_adicionales?.estado_conciliacion === 'EN_REVISION')
+                        }"
+                      >
+                        <option value="CONCILIADO">✅ CONCILIADO</option>
+                        <option value="PENDIENTE">⏳ PENDIENTE</option>
+                        <option value="EN_REVISION">🔍 EN REVISIÓN</option>
+                      </select>
+                    </td>
+                  </tr>
+
+                  <tr v-if="guiasConciliacionFiltradasDetalle.length === 0">
+                    <td colspan="9" class="py-8 text-center text-slate-400 italic">
+                      No se encontraron guías/remitos para los filtros seleccionados.
+                    </td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+        </div>
+      </div>
     </div>
+
+    <!-- MODAL DE REPORTE CONSOLIDADO -->
+    <ReporteConsolidadoModal
+      :is-open="isReporteConsolidadoOpen"
+      :movimientos="movimientosFiltrados"
+      @close="isReporteConsolidadoOpen = false"
+    />
 
     <!-- MODAL DE CREACIÓN / EDICIÓN DE EMPRESA DE TRANSPORTE -->
     <div v-if="isEmpresaModalOpen" class="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 p-4" @click.self="isEmpresaModalOpen = false">
