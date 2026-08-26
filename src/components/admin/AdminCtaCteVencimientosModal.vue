@@ -5,6 +5,7 @@ import jsPDF from 'jspdf';
 import 'jspdf-autotable';
 import { formatCurrency, formatDate } from '../../utils/formatters';
 import { useLogisticaPdfExportVariants } from '../../composables/useLogisticaPdfExportVariants.js';
+import { normalizeProveedor, getProveedorBadgeColor } from '../../utils/logisticaHelpers.js';
 
 const props = defineProps({
   modelValue: { type: Boolean, default: false },
@@ -78,6 +79,8 @@ const loadCtaCteExpenses = async () => {
         datos_adicionales,
         proveedor:proveedores(id, nombre),
         transporte:transportes(id, nombre),
+        provincias:provincias(id, nombre),
+        localidad_destino:localidades(id, nombre),
         perfil:perfiles!user_id(nombre_completo)
       `)
       .gte('fecha_gasto', originPeriod.value.start)
@@ -179,7 +182,8 @@ const totalBultos = computed(() => {
 const resumenPorEncomienda = computed(() => {
   const map = {};
   items.value.forEach(item => {
-    const name = item.transporte?.nombre || 'SIN ENCOMIENDA / N/A';
+    const rawName = item.transporte?.nombre || item.proveedor?.nombre || 'SIN ENCOMIENDA / N/A';
+    const name = normalizeProveedor(rawName);
     if (!map[name]) {
       map[name] = { nombre: name, cantOps: 0, bultos: 0, ctaCte: 0, pagoDirecto: 0, total: 0, zonasMap: {} };
     }
@@ -195,7 +199,7 @@ const resumenPorEncomienda = computed(() => {
     map[name].total += val;
 
     const extra = item.datos_adicionales || {};
-    const dest = (extra.destino_texto || item.localidad_destino?.nombre || item.provincia_nombre || item.provincia?.nombre || '').trim();
+    const dest = (extra.destino_texto || item.localidad_destino?.nombre || item.provincias?.nombre || '').trim();
     if (dest && !dest.toLowerCase().includes('sin destino') && !dest.toLowerCase().includes('sin provincia')) {
       map[name].zonasMap[dest] = (map[name].zonasMap[dest] || 0) + 1;
     }
@@ -217,7 +221,8 @@ const resumenPorEncomienda = computed(() => {
 const resumenPorProveedor = computed(() => {
   const map = {};
   items.value.forEach(item => {
-    const name = item.proveedor?.nombre || 'SIN PROVEEDOR';
+    const rawName = item.proveedor?.nombre || 'SIN PROVEEDOR';
+    const name = normalizeProveedor(rawName);
     if (!map[name]) {
       map[name] = { nombre: name, cantOps: 0, bultos: 0, ctaCte: 0, pagoDirecto: 0, total: 0 };
     }
@@ -464,7 +469,11 @@ watch([selectedMonth, includePagoInmediato], () => {
                   <tbody class="bg-white divide-y divide-slate-100 text-xs">
                     <tr v-for="(enc, idx) in resumenPorEncomienda" :key="enc.nombre" class="hover:bg-slate-50">
                       <td class="px-3 py-2.5 text-center font-bold text-slate-400 w-10">{{ idx + 1 }}</td>
-                      <td class="px-4 py-2.5 font-bold text-slate-800">{{ enc.nombre }}</td>
+                      <td class="px-4 py-2.5 font-bold">
+                        <span class="inline-block px-2.5 py-0.5 text-xs font-bold rounded-full border" :class="getProveedorBadgeColor(enc.nombre)">
+                          {{ enc.nombre }}
+                        </span>
+                      </td>
                       <td class="px-3 py-2.5 text-slate-600 font-medium truncate max-w-[130px]">{{ enc.zonaConcurrida }}</td>
                       <td class="px-4 py-2.5 text-center font-mono text-slate-900 font-bold">{{ enc.bultos }}</td>
                       <td class="px-4 py-2.5 text-center font-mono text-indigo-600 font-bold">{{ totalAmount > 0 ? ((enc.total / totalAmount) * 100).toFixed(1) + '%' : '0%' }}</td>
