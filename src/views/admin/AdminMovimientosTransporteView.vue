@@ -2490,6 +2490,7 @@ onMounted(fetchDatosLogistica);
               <Bar :data="chartFrecuenciaData" :options="chartAnalisisOptions" v-if="chartFrecuenciaData.labels.length > 0" />
               <p v-else class="text-center text-slate-400 py-16 text-xs">No hay datos para graficar.</p>
             </div>
+          </div>
         </div>
       </div>
     </div>
@@ -2868,7 +2869,6 @@ onMounted(fetchDatosLogistica);
 
         </div>
       </div>
-    </div>
 
     <!-- MODAL DE REPORTE CONSOLIDADO -->
     <ReporteConsolidadoModal
