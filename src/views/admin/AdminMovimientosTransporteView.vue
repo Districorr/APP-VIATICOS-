@@ -78,6 +78,30 @@ const conciliacionFiltroEstado = ref('TODOS'); // 'TODOS' | 'CONCILIADO' | 'PEND
 const conciliacionSearch = ref('');
 const conciliacionFiltroClienteMedico = ref(null);
 
+function getConciliacionClienteNombre(g) {
+  const extra = g.datos_adicionales || {};
+  return (
+    g.clientes?.nombre_cliente || 
+    g.cliente_nombre || 
+    g.cliente || 
+    extra.obra_social || 
+    extra.cliente || 
+    (g.paciente_referido ? `Pte: ${g.paciente_referido}` : 'Consumo Interno / Sin Cliente')
+  ).trim();
+}
+
+function getConciliacionMedicoNombre(g) {
+  const extra = g.datos_adicionales || {};
+  return (
+    g.paciente_referido || 
+    extra.medico_cirujano || 
+    extra.medico || 
+    extra.referente || 
+    g.medico || 
+    'General / Sin Referente'
+  ).trim();
+}
+
 const summaryConciliacion = computed(() => {
   return calculateConciliacionSummary(movimientosFiltrados.value);
 });
@@ -86,11 +110,14 @@ const guiasConciliacionFiltradasDetalle = computed(() => {
   let list = movimientosFiltrados.value;
 
   if (conciliacionFiltroClienteMedico.value) {
-    const q = conciliacionFiltroClienteMedico.value.toLowerCase();
+    const q = conciliacionFiltroClienteMedico.value.toLowerCase().trim();
     list = list.filter(g => {
-      const c = (g.clientes?.nombre_cliente || '').toLowerCase();
-      const m = (g.paciente_referido || g.datos_adicionales?.medico_cirujano || '').toLowerCase();
-      return c.includes(q) || m.includes(q);
+      const c = getConciliacionClienteNombre(g).toLowerCase();
+      const m = getConciliacionMedicoNombre(g).toLowerCase();
+      const cRaw = (g.clientes?.nombre_cliente || '').toLowerCase();
+      const mRaw = (g.paciente_referido || g.datos_adicionales?.medico_cirujano || '').toLowerCase();
+
+      return c === q || m === q || c.includes(q) || m.includes(q) || cRaw.includes(q) || mRaw.includes(q);
     });
   }
 
@@ -112,8 +139,8 @@ const guiasConciliacionFiltradasDetalle = computed(() => {
     const q = conciliacionSearch.value.toLowerCase().trim();
     list = list.filter(g => {
       const extra = g.datos_adicionales || {};
-      const c = (g.clientes?.nombre_cliente || '').toLowerCase();
-      const m = (g.paciente_referido || extra.medico_cirujano || '').toLowerCase();
+      const c = getConciliacionClienteNombre(g).toLowerCase();
+      const m = getConciliacionMedicoNombre(g).toLowerCase();
       const t = normalizeProveedor(g.transportes?.nombre || g.proveedores?.nombre || '').toLowerCase();
       const guia = (g.numero_factura || extra.numero_guia || '').toLowerCase();
       return c.includes(q) || m.includes(q) || t.includes(q) || guia.includes(q);
@@ -2825,10 +2852,10 @@ onMounted(fetchDatosLogistica);
                       </span>
                     </td>
                     <td class="py-3 px-4 font-semibold text-slate-900">
-                      {{ g.clientes?.nombre_cliente || 'Consumo Interno / Sin Cliente' }}
+                      {{ getConciliacionClienteNombre(g) }}
                     </td>
                     <td class="py-3 px-4 text-slate-600">
-                      {{ g.paciente_referido || g.datos_adicionales?.medico_cirujano || '-' }}
+                      {{ getConciliacionMedicoNombre(g) }}
                     </td>
                     <td class="py-3 px-4 text-slate-500">
                       {{ g.datos_adicionales?.destino_texto || g.localidad_destino?.nombre || g.provincias?.nombre || '-' }}
