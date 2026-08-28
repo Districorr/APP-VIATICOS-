@@ -2847,7 +2847,13 @@ onMounted(fetchDatosLogistica);
                       {{ formatDate(g.fecha_gasto) }}
                     </td>
                     <td class="py-3 px-4 font-mono font-bold text-slate-900">
-                      {{ g.numero_factura || g.datos_adicionales?.numero_guia || 'Sin Guía' }}
+                      <div>{{ g.numero_factura || g.datos_adicionales?.numero_guia || 'Sin Guía' }}</div>
+                      <span
+                        v-if="g.datos_adicionales?.origen_carga === 'carga_rapida_bultos' || g.datos_adicionales?.observacion_logistica?.includes('Bultos')"
+                        class="mt-1 inline-flex items-center gap-1 rounded-md bg-purple-100 px-2 py-0.5 text-[10px] font-extrabold text-purple-800 border border-purple-200"
+                      >
+                        📦 Carga Directa Bultos
+                      </span>
                     </td>
                     <td class="py-3 px-4">
                       <span

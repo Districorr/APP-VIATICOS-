@@ -372,6 +372,12 @@ async function handleGuardar() {
       resolverProveedorId(provToResolve)
     ]);
 
+    const obsUsuario = formState.observacion_logistica?.trim() || '';
+    const autoObsBultos = '📦 [Carga Rápida de Bultos Directos]';
+    const finalObsLogistica = obsUsuario 
+      ? (obsUsuario.includes('[Carga Rápida de Bultos Directos]') ? obsUsuario : `${autoObsBultos} ${obsUsuario}`)
+      : autoObsBultos;
+
     const payload = {
       user_id: userId,
       creado_por_id: userId,
@@ -398,7 +404,7 @@ async function handleGuardar() {
         precio_unitario_prefijado: Number(precioUnitarioPrefijado.value),
         sentido_movimiento: formState.sentido_movimiento || 'ida',
         destino_texto: formState.destino_texto?.trim() || null,
-        observacion_logistica: formState.observacion_logistica?.trim() || null,
+        observacion_logistica: finalObsLogistica,
       }
     };
 
