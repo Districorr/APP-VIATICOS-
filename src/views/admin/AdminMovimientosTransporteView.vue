@@ -1305,11 +1305,6 @@ onMounted(fetchDatosLogistica);
 
       <!-- Barra de Botones de Acción Alineados -->
       <div class="flex flex-wrap items-center gap-2.5 border-t border-slate-100 pt-4">
-        <button type="button" class="btn-action-primary !bg-purple-600 hover:!bg-purple-700 shadow-sm" @click="isReporteConsolidadoOpen = true">
-          <SparklesIcon class="h-4 w-4" />
-          <span>📦 Reporte Consolidado</span>
-        </button>
-
         <button type="button" class="btn-action-primary" @click="isNuevoMovimientoOpen = true">
           <PlusIcon class="h-4 w-4" />
           <span>+ Registrar movimiento</span>
@@ -1355,6 +1350,17 @@ onMounted(fetchDatosLogistica);
             v-if="isPdfMenuOpen"
             class="absolute right-0 z-30 mt-2 w-72 rounded-xl border border-slate-200 bg-white p-2 shadow-xl text-xs space-y-1"
           >
+            <button
+              type="button"
+              class="flex w-full items-start gap-2.5 rounded-lg p-2.5 text-left font-medium text-slate-700 hover:bg-purple-50 hover:text-purple-950 transition-colors cursor-pointer border-b border-slate-100 pb-2.5"
+              @click="isReporteConsolidadoOpen = true; isPdfMenuOpen = false;"
+            >
+              <SparklesIcon class="h-4 w-4 text-purple-600 shrink-0 mt-0.5" />
+              <div>
+                <strong class="block font-bold text-purple-900">📦 Reporte Consolidado (Estadísticas)</strong>
+                <span class="text-[11px] text-purple-600 font-normal">Métricas KPI, empresas líderes y descarga PDF</span>
+              </div>
+            </button>
             <button
               type="button"
               class="flex w-full items-start gap-2.5 rounded-lg p-2.5 text-left font-medium text-slate-700 hover:bg-rose-50 hover:text-rose-950 transition-colors cursor-pointer"
