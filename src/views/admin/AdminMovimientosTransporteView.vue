@@ -372,11 +372,20 @@ async function fetchDatosLogistica() {
     const logistica = gastosList.map(g => {
       let p = g.proveedor_id ? proveedoresMap.get(g.proveedor_id) : null;
       const pNorm = normalizeProveedor(p?.nombre);
-      p = { id: p?.id || 14, nombre: pNorm };
+      p = { id: p?.id || 'sin_proveedor', nombre: pNorm };
 
       let t = g.transporte_id ? transportesMap.get(g.transporte_id) : null;
-      const tNorm = normalizeProveedor(t?.nombre || pNorm);
-      t = { id: t?.id || p.id || 14, nombre: tNorm };
+      let tName = t?.nombre;
+      if (!tName) {
+        const isCirugia = Number(g.proveedor_id) === 14 ||
+                          (p?.nombre || '').toUpperCase().includes('CIRUGIA') ||
+                          isSurgeryDescription(g.descripcion_general);
+        if (isCirugia) {
+          tName = 'LOGISTICA CIRUGIA';
+        }
+      }
+      const tNorm = normalizeTransporte(tName);
+      t = { id: t?.id || (tNorm === 'LOGISTICA CIRUGIA' ? 14 : 'sin_encomienda'), nombre: tNorm };
 
       return {
         ...g,

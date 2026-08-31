@@ -18,9 +18,24 @@
  * @returns {string} Nombre oficial unificado del transporte
  */
 export function normalizeTransporte(name) {
-  if (!name || typeof name !== 'string') return 'LOGISTICA CIRUGIA';
+  if (!name || typeof name !== 'string') return 'SIN ENCOMIENDA';
   
   const cleanName = name.trim().toUpperCase();
+
+  const sinTransporteSynonyms = [
+    'SIN TRANSPORTE',
+    'SIN ENCOMIENDA',
+    'SIN PROVEEDOR',
+    'SIN_PROVEEDOR',
+    'N/A',
+    'SIN DATO',
+    '—',
+    '-'
+  ];
+
+  if (sinTransporteSynonyms.includes(cleanName)) {
+    return 'SIN ENCOMIENDA';
+  }
 
   const logisticaCirugiaSynonyms = [
     'EMA PACK',
@@ -32,23 +47,10 @@ export function normalizeTransporte(name) {
     'LOGISTICA CIRUGIA',
     'EMAPACK',
     'EMA-PACK',
-    'LOGISTICA DE CIRUGIAS',
-    'DISTRICORR',
-    'DISTRICORR SRL',
-    'DISTRICORR S.R.L.',
-    'DISTRICORR S.R.L',
-    'SIN PROVEEDOR',
-    'SIN_PROVEEDOR',
-    'SIN PROVEEDOR ASIGNADO',
-    'SIN PROVEEDOR/OTROS',
-    'SIN PROVEEDOR/OTRO',
-    'N/A',
-    'SIN DATO',
-    '—',
-    '-'
+    'LOGISTICA DE CIRUGIAS'
   ];
 
-  if (!cleanName || logisticaCirugiaSynonyms.includes(cleanName)) {
+  if (logisticaCirugiaSynonyms.includes(cleanName)) {
     return 'LOGISTICA CIRUGIA';
   }
 

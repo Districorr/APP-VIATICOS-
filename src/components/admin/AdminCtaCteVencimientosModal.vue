@@ -198,7 +198,15 @@ const totalBultos = computed(() => {
 const resumenPorEncomienda = computed(() => {
   const map = {};
   items.value.forEach(item => {
-    const rawName = item.transporte?.nombre || 'LOGISTICA CIRUGIA';
+    let rawName = item.transporte?.nombre;
+    if (!rawName) {
+      const isCirugia = Number(item.proveedor_id) === 14 ||
+                        (item.proveedor?.nombre || '').toUpperCase().includes('CIRUGIA') ||
+                        isSurgeryDescription(item.descripcion_general);
+      if (isCirugia) {
+        rawName = 'LOGISTICA CIRUGIA';
+      }
+    }
     const name = normalizeTransporte(rawName);
     if (!map[name]) {
       map[name] = { nombre: name, cantOps: 0, bultos: 0, ctaCte: 0, pagoDirecto: 0, total: 0, zonasMap: {} };
