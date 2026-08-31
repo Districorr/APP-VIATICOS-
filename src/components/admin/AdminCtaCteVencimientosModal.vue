@@ -5,7 +5,7 @@ import jsPDF from 'jspdf';
 import 'jspdf-autotable';
 import { formatCurrency, formatDate } from '../../utils/formatters';
 import { useLogisticaPdfExportVariants } from '../../composables/useLogisticaPdfExportVariants.js';
-import { normalizeProveedor, getProveedorBadgeColor } from '../../utils/logisticaHelpers.js';
+import { normalizeProveedor, normalizeTransporte, getProveedorBadgeColor } from '../../utils/logisticaHelpers.js';
 
 const props = defineProps({
   modelValue: { type: Boolean, default: false },
@@ -198,8 +198,8 @@ const totalBultos = computed(() => {
 const resumenPorEncomienda = computed(() => {
   const map = {};
   items.value.forEach(item => {
-    const rawName = item.transporte?.nombre || item.proveedor?.nombre || 'SIN ENCOMIENDA / N/A';
-    const name = normalizeProveedor(rawName);
+    const rawName = item.transporte?.nombre || 'LOGISTICA CIRUGIA';
+    const name = normalizeTransporte(rawName);
     if (!map[name]) {
       map[name] = { nombre: name, cantOps: 0, bultos: 0, ctaCte: 0, pagoDirecto: 0, total: 0, zonasMap: {} };
     }
@@ -237,7 +237,7 @@ const resumenPorEncomienda = computed(() => {
 const resumenPorProveedor = computed(() => {
   const map = {};
   items.value.forEach(item => {
-    const rawName = item.proveedor?.nombre || 'SIN PROVEEDOR';
+    const rawName = item.proveedor?.nombre;
     const name = normalizeProveedor(rawName);
     if (!map[name]) {
       map[name] = { nombre: name, cantOps: 0, bultos: 0, ctaCte: 0, pagoDirecto: 0, total: 0 };

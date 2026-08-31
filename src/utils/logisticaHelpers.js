@@ -10,12 +10,18 @@
  * @param {string} name 
  * @returns {string} Nombre oficial unificado
  */
-export function normalizeProveedor(name) {
+/**
+ * Unifica sinónimos de empresas de transporte, couriers o servicios de logística.
+ * Asigna 'LOGISTICA CIRUGIA' como operador logístico por defecto para envíos propios o sin transporte registrado.
+ * 
+ * @param {string} name 
+ * @returns {string} Nombre oficial unificado del transporte
+ */
+export function normalizeTransporte(name) {
   if (!name || typeof name !== 'string') return 'LOGISTICA CIRUGIA';
   
   const cleanName = name.trim().toUpperCase();
 
-  // Sinónimos de Logística Cirugía y Proveedor por defecto
   const logisticaCirugiaSynonyms = [
     'EMA PACK',
     'EMA',
@@ -46,35 +52,65 @@ export function normalizeProveedor(name) {
     return 'LOGISTICA CIRUGIA';
   }
 
-  // Andreani
-  if (cleanName.includes('ANDREANI') || cleanName.includes('ANDREANNI')) {
-    return 'ANDREANI';
+  if (cleanName.includes('ANDREANI') || cleanName.includes('ANDREANNI')) return 'ANDREANI';
+  if (cleanName === 'OCA' || cleanName.startsWith('OCA ') || cleanName.endsWith(' OCA')) return 'OCA';
+  if (cleanName.includes('CADETE') || cleanName.includes('CADETERIA') || cleanName.includes('CADETERÍA')) return 'CADETERIA';
+  if (cleanName.includes('EXPEDITO') || cleanName.includes('SAN EXPEDITO')) return 'SAN EXPEDITO';
+  if (cleanName.includes('VIA CARGO') || cleanName.includes('VIACARGO')) return 'VIA CARGO';
+  if (cleanName.includes('BUSPACK') || cleanName.includes('CHEVALLIER') || cleanName.includes('FLECHA BUS')) return cleanName;
+
+  return cleanName;
+}
+
+/**
+ * Normaliza nombres de proveedores de insumos/cirugías.
+ * Mantiene 'SIN PROVEEDOR' para registros generales o institucionales (DISTRICORR / sin proveedor),
+ * y 'LOGISTICA CIRUGIA' únicamente cuando corresponda explícitamente a ese proveedor.
+ * 
+ * @param {string} name 
+ * @returns {string} Nombre oficial unificado del proveedor
+ */
+export function normalizeProveedor(name) {
+  if (!name || typeof name !== 'string') return 'SIN PROVEEDOR';
+  
+  const cleanName = name.trim().toUpperCase();
+
+  const sinProveedorSynonyms = [
+    'DISTRICORR',
+    'DISTRICORR SRL',
+    'DISTRICORR S.R.L.',
+    'DISTRICORR S.R.L',
+    'SIN PROVEEDOR',
+    'SIN_PROVEEDOR',
+    'SIN PROVEEDOR ASIGNADO',
+    'SIN PROVEEDOR/OTROS',
+    'SIN PROVEEDOR/OTRO',
+    'N/A',
+    'SIN DATO',
+    '—',
+    '-'
+  ];
+
+  if (!cleanName || sinProveedorSynonyms.includes(cleanName)) {
+    return 'SIN PROVEEDOR';
   }
 
-  // OCA
-  if (cleanName === 'OCA' || cleanName.startsWith('OCA ') || cleanName.endsWith(' OCA')) {
-    return 'OCA';
+  const logisticaCirugiaSynonyms = [
+    'LOGISTICA CIRUGIA',
+    'LOGISTICA CIRUGIAS',
+    'LOGISTICA Y CIRUGIA',
+    'LOGISTICA DE CIRUGIAS'
+  ];
+
+  if (logisticaCirugiaSynonyms.includes(cleanName)) {
+    return 'LOGISTICA CIRUGIA';
   }
 
-  // Cadetería
-  if (cleanName.includes('CADETE') || cleanName.includes('CADETERIA') || cleanName.includes('CADETERÍA')) {
-    return 'CADETERIA';
-  }
-
-  // San Expedito
-  if (cleanName.includes('EXPEDITO') || cleanName.includes('SAN EXPEDITO')) {
-    return 'SAN EXPEDITO';
-  }
-
-  // Vía Cargo
-  if (cleanName.includes('VIA CARGO') || cleanName.includes('VIACARGO')) {
-    return 'VIA CARGO';
-  }
-
-  // Buspack / Chevallier / Urquiza / Flecha Bus
-  if (cleanName.includes('BUSPACK') || cleanName.includes('CHEVALLIER') || cleanName.includes('FLECHA BUS')) {
-    return cleanName;
-  }
+  if (cleanName.includes('ANDREANI') || cleanName.includes('ANDREANNI')) return 'ANDREANI';
+  if (cleanName === 'OCA' || cleanName.startsWith('OCA ') || cleanName.endsWith(' OCA')) return 'OCA';
+  if (cleanName.includes('CADETE') || cleanName.includes('CADETERIA') || cleanName.includes('CADETERÍA')) return 'CADETERIA';
+  if (cleanName.includes('EXPEDITO') || cleanName.includes('SAN EXPEDITO')) return 'SAN EXPEDITO';
+  if (cleanName.includes('VIA CARGO') || cleanName.includes('VIACARGO')) return 'VIA CARGO';
 
   return cleanName;
 }

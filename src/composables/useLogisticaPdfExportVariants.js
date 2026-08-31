@@ -1,7 +1,7 @@
 import jsPDF from 'jspdf';
 import 'jspdf-autotable';
 import { formatCurrency, formatDate } from '../utils/formatters';
-import { normalizeProveedor } from '../utils/logisticaHelpers';
+import { normalizeProveedor, normalizeTransporte } from '../utils/logisticaHelpers';
 
 export function useLogisticaPdfExportVariants() {
   /**
@@ -766,8 +766,8 @@ export function useLogisticaPdfExportVariants() {
     const provGroups = {};
 
     items.forEach(item => {
-      const encName = normalizeProveedor(item.transporte?.nombre || item.proveedor?.nombre);
-      const provName = normalizeProveedor(item.proveedor?.nombre || item.transporte?.nombre);
+      const encName = normalizeTransporte(item.transporte?.nombre);
+      const provName = normalizeProveedor(item.proveedor?.nombre);
       const val = Number(item.monto_total || 0);
       const bCount = getBultosCount(item);
 
