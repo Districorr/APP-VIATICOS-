@@ -336,13 +336,14 @@ function toggleExpandTransporte(key) {
 async function fetchDatosLogistica() {
   loading.value = true;
   try {
-    const [gastosRes, clientesRes, transportesRes, proveedoresRes, provinciasRes, localidadesRes] = await Promise.all([
+    const [gastosRes, clientesRes, transportesRes, proveedoresRes, provinciasRes, localidadesRes, tiposRes] = await Promise.all([
       supabase.from('gastos').select('*').order('fecha_gasto', { ascending: false }),
       supabase.from('clientes').select('id, nombre_cliente').order('nombre_cliente'),
       supabase.from('transportes').select('id, nombre, created_at').order('nombre'),
       supabase.from('proveedores').select('id, nombre').eq('activo', true).order('nombre'),
       supabase.from('provincias').select('id, nombre').order('nombre'),
       supabase.from('localidades').select('id, nombre').order('nombre'),
+      supabase.from('tipos_gasto_config').select('id, nombre_tipo_gasto'),
     ]);
 
     if (clientesRes.data) clientesOptions.value = clientesRes.data.map(c => ({ id: c.id, label: c.nombre_cliente }));
@@ -366,6 +367,7 @@ async function fetchDatosLogistica() {
     const proveedoresMap = new Map((proveedoresRes.data || []).map(p => [p.id, p]));
     const provinciasMap = new Map((provinciasRes.data || []).map(p => [p.id, p]));
     const localidadesMap = new Map((localidadesRes.data || []).map(l => [l.id, l]));
+    const tiposMap = new Map((tiposRes.data || []).map(t => [t.id, t.nombre_tipo_gasto]));
 
     const logistica = gastosList.map(g => {
       let p = g.proveedor_id ? proveedoresMap.get(g.proveedor_id) : null;
@@ -386,13 +388,24 @@ async function fetchDatosLogistica() {
       };
     }).filter(g => {
       const extra = g.datos_adicionales || {};
-      return g.transporte_id != null
-        || g.proveedor_id != null
-        || extra.modulo === 'logistica' 
-        || g.origen_gasto === 'cuenta_corriente_empresa'
-        || g.tipo_gasto_id === 22
-        || extra.origen_carga === 'encomiendas_carga_multiple'
-        || extra.cantidad_bultos != null;
+      const tipoNombre = (tiposMap.get(g.tipo_gasto_id) || '').toLowerCase();
+      
+      const isLogisticaTipo = (
+        g.transporte_id != null ||
+        g.tipo_gasto_id === 22 ||
+        extra.modulo === 'logistica' ||
+        extra.origen_carga === 'encomiendas_carga_multiple' ||
+        tipoNombre.includes('envio') ||
+        tipoNombre.includes('envío') ||
+        tipoNombre.includes('devolucion') ||
+        tipoNombre.includes('devolución') ||
+        tipoNombre.includes('logistica') ||
+        tipoNombre.includes('logística') ||
+        tipoNombre.includes('despacho') ||
+        tipoNombre.includes('encomienda')
+      );
+
+      return isLogisticaTipo;
     });
 
     gastosLogistica.value = logistica;

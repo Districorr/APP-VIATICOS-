@@ -73,12 +73,13 @@ const loadCtaCteExpenses = async () => {
       query = query.eq('origen_gasto', 'cuenta_corriente_empresa');
     }
 
-    const [gastosRes, transportesRes, proveedoresRes, provinciasRes, localidadesRes] = await Promise.all([
+    const [gastosRes, transportesRes, proveedoresRes, provinciasRes, localidadesRes, tiposRes] = await Promise.all([
       query,
       supabase.from('transportes').select('id, nombre'),
       supabase.from('proveedores').select('id, nombre'),
       supabase.from('provincias').select('id, nombre'),
-      supabase.from('localidades').select('id, nombre')
+      supabase.from('localidades').select('id, nombre'),
+      supabase.from('tipos_gasto_config').select('id, nombre_tipo_gasto')
     ]);
 
     if (gastosRes.error) throw gastosRes.error;
@@ -87,24 +88,41 @@ const loadCtaCteExpenses = async () => {
     const proveedoresList = proveedoresRes.data || [];
     const provinciasList = provinciasRes.data || [];
     const localidadesList = localidadesRes.data || [];
+    const tiposList = tiposRes.data || [];
 
     const transportesMap = new Map(transportesList.map(t => [t.id, t]));
     const proveedoresMap = new Map(proveedoresList.map(p => [p.id, p]));
     const provinciasMap = new Map(provinciasList.map(p => [p.id, p]));
     const localidadesMap = new Map(localidadesList.map(l => [l.id, l]));
+    const tiposMap = new Map(tiposList.map(t => [t.id, t.nombre_tipo_gasto]));
 
-    // Filtrar estrictamente para incluir solo gastos que correspondan al módulo de Logística / Encomiendas
+    // Filtrar estrictamente para incluir solo gastos que correspondan al módulo de Logística (Envíos | Devoluciones)
     const filteredData = data.filter(item => {
-      if (!includePagoInmediato.value) return true;
-      
       const extra = item.datos_adicionales || {};
-      return (
-        item.origen_gasto === 'cuenta_corriente_empresa' ||
+      const tipoNombre = (tiposMap.get(item.tipo_gasto_id) || '').toLowerCase();
+
+      const isLogistica = (
         item.transporte_id != null ||
         item.tipo_gasto_id === 22 ||
         extra.modulo === 'logistica' ||
-        extra.origen_carga === 'encomiendas_carga_multiple'
+        extra.origen_carga === 'encomiendas_carga_multiple' ||
+        tipoNombre.includes('envio') ||
+        tipoNombre.includes('envío') ||
+        tipoNombre.includes('devolucion') ||
+        tipoNombre.includes('devolución') ||
+        tipoNombre.includes('logistica') ||
+        tipoNombre.includes('logística') ||
+        tipoNombre.includes('despacho') ||
+        tipoNombre.includes('encomienda')
       );
+
+      if (!isLogistica) return false;
+
+      if (!includePagoInmediato.value) {
+        return item.origen_gasto === 'cuenta_corriente_empresa';
+      }
+
+      return true;
     });
 
     // Mapear y autodetectar empresas de transporte y cirugías en la descripción
