@@ -79,7 +79,14 @@ export function useLogisticaDescriptionParser(descriptionRef, clientesOptions = 
       }
     }
 
-    const hasSuggestions = !!(tipoLogistica || tipoMovimiento || paciente || cliente || proveedor);
+    // 5. Detección de N° de Guía / Factura / Remito ("FAC", "FACTURA", "GUIA", "REMITO", "RECIBO", "N°", "Nº")
+    let numeroGuiaSugerido = null;
+    const matchGuia = text.match(/(?:FAC(?:TURA)?|GU[IÍ]A|REMITO|RECIBO|N[°º])[:\s]*([A-Z0-9\-\.\/]{3,25})/i);
+    if (matchGuia && matchGuia[1]) {
+      numeroGuiaSugerido = matchGuia[1].trim();
+    }
+
+    const hasSuggestions = !!(tipoLogistica || tipoMovimiento || paciente || cliente || proveedor || numeroGuiaSugerido);
 
     return {
       tipo_logistica: tipoLogistica,
@@ -87,6 +94,7 @@ export function useLogisticaDescriptionParser(descriptionRef, clientesOptions = 
       paciente_referido: paciente,
       cliente_sugerido: cliente,
       proveedor_sugerido: proveedor,
+      numero_guia_sugerido: numeroGuiaSugerido,
       hasSuggestions,
     };
   });

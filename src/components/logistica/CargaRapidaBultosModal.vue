@@ -2,6 +2,7 @@
 import { ref, reactive, computed, watch, onMounted } from 'vue';
 import vSelect from 'vue-select';
 import 'vue-select/dist/vue-select.css';
+import DestinoSelect from '../DestinoSelect.vue';
 import { supabase } from '../../supabaseClient.js';
 import { useLogisticaDescriptionParser } from '../../composables/useLogisticaDescriptionParser.js';
 import { formatCurrency } from '../../utils/formatters.js';
@@ -129,7 +130,14 @@ function aplicarSugerencia(key, value) {
   else if (key === 'paciente_referido' && value) formState.paciente_referido = value;
   else if (key === 'cliente_sugerido' && value?.id) formState.cliente_id = value.id;
   else if (key === 'proveedor_sugerido' && value?.id) formState.proveedor_id = value.id;
+  else if (key === 'numero_guia_sugerido' && value) formState.numero_guia = value;
 }
+
+watch(() => sugerencias.value.numero_guia_sugerido, (newGuia) => {
+  if (newGuia && !formState.numero_guia) {
+    formState.numero_guia = newGuia;
+  }
+});
 
 watch(() => formState.tipo_logistica, (newTipo) => {
   if (newTipo === 'cirugia') {
@@ -709,9 +717,12 @@ watch(() => props.modelValue, (isOpen) => {
               </div>
             </template>
 
-            <div>
-              <label class="field-label">Provincia Destino</label>
-              <v-select v-model="formState.provincia_id" :options="provinciasOptions" :reduce="o => (o.code !== undefined ? o.code : o.value)" placeholder="Provincia" class="v-select-filter" @update:modelValue="handleProvinciaChange" />
+            <div class="sm:col-span-2">
+              <label class="field-label">Destino (Localidad / Provincia)</label>
+              <DestinoSelect
+                v-model:provinciaId="formState.provincia_id"
+                v-model:localidadId="formState.localidad_destino_id"
+              />
             </div>
 
             <div>

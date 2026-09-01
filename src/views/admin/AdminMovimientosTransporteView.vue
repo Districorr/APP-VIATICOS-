@@ -49,7 +49,7 @@ import {
   ExclamationTriangleIcon,
 } from '@heroicons/vue/24/outline';
 import { useLogisticaPdfExportVariants } from '../../composables/useLogisticaPdfExportVariants.js';
-import { normalizeProveedor, getProveedorBadgeColor } from '../../utils/logisticaHelpers.js';
+import { normalizeProveedor, normalizeTransporte, getProveedorBadgeColor } from '../../utils/logisticaHelpers.js';
 import { calculateConciliacionSummary, formatPercent } from '../../utils/conciliacionHelpers.js';
 import { useConciliacionPDF } from '../../composables/useConciliacionPDF.js';
 import ReporteConsolidadoModal from '../../components/admin/logistica/ReporteConsolidadoModal.vue';
@@ -375,17 +375,8 @@ async function fetchDatosLogistica() {
       p = { id: p?.id || 'sin_proveedor', nombre: pNorm };
 
       let t = g.transporte_id ? transportesMap.get(g.transporte_id) : null;
-      let tName = t?.nombre;
-      if (!tName) {
-        const isCirugia = Number(g.proveedor_id) === 14 ||
-                          (p?.nombre || '').toUpperCase().includes('CIRUGIA') ||
-                          isSurgeryDescription(g.descripcion_general);
-        if (isCirugia) {
-          tName = 'LOGISTICA CIRUGIA';
-        }
-      }
-      const tNorm = normalizeTransporte(tName);
-      t = { id: t?.id || (tNorm === 'LOGISTICA CIRUGIA' ? 14 : 'sin_encomienda'), nombre: tNorm };
+      const tNorm = normalizeTransporte(t?.nombre);
+      t = { id: t?.id || 'sin_encomienda', nombre: tNorm };
 
       return {
         ...g,

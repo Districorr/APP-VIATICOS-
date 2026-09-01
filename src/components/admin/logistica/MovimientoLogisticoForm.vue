@@ -2,6 +2,7 @@
 import { ref, reactive, watch, computed, onMounted, onUnmounted } from 'vue';
 import vSelect from 'vue-select';
 import 'vue-select/dist/vue-select.css';
+import DestinoSelect from '../../DestinoSelect.vue';
 import { supabase } from '../../../supabaseClient.js';
 import { useLogisticaDescriptionParser } from '../../../composables/useLogisticaDescriptionParser.js';
 import { normalizeProveedor } from '../../../utils/logisticaHelpers.js';
@@ -64,8 +65,16 @@ function aplicarSugerencia(key, value) {
     formState.cliente_id = value.id;
   } else if (key === 'proveedor_sugerido' && value?.id) {
     formState.proveedor_id = value.id;
+  } else if (key === 'numero_guia_sugerido' && value) {
+    formState.numero_guia = value;
   }
 }
+
+watch(() => sugerencias.value.numero_guia_sugerido, (newGuia) => {
+  if (newGuia && !formState.numero_guia) {
+    formState.numero_guia = newGuia;
+  }
+});
 
 watch(() => formState.tipo_logistica, (newTipo) => {
   if (newTipo === 'cirugia') {
@@ -727,15 +736,13 @@ watch(formState, (newVal) => {
               </select>
             </label>
 
-            <label class="field-group">
-              <span class="field-label">Provincia Destino</span>
-              <v-select v-model="formState.provincia_id" :options="provinciasOptions" :reduce="o => (o.code !== undefined ? o.code : o.value)" placeholder="Provincia" class="v-select-filter" @update:modelValue="handleProvinciaChange" />
-            </label>
-
-            <label class="field-group">
-              <span class="field-label">Localidad Destino</span>
-              <v-select v-model="formState.localidad_destino_id" :options="localidadOptionsActuales" :reduce="o => (o.code !== undefined ? o.code : o.value)" :disabled="!formState.provincia_id" placeholder="Localidad" class="v-select-filter" />
-            </label>
+            <div class="field-group md:col-span-2">
+              <span class="field-label">Destino (Localidad / Provincia)</span>
+              <DestinoSelect
+                v-model:provinciaId="formState.provincia_id"
+                v-model:localidadId="formState.localidad_destino_id"
+              />
+            </div>
 
             <label class="field-group">
               <span class="field-label">Cantidad de Bultos <span class="text-red-500">*</span></span>
@@ -912,15 +919,13 @@ watch(formState, (newVal) => {
         </select>
       </label>
 
-      <label class="field-group">
-        <span class="field-label">Provincia Destino</span>
-        <v-select v-model="formState.provincia_id" :options="provinciasOptions" :reduce="o => o.code" placeholder="Provincia" class="v-select-filter" @update:modelValue="handleProvinciaChange" />
-      </label>
-
-      <label class="field-group">
-        <span class="field-label">Localidad Destino</span>
-        <v-select v-model="formState.localidad_destino_id" :options="localidadOptionsActuales" :reduce="o => o.code" :disabled="!formState.provincia_id" placeholder="Localidad" class="v-select-filter" />
-      </label>
+      <div class="field-group md:col-span-2">
+        <span class="field-label">Destino (Localidad / Provincia)</span>
+        <DestinoSelect
+          v-model:provinciaId="formState.provincia_id"
+          v-model:localidadId="formState.localidad_destino_id"
+        />
+      </div>
 
       <label class="field-group">
         <span class="field-label">Cantidad de Bultos <span class="text-red-500">*</span></span>

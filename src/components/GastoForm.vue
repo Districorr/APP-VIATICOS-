@@ -486,6 +486,11 @@ watch([() => formState.monto_total, sinFactura], ([newMonto, noTieneFactura]) =>
   else formState.monto_iva = parseFloat(((newMonto || 0) - ((newMonto || 0) / 1.21)).toFixed(2));
 }, { immediate: true });
 watch(sinFactura, (esSinFactura) => { if (esSinFactura) formState.numero_factura = ''; });
+watch(() => formState.numero_factura, (newFactura, oldFactura) => {
+  if (newFactura && (!formState.numero_guia || formState.numero_guia === oldFactura)) {
+    formState.numero_guia = newFactura;
+  }
+});
 watch(() => [formState.numero_factura, formState.proveedor_id], ([numFactura, provId]) => {
   clearTimeout(duplicationCheckTimeout.value);
   duplicationWarning.value = '';

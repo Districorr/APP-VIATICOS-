@@ -1,7 +1,7 @@
 import jsPDF from 'jspdf';
 import 'jspdf-autotable';
 import { formatCurrency, formatDate } from '../utils/formatters';
-import { normalizeProveedor, normalizeTransporte } from '../utils/logisticaHelpers';
+import { normalizeProveedor, normalizeTransporte, getDestinoPresentation, getComentarioLimpio } from '../utils/logisticaHelpers';
 
 export function useLogisticaPdfExportVariants() {
   /**
@@ -779,18 +779,22 @@ export function useLogisticaPdfExportVariants() {
       else encGroups[encName].pagoDirecto += val;
       encGroups[encName].total += val;
 
-      const dest = getDestinoLimpio(item);
+      const dest = getDestinoPresentation(item);
       if (dest && dest !== '—') {
         encGroups[encName].zonasMap[dest] = (encGroups[encName].zonasMap[dest] || 0) + 1;
       }
 
       // Proveedores
-      if (!provGroups[provName]) provGroups[provName] = { nombre: provName, cant: 0, bultos: 0, ctaCte: 0, pagoDirecto: 0, total: 0 };
-      provGroups[provName].cant += 1;
-      provGroups[provName].bultos += bCount;
-      if (item.origen_gasto === 'cuenta_corriente_empresa') provGroups[provName].ctaCte += val;
-      else provGroups[provName].pagoDirecto += val;
-      provGroups[provName].total += val;
+      const isPropia = provName === 'SIN PROVEEDOR' || provName === 'LOGISTICA CIRUGIA';
+      const key = isPropia ? 'OPERACION_PROPIA' : provName;
+      const targetName = isPropia ? 'Operación propia — Logística de Cirugía' : provName;
+
+      if (!provGroups[key]) provGroups[key] = { nombre: targetName, isPropia, cant: 0, bultos: 0, ctaCte: 0, pagoDirecto: 0, total: 0 };
+      provGroups[key].cant += 1;
+      provGroups[key].bultos += bCount;
+      if (item.origen_gasto === 'cuenta_corriente_empresa') provGroups[key].ctaCte += val;
+      else provGroups[key].pagoDirecto += val;
+      provGroups[key].total += val;
     });
 
     const sortedEncomiendas = Object.values(encGroups).map(e => {
@@ -804,7 +808,13 @@ export function useLogisticaPdfExportVariants() {
       }
       return { ...e, zonaConcurrida: topZona };
     }).sort((a, b) => b.total - a.total);
-    const sortedProvs = Object.values(provGroups).sort((a, b) => b.total - a.total);
+
+    const operacionPropiaObj = provGroups['OPERACION_PROPIA'] || { nombre: 'Operación propia — Logística de Cirugía', isPropia: true, cant: 0, bultos: 0, ctaCte: 0, pagoDirecto: 0, total: 0 };
+    const sortedProvs = Object.values(provGroups)
+      .filter(p => !p.isPropia)
+      .sort((a, b) => b.total - a.total);
+    const subtotalProvsVal = sortedProvs.reduce((a, b) => a + b.total, 0);
+    const subtotalProvsBultos = sortedProvs.reduce((a, b) => a + b.bultos, 0);
 
     let topEncName = sortedEncomiendas.length > 0 ? sortedEncomiendas[0].nombre : '—';
     let maxEncVal = sortedEncomiendas.length > 0 ? sortedEncomiendas[0].total : 0;
@@ -954,7 +964,7 @@ export function useLogisticaPdfExportVariants() {
 
     // --- TABLA RESUMEN POR PROVEEDOR (Si modo es 'proveedor' o 'completo') ---
     if (modo === 'proveedor' || modo === 'completo') {
-      if (currentY > 160) {
+      if (currentY > 150) {
         doc.addPage();
         currentY = 15;
       }
@@ -962,11 +972,23 @@ export function useLogisticaPdfExportVariants() {
       doc.setFontSize(8.5);
       doc.setFont('helvetica', 'bold');
       doc.setTextColor(30, 41, 59);
-      doc.text(`${secNum}. RESUMEN CONSOLIDADO POR PROVEEDOR`, 10, currentY);
+      doc.text(`${secNum}. RESUMEN POR PROVEEDOR EXTERNO & OPERACIÓN PROPIA`, 10, currentY);
       secNum++;
-      currentY += 3;
+      currentY += 4;
 
-      const provHeaders = [['N°', 'Proveedor / Empresa', 'Bultos', 'Participación', 'Cuenta Corriente ($)', 'Pago Directo ($)', 'Total Consolidado ($)']];
+      // Banner de Operación Propia - Logística de Cirugía
+      doc.setFillColor(30, 41, 59);
+      doc.roundedRect(10, currentY, 277, 9, 1.5, 1.5, 'F');
+      doc.setFontSize(7.5);
+      doc.setFont('helvetica', 'bold');
+      doc.setTextColor(255, 255, 255);
+      doc.text('OPERACIÓN PROPIA — LOGÍSTICA DE CIRUGÍA (Consumos Propios y Gestión Interna)', 14, currentY + 6);
+      
+      const opStr = `${operacionPropiaObj.bultos} bultos  |  Total: ${formatCurrency(operacionPropiaObj.total)}`;
+      doc.text(opStr, 280, currentY + 6, { align: 'right' });
+      currentY += 12;
+
+      const provHeaders = [['N°', 'Proveedor / Empresa (Externo)', 'Bultos', 'Participación', 'Cuenta Corriente ($)', 'Pago Directo ($)', 'Total Consolidado ($)']];
       const provRows = sortedProvs.map((p, idx) => {
         const sharePct = totalConsolidado > 0 ? ((p.total / totalConsolidado) * 100).toFixed(1) + '%' : '0%';
         return [
@@ -980,15 +1002,35 @@ export function useLogisticaPdfExportVariants() {
         ];
       });
 
-      const provFoot = [[
-        '#',
-        `TOTAL CONSOLIDADO POR PROVEEDOR (${sortedProvs.length} proveedores)`,
-        `${totalBultos} bultos`,
-        '100.0%',
-        formatCurrency(totalCtaCte),
-        formatCurrency(totalPagoDirecto),
-        formatCurrency(totalConsolidado)
-      ]];
+      const provFoot = [
+        [
+          '#',
+          `SUBTOTAL PROVEEDORES EXTERNOS (${sortedProvs.length} empresas)`,
+          `${subtotalProvsBultos} bultos`,
+          totalConsolidado > 0 ? ((subtotalProvsVal / totalConsolidado) * 100).toFixed(1) + '%' : '0%',
+          '—',
+          '—',
+          formatCurrency(subtotalProvsVal)
+        ],
+        [
+          '#',
+          'OPERACIÓN PROPIA — LOGÍSTICA DE CIRUGÍA',
+          `${operacionPropiaObj.bultos} bultos`,
+          totalConsolidado > 0 ? ((operacionPropiaObj.total / totalConsolidado) * 100).toFixed(1) + '%' : '0%',
+          formatCurrency(operacionPropiaObj.ctaCte),
+          formatCurrency(operacionPropiaObj.pagoDirecto),
+          formatCurrency(operacionPropiaObj.total)
+        ],
+        [
+          '#',
+          'TOTAL CONSOLIDADO GENERAL',
+          `${totalBultos} bultos`,
+          '100.0%',
+          formatCurrency(totalCtaCte),
+          formatCurrency(totalPagoDirecto),
+          formatCurrency(totalConsolidado)
+        ]
+      ];
 
       doc.autoTable({
         startY: currentY,
@@ -1053,13 +1095,14 @@ export function useLogisticaPdfExportVariants() {
         return 'Pago Directo';
       };
 
-      const detailHeaders = [['N°', 'Fecha', 'Encomienda / Transporte', 'Proveedor', 'Detalle / Concepto', 'Bultos', 'N° Factura', 'Origen', 'Importe ($)']];
+      const detailHeaders = [['N°', 'Fecha', 'Encomienda', 'Proveedor', 'Destino / Localidad', 'Comentario', 'Bultos', 'N° Factura', 'Origen', 'Importe ($)']];
       const detailRows = sortedItems.map((item, index) => [
         String(index + 1),
         formatDate(item.fecha_gasto),
-        item.transporte?.nombre || 'N/A',
-        item.proveedor?.nombre || 'SIN PROVEEDOR',
-        item.descripcion_general || 'Pago de encomienda',
+        normalizeTransporte(item.transporte?.nombre),
+        normalizeProveedor(item.proveedor?.nombre),
+        getDestinoPresentation(item),
+        getComentarioLimpio(item),
         String(getBultosCount(item)),
         item.numero_factura || '—',
         getOrigenLabel(item),
@@ -1069,6 +1112,7 @@ export function useLogisticaPdfExportVariants() {
       const detailFoot = [[
         '#',
         `TOTAL DETALLE CONSOLIDADO (${cantOps} registros)`,
+        '—',
         '—',
         '—',
         '—',
@@ -1088,15 +1132,16 @@ export function useLogisticaPdfExportVariants() {
         headStyles: { fillColor: [51, 65, 85], textColor: [255, 255, 255], fontStyle: 'bold', fontSize: 7 },
         footStyles: { fillColor: [241, 245, 249], textColor: [15, 23, 42], fontStyle: 'bold', fontSize: 7, lineWidth: { top: 0.4 }, lineColor: [51, 65, 85] },
         columnStyles: {
-          0: { cellWidth: 10, halign: 'center' },
-          1: { cellWidth: 16 },
-          2: { cellWidth: 38, fontStyle: 'bold' },
-          3: { cellWidth: 38 },
-          4: { cellWidth: 77 },
-          5: { cellWidth: 16, halign: 'center', fontStyle: 'bold' },
-          6: { cellWidth: 24, halign: 'center' },
-          7: { cellWidth: 24, halign: 'center' },
-          8: { cellWidth: 34, halign: 'right', fontStyle: 'bold' }
+          0: { cellWidth: 8, halign: 'center' },
+          1: { cellWidth: 15 },
+          2: { cellWidth: 32, fontStyle: 'bold' },
+          3: { cellWidth: 32 },
+          4: { cellWidth: 32 },
+          5: { cellWidth: 55 },
+          6: { cellWidth: 14, halign: 'center', fontStyle: 'bold' },
+          7: { cellWidth: 22, halign: 'center' },
+          8: { cellWidth: 22, halign: 'center' },
+          9: { cellWidth: 30, halign: 'right', fontStyle: 'bold' }
         },
         margin: { left: 10, right: 10 }
       });

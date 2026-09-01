@@ -5,7 +5,7 @@ import jsPDF from 'jspdf';
 import 'jspdf-autotable';
 import { formatCurrency, formatDate } from '../../utils/formatters';
 import { useLogisticaPdfExportVariants } from '../../composables/useLogisticaPdfExportVariants.js';
-import { normalizeProveedor, normalizeTransporte, getProveedorBadgeColor } from '../../utils/logisticaHelpers.js';
+import { normalizeProveedor, normalizeTransporte, getDestinoPresentation, getComentarioLimpio, getProveedorBadgeColor } from '../../utils/logisticaHelpers.js';
 
 const props = defineProps({
   modelValue: { type: Boolean, default: false },
@@ -47,16 +47,6 @@ const originPeriod = computed(() => {
     vencimientoLabel: new Date(year, month - 1, 1).toLocaleDateString('es-AR', { month: 'long', year: 'numeric' }),
   };
 });
-
-const isSurgeryDescription = (desc) => {
-  if (!desc) return false;
-  const normalized = String(desc)
-    .normalize('NFD')
-    .replace(/[\u0300-\u036f]/g, '')
-    .trim()
-    .toLowerCase();
-  return normalized.includes('cirugia') || normalized.includes('cirugía');
-};
 
 const loadCtaCteExpenses = async () => {
   if (!originPeriod.value) return;
@@ -125,33 +115,17 @@ const loadCtaCteExpenses = async () => {
       return true;
     });
 
-    // Mapear y autodetectar empresas de transporte y cirugías en la descripción
+    // Mapear utilizando únicamente las fuentes de verdad relacionales de la BD
     items.value = filteredData.map(item => {
       let t = item.transporte_id ? transportesMap.get(item.transporte_id) : null;
       let p = item.proveedor_id ? proveedoresMap.get(item.proveedor_id) : null;
       let prov = item.provincia_id ? provinciasMap.get(item.provincia_id) : null;
       let loc = item.localidad_destino_id ? localidadesMap.get(item.localidad_destino_id) : null;
 
-      const desc = item.descripcion_general || '';
-      const descUpper = desc.toUpperCase();
-
-      // Si no tiene transporte en la relación pero figura en la descripción, autodetectarlo
-      if (!t && transportesList.length > 0) {
-        const matched = transportesList.find(tr => tr.nombre && tr.nombre.length > 2 && descUpper.includes(tr.nombre.toUpperCase()));
-        if (matched) {
-          t = { id: matched.id, nombre: matched.nombre };
-        }
-      }
-
-      const isSinProv = !p || p.id === 4 || (p.nombre || '').toLowerCase() === 'sin proveedor';
-      const finalProv = (isSinProv && isSurgeryDescription(desc))
-        ? { id: 14, nombre: 'LOGISTICA CIRUGIA' }
-        : p;
-
       return {
         ...item,
         transporte: t,
-        proveedor: finalProv,
+        proveedor: p,
         provincias: prov,
         localidad_destino: loc
       };
@@ -198,16 +172,7 @@ const totalBultos = computed(() => {
 const resumenPorEncomienda = computed(() => {
   const map = {};
   items.value.forEach(item => {
-    let rawName = item.transporte?.nombre;
-    if (!rawName) {
-      const isCirugia = Number(item.proveedor_id) === 14 ||
-                        (item.proveedor?.nombre || '').toUpperCase().includes('CIRUGIA') ||
-                        isSurgeryDescription(item.descripcion_general);
-      if (isCirugia) {
-        rawName = 'LOGISTICA CIRUGIA';
-      }
-    }
-    const name = normalizeTransporte(rawName);
+    const name = normalizeTransporte(item.transporte?.nombre);
     if (!map[name]) {
       map[name] = { nombre: name, cantOps: 0, bultos: 0, ctaCte: 0, pagoDirecto: 0, total: 0, zonasMap: {} };
     }
@@ -222,9 +187,8 @@ const resumenPorEncomienda = computed(() => {
     }
     map[name].total += val;
 
-    const extra = item.datos_adicionales || {};
-    const dest = (extra.destino_texto || item.localidad_destino?.nombre || item.provincias?.nombre || '').trim();
-    if (dest && !dest.toLowerCase().includes('sin destino') && !dest.toLowerCase().includes('sin provincia')) {
+    const dest = getDestinoPresentation(item);
+    if (dest && dest !== '—') {
       map[name].zonasMap[dest] = (map[name].zonasMap[dest] || 0) + 1;
     }
   });
@@ -242,27 +206,58 @@ const resumenPorEncomienda = computed(() => {
   }).sort((a, b) => b.total - a.total);
 });
 
-const resumenPorProveedor = computed(() => {
+const operacionPropiaCirugia = computed(() => {
+  const op = { nombre: 'Operación propia — Logística de Cirugía', cantOps: 0, bultos: 0, ctaCte: 0, pagoDirecto: 0, total: 0 };
+  items.value.forEach(item => {
+    const name = normalizeProveedor(item.proveedor?.nombre);
+    if (name === 'SIN PROVEEDOR' || name === 'LOGISTICA CIRUGIA') {
+      const val = Number(item.monto_total || 0);
+      const bCount = getBultosCount(item);
+      op.cantOps += 1;
+      op.bultos += bCount;
+      if (item.origen_gasto === 'cuenta_corriente_empresa') {
+        op.ctaCte += val;
+      } else {
+        op.pagoDirecto += val;
+      }
+      op.total += val;
+    }
+  });
+  return op;
+});
+
+const proveedoresExternos = computed(() => {
   const map = {};
   items.value.forEach(item => {
-    const rawName = item.proveedor?.nombre;
-    const name = normalizeProveedor(rawName);
-    if (!map[name]) {
-      map[name] = { nombre: name, cantOps: 0, bultos: 0, ctaCte: 0, pagoDirecto: 0, total: 0 };
+    const name = normalizeProveedor(item.proveedor?.nombre);
+    if (name !== 'SIN PROVEEDOR' && name !== 'LOGISTICA CIRUGIA') {
+      if (!map[name]) {
+        map[name] = { nombre: name, cantOps: 0, bultos: 0, ctaCte: 0, pagoDirecto: 0, total: 0 };
+      }
+      const val = Number(item.monto_total || 0);
+      const bCount = getBultosCount(item);
+      map[name].cantOps += 1;
+      map[name].bultos += bCount;
+      if (item.origen_gasto === 'cuenta_corriente_empresa') {
+        map[name].ctaCte += val;
+      } else {
+        map[name].pagoDirecto += val;
+      }
+      map[name].total += val;
     }
-    const val = Number(item.monto_total || 0);
-    const bCount = getBultosCount(item);
-    map[name].cantOps += 1;
-    map[name].bultos += bCount;
-    if (item.origen_gasto === 'cuenta_corriente_empresa') {
-      map[name].ctaCte += val;
-    } else {
-      map[name].pagoDirecto += val;
-    }
-    map[name].total += val;
   });
   return Object.values(map).sort((a, b) => b.total - a.total);
 });
+
+const totalProveedoresExternos = computed(() => {
+  return proveedoresExternos.value.reduce((acc, p) => acc + p.total, 0);
+});
+
+const totalBultosExternos = computed(() => {
+  return proveedoresExternos.value.reduce((acc, p) => acc + p.bultos, 0);
+});
+
+const resumenPorProveedor = computed(() => proveedoresExternos.value);
 
 const getOrigenBadge = (item) => {
   if (item.origen_gasto === 'cuenta_corriente_empresa') {
@@ -446,8 +441,8 @@ watch([selectedMonth, includePagoInmediato], () => {
                   activeViewTab === 'proveedor' ? 'bg-indigo-600 text-white shadow-xs' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
                 ]"
               >
-                <span>Por Proveedor</span>
-                <span class="px-1.5 py-0.5 rounded-full text-[10px] bg-white/20 text-white font-mono" v-if="activeViewTab === 'proveedor'">{{ resumenPorProveedor.length }}</span>
+                <span>Por Proveedor (Externos)</span>
+                <span class="px-1.5 py-0.5 rounded-full text-[10px] bg-white/20 text-white font-mono" v-if="activeViewTab === 'proveedor'">{{ proveedoresExternos.length }}</span>
               </button>
 
               <button 
@@ -521,42 +516,86 @@ watch([selectedMonth, includePagoInmediato], () => {
             </div>
 
             <!-- VISTA 2: TABLA RESUMEN POR PROVEEDOR -->
-            <div v-else-if="activeViewTab === 'proveedor'" class="rounded-xl border border-slate-200 overflow-hidden">
-              <div class="overflow-x-auto max-h-[50vh]">
-                <table class="min-w-full divide-y divide-slate-200">
-                  <thead class="bg-slate-50 sticky top-0">
-                    <tr>
-                      <th class="px-3 py-2.5 text-center text-xs font-bold uppercase tracking-wider text-slate-500 w-10">N°</th>
-                      <th class="px-4 py-2.5 text-left text-xs font-bold uppercase tracking-wider text-slate-500">Proveedor / Empresa</th>
-                      <th class="px-4 py-2.5 text-center text-xs font-bold uppercase tracking-wider text-slate-500">Bultos</th>
-                      <th class="px-4 py-2.5 text-center text-xs font-bold uppercase tracking-wider text-slate-500">% Participación</th>
-                      <th class="px-4 py-2.5 text-right text-xs font-bold uppercase tracking-wider text-slate-500">Cta. Corriente</th>
-                      <th class="px-4 py-2.5 text-right text-xs font-bold uppercase tracking-wider text-slate-500">Pago Directo</th>
-                      <th class="px-4 py-2.5 text-right text-xs font-bold uppercase tracking-wider text-slate-500">Total Consolidado</th>
-                    </tr>
-                  </thead>
-                  <tbody class="bg-white divide-y divide-slate-100 text-xs">
-                    <tr v-for="(prov, idx) in resumenPorProveedor" :key="prov.nombre" class="hover:bg-slate-50">
-                      <td class="px-3 py-2.5 text-center font-bold text-slate-400 w-10">{{ idx + 1 }}</td>
-                      <td class="px-4 py-2.5 font-bold text-slate-800">{{ prov.nombre }}</td>
-                      <td class="px-4 py-2.5 text-center font-mono text-slate-900 font-bold">{{ prov.bultos }}</td>
-                      <td class="px-4 py-2.5 text-center font-mono text-indigo-600 font-bold">{{ totalAmount > 0 ? ((prov.total / totalAmount) * 100).toFixed(1) + '%' : '0%' }}</td>
-                      <td class="px-4 py-2.5 text-right font-medium text-slate-700">{{ formatCurrency(prov.ctaCte) }}</td>
-                      <td class="px-4 py-2.5 text-right font-medium text-emerald-600">{{ formatCurrency(prov.pagoDirecto) }}</td>
-                      <td class="px-4 py-2.5 text-right font-extrabold text-slate-900">{{ formatCurrency(prov.total) }}</td>
-                    </tr>
-                  </tbody>
-                  <tfoot class="bg-slate-100 font-bold text-xs text-slate-900 border-t-2 border-slate-300">
-                    <tr>
-                      <td class="px-4 py-3" colspan="2">TOTAL CONSOLIDADO ({{ resumenPorProveedor.length }} proveedores)</td>
-                      <td class="px-4 py-3 text-center font-mono font-extrabold text-indigo-700">{{ totalBultos }} bultos</td>
-                      <td class="px-4 py-3 text-center font-mono text-indigo-700">100.0%</td>
-                      <td class="px-4 py-3 text-right text-slate-800">{{ formatCurrency(totalCtaCte) }}</td>
-                      <td class="px-4 py-3 text-right text-emerald-700">{{ formatCurrency(totalPagoDirecto) }}</td>
-                      <td class="px-4 py-3 text-right text-indigo-700 text-sm font-extrabold">{{ formatCurrency(totalAmount) }}</td>
-                    </tr>
-                  </tfoot>
-                </table>
+            <div v-else-if="activeViewTab === 'proveedor'" class="space-y-4">
+              <!-- Card KPI Operación Propia - Logística de Cirugía -->
+              <div class="p-4 rounded-xl bg-slate-900 text-white shadow-sm flex flex-wrap items-center justify-between gap-4 border border-slate-800">
+                <div class="flex items-center gap-3">
+                  <div class="p-2.5 bg-indigo-500/20 rounded-lg border border-indigo-400/30">
+                    <svg class="w-5 h-5 text-indigo-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4" />
+                    </svg>
+                  </div>
+                  <div>
+                    <span class="text-[10px] font-bold uppercase tracking-wider text-indigo-400">Operación propia — Logística de Cirugía</span>
+                    <h4 class="text-sm font-bold text-white">Gestión Interna / Consumos Propios Districorr</h4>
+                    <p class="text-[11px] text-slate-300">Movimientos logísticos de insumos internos y cuenta corriente de la empresa sin proveedor externo.</p>
+                  </div>
+                </div>
+                <div class="flex items-center gap-6 text-right">
+                  <div>
+                    <span class="text-[10px] uppercase font-bold text-slate-400">Bultos</span>
+                    <div class="text-sm font-extrabold font-mono text-white">{{ operacionPropiaCirugia.bultos }} bultos</div>
+                  </div>
+                  <div>
+                    <span class="text-[10px] uppercase font-bold text-indigo-300">Total Operación Propia</span>
+                    <div class="text-base font-extrabold font-mono text-emerald-400">{{ formatCurrency(operacionPropiaCirugia.total) }}</div>
+                  </div>
+                </div>
+              </div>
+
+              <!-- Tabla Proveedores Externos Reales -->
+              <div class="rounded-xl border border-slate-200 overflow-hidden">
+                <div class="overflow-x-auto max-h-[50vh]">
+                  <table class="min-w-full divide-y divide-slate-200">
+                    <thead class="bg-slate-50 sticky top-0">
+                      <tr>
+                        <th class="px-3 py-2.5 text-center text-xs font-bold uppercase tracking-wider text-slate-500 w-10">N°</th>
+                        <th class="px-4 py-2.5 text-left text-xs font-bold uppercase tracking-wider text-slate-500">Proveedor / Empresa (Externo)</th>
+                        <th class="px-4 py-2.5 text-center text-xs font-bold uppercase tracking-wider text-slate-500">Bultos</th>
+                        <th class="px-4 py-2.5 text-center text-xs font-bold uppercase tracking-wider text-slate-500">% Participación</th>
+                        <th class="px-4 py-2.5 text-right text-xs font-bold uppercase tracking-wider text-slate-500">Cta. Corriente</th>
+                        <th class="px-4 py-2.5 text-right text-xs font-bold uppercase tracking-wider text-slate-500">Pago Directo</th>
+                        <th class="px-4 py-2.5 text-right text-xs font-bold uppercase tracking-wider text-slate-500">Total Consolidado</th>
+                      </tr>
+                    </thead>
+                    <tbody class="bg-white divide-y divide-slate-100 text-xs">
+                      <tr v-for="(prov, idx) in proveedoresExternos" :key="prov.nombre" class="hover:bg-slate-50">
+                        <td class="px-3 py-2.5 text-center font-bold text-slate-400 w-10">{{ idx + 1 }}</td>
+                        <td class="px-4 py-2.5 font-bold text-slate-800">{{ prov.nombre }}</td>
+                        <td class="px-4 py-2.5 text-center font-mono text-slate-900 font-bold">{{ prov.bultos }}</td>
+                        <td class="px-4 py-2.5 text-center font-mono text-indigo-600 font-bold">{{ totalAmount > 0 ? ((prov.total / totalAmount) * 100).toFixed(1) + '%' : '0%' }}</td>
+                        <td class="px-4 py-2.5 text-right font-medium text-slate-700">{{ formatCurrency(prov.ctaCte) }}</td>
+                        <td class="px-4 py-2.5 text-right font-medium text-emerald-600">{{ formatCurrency(prov.pagoDirecto) }}</td>
+                        <td class="px-4 py-2.5 text-right font-extrabold text-slate-900">{{ formatCurrency(prov.total) }}</td>
+                      </tr>
+                    </tbody>
+                    <tfoot class="bg-slate-100 font-bold text-xs text-slate-900 border-t-2 border-slate-300">
+                      <tr>
+                        <td class="px-4 py-2 text-slate-600 font-semibold" colspan="2">Subtotal Proveedores Externos ({{ proveedoresExternos.length }} empresas)</td>
+                        <td class="px-4 py-2 text-center font-mono text-slate-800">{{ totalBultosExternos }} bultos</td>
+                        <td class="px-4 py-2 text-center font-mono text-slate-600">{{ totalAmount > 0 ? ((totalProveedoresExternos / totalAmount) * 100).toFixed(1) + '%' : '0%' }}</td>
+                        <td class="px-4 py-2 text-right" colspan="2"></td>
+                        <td class="px-4 py-2 text-right font-bold text-slate-800">{{ formatCurrency(totalProveedoresExternos) }}</td>
+                      </tr>
+                      <tr class="bg-indigo-50/70 border-t border-indigo-100">
+                        <td class="px-4 py-2 text-indigo-900 font-bold" colspan="2">Operación propia — Logística de Cirugía</td>
+                        <td class="px-4 py-2 text-center font-mono text-indigo-900 font-bold">{{ operacionPropiaCirugia.bultos }} bultos</td>
+                        <td class="px-4 py-2 text-center font-mono text-indigo-700 font-bold">{{ totalAmount > 0 ? ((operacionPropiaCirugia.total / totalAmount) * 100).toFixed(1) + '%' : '0%' }}</td>
+                        <td class="px-4 py-2 text-right font-medium text-slate-700">{{ formatCurrency(operacionPropiaCirugia.ctaCte) }}</td>
+                        <td class="px-4 py-2 text-right font-medium text-emerald-600">{{ formatCurrency(operacionPropiaCirugia.pagoDirecto) }}</td>
+                        <td class="px-4 py-2 text-right font-extrabold text-indigo-950">{{ formatCurrency(operacionPropiaCirugia.total) }}</td>
+                      </tr>
+                      <tr class="border-t-2 border-slate-400 bg-slate-200/80">
+                        <td class="px-4 py-2.5 text-slate-900 font-extrabold" colspan="2">TOTAL CONSOLIDADO GENERAL</td>
+                        <td class="px-4 py-2.5 text-center font-mono font-extrabold text-indigo-900">{{ totalBultos }} bultos</td>
+                        <td class="px-4 py-2.5 text-center font-mono text-indigo-900 font-bold">100.0%</td>
+                        <td class="px-4 py-2.5 text-right font-bold text-slate-800">{{ formatCurrency(totalCtaCte) }}</td>
+                        <td class="px-4 py-2.5 text-right font-bold text-emerald-800">{{ formatCurrency(totalPagoDirecto) }}</td>
+                        <td class="px-4 py-2.5 text-right text-indigo-900 text-sm font-black">{{ formatCurrency(totalAmount) }}</td>
+                      </tr>
+                    </tfoot>
+                  </table>
+                </div>
               </div>
             </div>
 
@@ -605,15 +644,27 @@ watch([selectedMonth, includePagoInmediato], () => {
               <div>
                 <h4 class="text-xs font-bold uppercase tracking-wider text-slate-700 mb-2 flex items-center gap-1.5">
                   <span class="w-2 h-2 rounded-full bg-indigo-600"></span>
-                  2. Resumen por Proveedor
+                  2. Resumen por Proveedor Externo & Operación Propia
                 </h4>
+                
+                <!-- Sub-Card Operación Propia en Vista Completa -->
+                <div class="p-3 mb-2 rounded-lg bg-slate-900 text-white flex items-center justify-between text-xs">
+                  <div>
+                    <span class="font-bold text-indigo-300">Operación propia — Logística de Cirugía:</span>
+                    <span class="ml-2 text-slate-300">Consumos y gestión interna de la empresa</span>
+                  </div>
+                  <div class="font-mono font-bold text-emerald-400">
+                    {{ operacionPropiaCirugia.bultos }} bultos | {{ formatCurrency(operacionPropiaCirugia.total) }}
+                  </div>
+                </div>
+
                 <div class="rounded-xl border border-slate-200 overflow-hidden">
                   <div class="overflow-x-auto max-h-[25vh]">
                     <table class="min-w-full divide-y divide-slate-200">
                       <thead class="bg-slate-50 sticky top-0">
                         <tr>
                           <th class="px-3 py-2 text-center text-xs font-bold uppercase tracking-wider text-slate-500 w-10">N°</th>
-                          <th class="px-4 py-2 text-left text-xs font-bold uppercase tracking-wider text-slate-500">Proveedor</th>
+                          <th class="px-4 py-2 text-left text-xs font-bold uppercase tracking-wider text-slate-500">Proveedor Externo</th>
                           <th class="px-4 py-2 text-center text-xs font-bold uppercase tracking-wider text-slate-500">Bultos</th>
                           <th class="px-4 py-2 text-center text-xs font-bold uppercase tracking-wider text-slate-500">% Participación</th>
                           <th class="px-4 py-2 text-right text-xs font-bold uppercase tracking-wider text-slate-500">Cta. Corriente</th>
@@ -622,7 +673,7 @@ watch([selectedMonth, includePagoInmediato], () => {
                         </tr>
                       </thead>
                       <tbody class="bg-white divide-y divide-slate-100 text-xs">
-                        <tr v-for="(prov, idx) in resumenPorProveedor" :key="prov.nombre" class="hover:bg-slate-50">
+                        <tr v-for="(prov, idx) in proveedoresExternos" :key="prov.nombre" class="hover:bg-slate-50">
                           <td class="px-3 py-2 text-center font-bold text-slate-400 w-10">{{ idx + 1 }}</td>
                           <td class="px-4 py-2 font-bold text-slate-800">{{ prov.nombre }}</td>
                           <td class="px-4 py-2 text-center font-mono text-slate-900 font-bold">{{ prov.bultos }}</td>
@@ -649,7 +700,8 @@ watch([selectedMonth, includePagoInmediato], () => {
                       <th class="px-4 py-2.5 text-left text-xs font-bold uppercase tracking-wider text-slate-500">Fecha</th>
                       <th class="px-4 py-2.5 text-left text-xs font-bold uppercase tracking-wider text-slate-500">Encomienda</th>
                       <th class="px-4 py-2.5 text-left text-xs font-bold uppercase tracking-wider text-slate-500">Proveedor</th>
-                      <th class="px-4 py-2.5 text-left text-xs font-bold uppercase tracking-wider text-slate-500">Detalle</th>
+                      <th class="px-4 py-2.5 text-left text-xs font-bold uppercase tracking-wider text-slate-500">Destino / Localidad</th>
+                      <th class="px-4 py-2.5 text-left text-xs font-bold uppercase tracking-wider text-slate-500">Comentario</th>
                       <th class="px-4 py-2.5 text-center text-xs font-bold uppercase tracking-wider text-slate-500">Bultos</th>
                       <th class="px-4 py-2.5 text-center text-xs font-bold uppercase tracking-wider text-slate-500">Factura</th>
                       <th class="px-4 py-2.5 text-center text-xs font-bold uppercase tracking-wider text-slate-500">Origen</th>
@@ -660,9 +712,10 @@ watch([selectedMonth, includePagoInmediato], () => {
                     <tr v-for="(item, idx) in items" :key="item.id" class="hover:bg-slate-50">
                       <td class="px-3 py-2.5 text-center font-bold text-slate-400 w-10">{{ idx + 1 }}</td>
                       <td class="px-4 py-2.5 whitespace-nowrap text-slate-600">{{ formatDate(item.fecha_gasto) }}</td>
-                      <td class="px-4 py-2.5 font-semibold text-slate-800">{{ item.transporte?.nombre || 'N/A' }}</td>
-                      <td class="px-4 py-2.5 text-slate-700">{{ item.proveedor?.nombre || 'SIN PROVEEDOR' }}</td>
-                      <td class="px-4 py-2.5 text-slate-500 truncate max-w-xs">{{ item.descripcion_general || 'Pago de encomienda' }}</td>
+                      <td class="px-4 py-2.5 font-semibold text-slate-800">{{ normalizeTransporte(item.transporte?.nombre) }}</td>
+                      <td class="px-4 py-2.5 text-slate-700">{{ normalizeProveedor(item.proveedor?.nombre) }}</td>
+                      <td class="px-4 py-2.5 text-slate-700 font-medium">{{ getDestinoPresentation(item) }}</td>
+                      <td class="px-4 py-2.5 text-slate-500 truncate max-w-xs">{{ getComentarioLimpio(item) }}</td>
                       <td class="px-4 py-2.5 text-center font-mono font-bold text-indigo-700">{{ getBultosCount(item) }}</td>
                       <td class="px-4 py-2.5 text-center text-slate-600 font-mono">{{ item.numero_factura || '—' }}</td>
                       <td class="px-4 py-2.5 text-center">

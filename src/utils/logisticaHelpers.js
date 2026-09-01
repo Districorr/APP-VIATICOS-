@@ -1,18 +1,21 @@
 /**
- * Normalización de Proveedores / Transportes de Logística
+ * Verifica si una descripción corresponde a cirugía
+ * @param {string} desc
+ * @returns {boolean}
  */
+export function isSurgeryDescription(desc) {
+  if (!desc) return false;
+  const normalized = String(desc)
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .trim()
+    .toLowerCase();
+  return normalized.includes('cirugia');
+}
 
 /**
- * Unifica sinónimos de empresas de transporte, couriers o servicios de logística.
- * Convertirá automáticamente valores como "EMA PACK", "EMA", "LOGISTICA", "CIRUGIA", 
- * "LOGISTICA CIRUGIAS" o "LOGISTICA Y CIRUGIA" a la denominación oficial unificada: "LOGISTICA CIRUGIA".
- * 
- * @param {string} name 
- * @returns {string} Nombre oficial unificado
- */
-/**
- * Unifica sinónimos de empresas de transporte, couriers o servicios de logística.
- * Asigna 'LOGISTICA CIRUGIA' como operador logístico por defecto para envíos propios o sin transporte registrado.
+ * Normalización de Empresas de Transporte / Encomiendas / Operadores Logísticos
+ * Únicamente utiliza el valor del transporte. No consulta proveedor ni descripción.
  * 
  * @param {string} name 
  * @returns {string} Nombre oficial unificado del transporte
@@ -38,15 +41,9 @@ export function normalizeTransporte(name) {
   }
 
   const logisticaCirugiaSynonyms = [
-    'EMA PACK',
-    'EMA',
-    'LOGISTICA',
-    'CIRUGIA',
+    'LOGISTICA CIRUGIA',
     'LOGISTICA CIRUGIAS',
     'LOGISTICA Y CIRUGIA',
-    'LOGISTICA CIRUGIA',
-    'EMAPACK',
-    'EMA-PACK',
     'LOGISTICA DE CIRUGIAS'
   ];
 
@@ -59,15 +56,14 @@ export function normalizeTransporte(name) {
   if (cleanName.includes('CADETE') || cleanName.includes('CADETERIA') || cleanName.includes('CADETERÍA')) return 'CADETERIA';
   if (cleanName.includes('EXPEDITO') || cleanName.includes('SAN EXPEDITO')) return 'SAN EXPEDITO';
   if (cleanName.includes('VIA CARGO') || cleanName.includes('VIACARGO')) return 'VIA CARGO';
-  if (cleanName.includes('BUSPACK') || cleanName.includes('CHEVALLIER') || cleanName.includes('FLECHA BUS')) return cleanName;
 
   return cleanName;
 }
 
 /**
  * Normaliza nombres de proveedores de insumos/cirugías.
- * Mantiene 'SIN PROVEEDOR' para registros generales o institucionales (DISTRICORR / sin proveedor),
- * y 'LOGISTICA CIRUGIA' únicamente cuando corresponda explícitamente a ese proveedor.
+ * Mantiene 'SIN PROVEEDOR' para registros nulos, vacíos, institucionales o DISTRICORR.
+ * No utiliza el transporte ni la descripción como fallback.
  * 
  * @param {string} name 
  * @returns {string} Nombre oficial unificado del proveedor
@@ -108,13 +104,147 @@ export function normalizeProveedor(name) {
     return 'LOGISTICA CIRUGIA';
   }
 
-  if (cleanName.includes('ANDREANI') || cleanName.includes('ANDREANNI')) return 'ANDREANI';
-  if (cleanName === 'OCA' || cleanName.startsWith('OCA ') || cleanName.endsWith(' OCA')) return 'OCA';
-  if (cleanName.includes('CADETE') || cleanName.includes('CADETERIA') || cleanName.includes('CADETERÍA')) return 'CADETERIA';
-  if (cleanName.includes('EXPEDITO') || cleanName.includes('SAN EXPEDITO')) return 'SAN EXPEDITO';
-  if (cleanName.includes('VIA CARGO') || cleanName.includes('VIACARGO')) return 'VIA CARGO';
-
   return cleanName;
+}
+
+/**
+ * Extracción pura de presentación de localidad desde texto descriptivo (sin modificar la BD).
+ * Reconoce ciudades conocidas presentes en descripciones históricas.
+ * 
+ * @param {string} text 
+ * @returns {string|null}
+ */
+export function extractLocalidadPresentation(text) {
+  if (!text || typeof text !== 'string') return null;
+  const upper = text.toUpperCase();
+
+  const CIDADES_CONOCIDAS = [
+    'GOYA',
+    'CURUZU CUATIA',
+    'CURUZÚ CUATIÁ',
+    'BELLA VISTA',
+    'PASO DE LOS LIBRES',
+    'CORRIENTES',
+    'MERCEDES',
+    'ITUZAINGO',
+    'ITUZAINGÓ',
+    'ESQUINA',
+    'SANTO TOME',
+    'SANTO TOMÉ',
+    'MONTE CASEROS',
+    'FORMOSA',
+    'RESISTENCIA',
+    'SALADAS',
+    'SANTA LUCIA',
+    'SANTA LUCÍA',
+    'VIRASORO',
+    'GOBERNADOR VIRASORO',
+    'SAUCE',
+    'EMPEDRADO',
+    'MBURUCUYA',
+    'MBURUCUYÁ',
+    'SAN LUIS DEL PALMAR',
+    'ITATI',
+    'ITATÍ'
+  ];
+
+  for (const ciudad of CIDADES_CONOCIDAS) {
+    if (upper.includes(ciudad)) {
+      // Normalizar nombre de ciudad limpia
+      if (ciudad.includes('CURUZU')) return 'Curuzú Cuatiá';
+      if (ciudad.includes('PASO DE LOS LIBRES')) return 'Paso de los Libres';
+      if (ciudad.includes('BELLA VISTA')) return 'Bella Vista';
+      if (ciudad.includes('SANTO TOME')) return 'Santo Tomé';
+      if (ciudad.includes('ITUZAINGO')) return 'Ituzaingó';
+      if (ciudad.includes('SANTA LUCIA')) return 'Santa Lucía';
+      if (ciudad.includes('MBURUCUYA')) return 'Mburucuyá';
+      if (ciudad.includes('ITATI')) return 'Itatí';
+      if (ciudad.includes('VIRASORO')) return 'Virasoro';
+      return ciudad.charAt(0) + ciudad.slice(1).toLowerCase();
+    }
+  }
+
+  return null;
+}
+
+/**
+ * Obtiene la localidad/destino para presentación siguiendo el orden estricto:
+ * 1. Localidad real del registro (relación localidad_destino / localidad).
+ * 2. Extracción de presentación desde la descripción/datos adicionales.
+ * 3. Provincia como fallback visual (formateada como provincia).
+ * 4. "—"
+ * 
+ * @param {object} item 
+ * @returns {string}
+ */
+export function getDestinoPresentation(item) {
+  if (!item) return '—';
+
+  // 1. Localidad real asignada en el registro
+  const locObj = item.localidad_destino || item.localidad;
+  if (locObj && locObj.nombre && locObj.nombre.trim()) {
+    return locObj.nombre.trim();
+  }
+
+  const extra = item.datos_adicionales || {};
+
+  // 2. Extracción visual desde texto de descripción o destino_texto
+  const textToScan = [
+    extra.destino_texto,
+    item.descripcion_general,
+    item.detalle,
+    extra.observacion_logistica
+  ].filter(Boolean).join(' ');
+
+  const extracted = extractLocalidadPresentation(textToScan);
+  if (extracted) {
+    return extracted;
+  }
+
+  // 3. Provincia como fallback visual explícito
+  const provObj = item.provincias || item.provincia;
+  if (provObj && provObj.nombre && provObj.nombre.trim()) {
+    const provNombre = provObj.nombre.trim();
+    if (provNombre.toLowerCase().startsWith('prov')) return provNombre;
+    return `Prov. ${provNombre}`;
+  }
+
+  return '—';
+}
+
+/**
+ * Limpia y formatea el comentario complementario de la operación.
+ * Elimina prefijos redundantes como "Operación con proveedor — XXXXX".
+ * 
+ * @param {object} item 
+ * @returns {string}
+ */
+export function getComentarioLimpio(item) {
+  if (!item) return '—';
+
+  const extra = item.datos_adicionales || {};
+  let desc = (item.descripcion_general || item.detalle || extra.observacion_logistica || '').trim();
+
+  if (!desc) {
+    const paciente = item.paciente_referido || extra.paciente_referido;
+    if (paciente) return `Paciente: ${paciente}`;
+    return '—';
+  }
+
+  // Eliminar patrones redundantes de descripciones autogeneradas
+  desc = desc
+    .replace(/^Operaci[oó]n con proveedor\s*[\s—–-]\s*[^\n–—-]+[\s—–-]?/i, '')
+    .replace(/^Despacho\s+(Env[ií]o|Recepci[oó]n)[\s—–-]?/i, '')
+    .trim();
+
+  // Si tras limpiar quedó vacío o solo con guiones
+  if (!desc || desc === '—' || desc === '-') {
+    const paciente = item.paciente_referido || extra.paciente_referido;
+    if (paciente) return `Paciente: ${paciente}`;
+    return '—';
+  }
+
+  return desc;
 }
 
 // Paleta de colores elegantes, suaves y de alto contraste
