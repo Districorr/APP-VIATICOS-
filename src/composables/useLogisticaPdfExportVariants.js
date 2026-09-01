@@ -1,7 +1,7 @@
 import jsPDF from 'jspdf';
 import 'jspdf-autotable';
 import { formatCurrency, formatDate } from '../utils/formatters';
-import { normalizeProveedor, normalizeTransporte, getDestinoPresentation, getComentarioLimpio } from '../utils/logisticaHelpers';
+import { normalizeProveedor, normalizeTransporte, getDestinoPresentation, getComentarioLimpio, getProveedorLabel, isLogisticaCirugia } from '../utils/logisticaHelpers';
 
 export function useLogisticaPdfExportVariants() {
   /**
@@ -784,17 +784,16 @@ export function useLogisticaPdfExportVariants() {
         encGroups[encName].zonasMap[dest] = (encGroups[encName].zonasMap[dest] || 0) + 1;
       }
 
-      // Proveedores
-      const isPropia = provName === 'SIN PROVEEDOR' || provName === 'LOGISTICA CIRUGIA';
-      const key = isPropia ? 'OPERACION_PROPIA' : provName;
-      const targetName = isPropia ? 'Operación propia — Logística de Cirugía' : provName;
-
-      if (!provGroups[key]) provGroups[key] = { nombre: targetName, isPropia, cant: 0, bultos: 0, ctaCte: 0, pagoDirecto: 0, total: 0 };
-      provGroups[key].cant += 1;
-      provGroups[key].bultos += bCount;
-      if (item.origen_gasto === 'cuenta_corriente_empresa') provGroups[key].ctaCte += val;
-      else provGroups[key].pagoDirecto += val;
-      provGroups[key].total += val;
+      // Proveedores (Ranking / Consolidado excluye Logística de Cirugía)
+      if (!isLogisticaCirugia(item) && provName && provName !== 'SIN PROVEEDOR') {
+        const key = provName;
+        if (!provGroups[key]) provGroups[key] = { nombre: provName, isPropia: false, cant: 0, bultos: 0, ctaCte: 0, pagoDirecto: 0, total: 0 };
+        provGroups[key].cant += 1;
+        provGroups[key].bultos += bCount;
+        if (item.origen_gasto === 'cuenta_corriente_empresa') provGroups[key].ctaCte += val;
+        else provGroups[key].pagoDirecto += val;
+        provGroups[key].total += val;
+      }
     });
 
     const sortedEncomiendas = Object.values(encGroups).map(e => {
@@ -1100,7 +1099,7 @@ export function useLogisticaPdfExportVariants() {
         String(index + 1),
         formatDate(item.fecha_gasto),
         normalizeTransporte(item.transporte?.nombre),
-        normalizeProveedor(item.proveedor?.nombre),
+        getProveedorLabel(item),
         getDestinoPresentation(item),
         getComentarioLimpio(item),
         String(getBultosCount(item)),

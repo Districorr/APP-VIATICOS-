@@ -5,7 +5,7 @@ import jsPDF from 'jspdf';
 import 'jspdf-autotable';
 import { formatCurrency, formatDate } from '../../utils/formatters';
 import { useLogisticaPdfExportVariants } from '../../composables/useLogisticaPdfExportVariants.js';
-import { normalizeProveedor, normalizeTransporte, getDestinoPresentation, getComentarioLimpio, getProveedorBadgeColor } from '../../utils/logisticaHelpers.js';
+import { normalizeProveedor, normalizeTransporte, getDestinoPresentation, getComentarioLimpio, getProveedorBadgeColor, isLogisticaCirugia, getProveedorLabel } from '../../utils/logisticaHelpers.js';
 
 const props = defineProps({
   modelValue: { type: Boolean, default: false },
@@ -207,10 +207,9 @@ const resumenPorEncomienda = computed(() => {
 });
 
 const operacionPropiaCirugia = computed(() => {
-  const op = { nombre: 'Operación propia — Logística de Cirugía', cantOps: 0, bultos: 0, ctaCte: 0, pagoDirecto: 0, total: 0 };
+  const op = { nombre: 'Logística de Cirugía', cantOps: 0, bultos: 0, ctaCte: 0, pagoDirecto: 0, total: 0 };
   items.value.forEach(item => {
-    const name = normalizeProveedor(item.proveedor?.nombre);
-    if (name === 'SIN PROVEEDOR' || name === 'LOGISTICA CIRUGIA') {
+    if (isLogisticaCirugia(item)) {
       const val = Number(item.monto_total || 0);
       const bCount = getBultosCount(item);
       op.cantOps += 1;
@@ -229,21 +228,23 @@ const operacionPropiaCirugia = computed(() => {
 const proveedoresExternos = computed(() => {
   const map = {};
   items.value.forEach(item => {
-    const name = normalizeProveedor(item.proveedor?.nombre);
-    if (name !== 'SIN PROVEEDOR' && name !== 'LOGISTICA CIRUGIA') {
-      if (!map[name]) {
-        map[name] = { nombre: name, cantOps: 0, bultos: 0, ctaCte: 0, pagoDirecto: 0, total: 0 };
+    if (!isLogisticaCirugia(item)) {
+      const name = getProveedorLabel(item);
+      if (name !== 'Sin Proveedor') {
+        if (!map[name]) {
+          map[name] = { nombre: name, cantOps: 0, bultos: 0, ctaCte: 0, pagoDirecto: 0, total: 0 };
+        }
+        const val = Number(item.monto_total || 0);
+        const bCount = getBultosCount(item);
+        map[name].cantOps += 1;
+        map[name].bultos += bCount;
+        if (item.origen_gasto === 'cuenta_corriente_empresa') {
+          map[name].ctaCte += val;
+        } else {
+          map[name].pagoDirecto += val;
+        }
+        map[name].total += val;
       }
-      const val = Number(item.monto_total || 0);
-      const bCount = getBultosCount(item);
-      map[name].cantOps += 1;
-      map[name].bultos += bCount;
-      if (item.origen_gasto === 'cuenta_corriente_empresa') {
-        map[name].ctaCte += val;
-      } else {
-        map[name].pagoDirecto += val;
-      }
-      map[name].total += val;
     }
   });
   return Object.values(map).sort((a, b) => b.total - a.total);

@@ -13,6 +13,7 @@ import { useEncomiendasDashboard } from '../../../composables/useEncomiendasDash
 import { useEncomiendasExcelExporter } from '../../../composables/useEncomiendasExcelExporter';
 import { useEncomiendasPdfExporter } from '../../../composables/useEncomiendasPdfExporter';
 import { formatCurrency, formatDate } from '../../../utils/formatters';
+import { getProveedorLabel, isLogisticaCirugia } from '../../../utils/logisticaHelpers';
 
 const props = defineProps({
   perfilesOptions: { type: Array, default: () => [] },
@@ -1083,8 +1084,8 @@ onMounted(async () => {
                       <svg class="h-4 w-4 transform transition-transform text-slate-400" :class="{'rotate-90': expandedRows[getRowKey(item)]}" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7" />
                       </svg>
-                      <span :class="textToneClass(getValue(item, ['proveedor_nombre', 'proveedor', 'nombre_proveedor'], 'Sin proveedor'))">
-                        {{ getValue(item, ['proveedor_nombre', 'proveedor', 'nombre_proveedor'], 'Sin proveedor') }}
+                      <span :class="textToneClass(getProveedorLabel(item))">
+                        {{ getProveedorLabel(item) }}
                       </span>
                     </div>
                   </td>

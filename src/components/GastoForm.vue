@@ -732,7 +732,7 @@ async function handleSubmit() {
       tipo_gasto_id: formState.tipo_gasto_id,
       cliente_id: isLogisticaType.value ? (isCirugia ? finalClienteId : null) : finalClienteId,
       transporte_id: finalTransporteId,
-      proveedor_id: isLogisticaType.value ? (isCirugia ? (finalProveedorId || 14) : finalProveedorId) : finalProveedorId,
+      proveedor_id: isLogisticaType.value ? (isCirugia ? null : (finalProveedorId || null)) : (finalProveedorId || null),
       
       provincia_id: provinciaIdFinalGasto,
       provincia: nombreProvincia,

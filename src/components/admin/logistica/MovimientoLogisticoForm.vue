@@ -302,7 +302,7 @@ function resetForm() {
   formState.destino_texto = '';
   formState.cliente_id = null;
   formState.paciente_referido = '';
-  formState.proveedor_id = formState.tipo_logistica === 'cirugia' ? 14 : null;
+  formState.proveedor_id = null;
   formState.cantidad_bultos = 1;
   formState.sentido_movimiento = 'ida';
   formState.tipo_movimiento_encomienda = 'Envío';
@@ -420,7 +420,7 @@ async function handleGuardar() {
       monto_total: monto,
       cliente_id: isCirugia ? finalClienteId : null,
       transporte_id: finalTransporteId,
-      proveedor_id: finalProveedorId || (isCirugia ? 14 : null),
+      proveedor_id: isCirugia ? null : (finalProveedorId || null),
       provincia_id: formState.provincia_id || null,
       localidad_destino_id: formState.localidad_destino_id || null,
       numero_factura: formState.numero_guia?.trim() || null,

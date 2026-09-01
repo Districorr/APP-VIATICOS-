@@ -61,6 +61,60 @@ export function normalizeTransporte(name) {
 }
 
 /**
+ * Determina si un registro corresponde a Logística de Cirugía.
+ * Fuente de verdad principal: datos_adicionales.tipo_logistica === 'cirugia'.
+ * Compatibilidad histórica: proveedor_id === 14 o nombre de proveedor histórico 'LOGISTICA CIRUGIA'.
+ * 
+ * @param {Object} item 
+ * @returns {boolean}
+ */
+export function isLogisticaCirugia(item) {
+  if (!item) return false;
+  const extra = item.datos_adicionales || {};
+  
+  if (extra.tipo_logistica === 'cirugia') return true;
+  if (extra.tipo_logistica === 'proveedor' || extra.tipo_logistica === 'proveedor_otros') return false;
+
+  if (Number(item.proveedor_id) === 14) return true;
+
+  const provName = (item.proveedores?.nombre || item.proveedor_nombre || item.proveedor || '').toUpperCase().trim();
+  if (provName === 'LOGISTICA CIRUGIA' || provName === 'LOGISTICA CIRUGIAS' || provName === 'LOGISTICA DE CIRUGIAS') {
+    return true;
+  }
+
+  return false;
+}
+
+/**
+ * Retorna la etiqueta visual oficial del proveedor o 'Logística de Cirugía'.
+ * 
+ * @param {Object|string} itemOrName 
+ * @returns {string}
+ */
+export function getProveedorLabel(itemOrName) {
+  if (!itemOrName) return 'Sin Proveedor';
+  
+  if (typeof itemOrName === 'object') {
+    if (isLogisticaCirugia(itemOrName)) {
+      return 'Logística de Cirugía';
+    }
+    const name = itemOrName.proveedores?.nombre || itemOrName.proveedor_nombre || itemOrName.proveedor || '';
+    if (!name || name === 'SIN PROVEEDOR' || name === 'Sin proveedor') return 'Sin Proveedor';
+    return normalizeProveedor(name);
+  }
+
+  const strName = String(itemOrName).trim();
+  const upper = strName.toUpperCase();
+  if (upper === 'LOGISTICA CIRUGIA' || upper === 'LOGISTICA CIRUGIAS' || upper === '14') {
+    return 'Logística de Cirugía';
+  }
+  if (!strName || upper === 'SIN PROVEEDOR' || upper === 'SIN_PROVEEDOR') {
+    return 'Sin Proveedor';
+  }
+  return normalizeProveedor(strName);
+}
+
+/**
  * Normaliza nombres de proveedores de insumos/cirugías.
  * Mantiene 'SIN PROVEEDOR' para registros nulos, vacíos, institucionales o DISTRICORR.
  * No utiliza el transporte ni la descripción como fallback.
@@ -101,7 +155,7 @@ export function normalizeProveedor(name) {
   ];
 
   if (logisticaCirugiaSynonyms.includes(cleanName)) {
-    return 'LOGISTICA CIRUGIA';
+    return 'Logística de Cirugía';
   }
 
   return cleanName;

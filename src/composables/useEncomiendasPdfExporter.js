@@ -1,6 +1,7 @@
 import jsPDF from 'jspdf';
 import 'jspdf-autotable';
 import { formatCurrency, formatDate } from '../utils/formatters';
+import { getProveedorLabel, isLogisticaCirugia } from '../utils/logisticaHelpers';
 
 const numberValue = (value) => {
   const parsed = Number(value);
@@ -226,7 +227,7 @@ const buildControlRows = (dashboard, weeks, totals) => {
   const rows = (dashboard?.control_semanal_por_proveedor || []).map((item) => {
     const percent = item.porcentaje_consumido;
     return [
-      getValue(item, ['proveedor_nombre', 'proveedor', 'nombre_proveedor'], 'Sin proveedor'),
+      getProveedorLabel(item),
       ...weeks.map((week) => formatCurrency(weekAmount(item, week))),
       formatCurrency(item.gasto_total_periodo),
       numberValue(item.despachos_periodo).toLocaleString('es-AR'),
@@ -267,7 +268,7 @@ const summarizeOperations = (dashboard) => {
     const amount = numberValue(getValue(item, ['monto', 'monto_total', 'total'], 0));
     const movement = movementLabel(getValue(item, ['tipo_movimiento', 'tipo_movimiento_encomienda']));
     const movementKey = movement === 'Recepciones' ? 'Recepciones' : 'Envíos';
-    const provider = getValue(item, ['proveedor', 'proveedor_nombre', 'nombre_proveedor'], 'Sin proveedor');
+    const provider = getProveedorLabel(item);
 
     movements[movementKey].count += 1;
     movements[movementKey].amount += amount;

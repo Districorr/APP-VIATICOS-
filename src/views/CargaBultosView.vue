@@ -398,7 +398,7 @@ async function handleGuardar() {
       monto_total: monto,
       cliente_id: isCirugia ? finalClienteId : null,
       transporte_id: finalTransporteId,
-      proveedor_id: finalProveedorId || (isCirugia ? 14 : null),
+      proveedor_id: isCirugia ? null : (finalProveedorId || null),
       provincia_id: formState.provincia_id || null,
       localidad_destino_id: formState.localidad_destino_id || null,
       numero_factura: formState.numero_guia?.trim() || null,

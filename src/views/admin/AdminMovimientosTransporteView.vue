@@ -11,6 +11,7 @@ import { Chart as ChartJS, Title, Tooltip as ChartTooltip, Legend, BarElement, C
 import { supabase } from '../../supabaseClient.js';
 import { formatCurrency, formatDate } from '../../utils/formatters.js';
 import { useExcelExporter } from '../../composables/useExcelExporter.js';
+import { getProveedorLabel, isLogisticaCirugia } from '../../utils/logisticaHelpers.js';
 
 // Componentes y Modales
 import MovimientoLogisticoForm from '../../components/admin/logistica/MovimientoLogisticoForm.vue';
@@ -350,11 +351,8 @@ async function fetchDatosLogistica() {
     if (transportesRes.data) transportesOptions.value = transportesRes.data.map(t => ({ id: t.id, code: t.id, value: t.id, label: t.nombre, nombre: t.nombre, tarifa_por_bulto: t.tarifa_por_bulto || 0, created_at: t.created_at }));
     if (proveedoresRes.data) {
       const provs = proveedoresRes.data.map(p => ({ id: p.id, label: p.nombre }));
-      if (!provs.some(p => Number(p.id) === 14)) {
-        provs.unshift({ id: 14, label: 'LOGISTICA CIRUGIA' });
-      }
-      if (!provs.some(p => (p.label || '').toLowerCase().trim() === 'sin proveedor')) {
-        provs.push({ id: 'sin_proveedor', label: 'SIN PROVEEDOR' });
+      if (!provs.some(p => String(p.id) === 'logistica_cirugia')) {
+        provs.unshift({ id: 'logistica_cirugia', label: 'Logística de Cirugía' });
       }
       proveedoresOptions.value = provs;
     }
@@ -788,22 +786,12 @@ const movimientosFiltrados = computed(() => {
     const matchesSentido = !filters.sentido || extra.sentido_movimiento === filters.sentido;
     const matchesCliente = !filters.clienteId || String(g.cliente_id) === String(filters.clienteId);
     const matchesPaciente = !filters.paciente || pacienteName.toLowerCase().includes(filters.paciente.toLowerCase().trim());
-    const LOGISTICA_CIRUGIA_ID = 14;
-    const isCirugiaFilter = Number(filters.proveedorId) === LOGISTICA_CIRUGIA_ID;
-
-    const selectedProvOpt = proveedoresOptions.value.find(p => String(p.id) === String(filters.proveedorId));
-    const selectedProvName = (selectedProvOpt?.label || '').toLowerCase().trim();
-    const isSinProveedorFilter = selectedProvName === 'sin proveedor' || String(filters.proveedorId) === 'sin_proveedor';
+    const isCirugiaFilter = String(filters.proveedorId) === 'logistica_cirugia' || Number(filters.proveedorId) === 14;
 
     let matchesProveedor = true;
     if (filters.proveedorId) {
       if (isCirugiaFilter) {
-        matchesProveedor = Number(g.proveedor_id) === LOGISTICA_CIRUGIA_ID ||
-          (!g.proveedor_id && (extra.tipo_logistica === 'cirugia' || (g.descripcion_general || '').toLowerCase().includes('cirug')));
-      } else if (isSinProveedorFilter) {
-        matchesProveedor = !g.proveedor_id ||
-          String(g.proveedor_id) === String(filters.proveedorId) ||
-          (g.proveedores?.nombre || '').toLowerCase().trim() === 'sin proveedor';
+        matchesProveedor = isLogisticaCirugia(g);
       } else {
         matchesProveedor = String(g.proveedor_id) === String(filters.proveedorId);
       }
@@ -1758,8 +1746,8 @@ onMounted(fetchDatosLogistica);
               </div>
 
               <div class="flex justify-between text-slate-600 pt-1 border-t border-slate-100">
-                <span>Proveedor:</span>
-                <strong class="text-slate-800">{{ g.proveedores?.nombre || 'Sin proveedor' }}</strong>
+                <span>Proveedor / Tipo:</span>
+                <strong class="text-slate-800">{{ getProveedorLabel(g) }}</strong>
               </div>
 
               <div class="flex justify-between text-slate-600">
@@ -2047,7 +2035,7 @@ onMounted(fetchDatosLogistica);
             <tbody class="divide-y divide-slate-100">
               <tr v-for="g in movimientosTransporteExpandido" :key="g.id" class="hover:bg-slate-50">
                 <td class="whitespace-nowrap px-4 py-2.5 text-slate-600">{{ formatDate(g.fecha_gasto) }}</td>
-                <td class="px-4 py-2.5 text-slate-700">{{ g.proveedores?.nombre || 'Sin proveedor' }}</td>
+                <td class="px-4 py-2.5 text-slate-700">{{ getProveedorLabel(g) }}</td>
                 <td class="px-4 py-2.5 font-semibold text-slate-900">{{ getClientePacienteDisplay(g).principal }}</td>
                 <td class="px-4 py-2.5 text-slate-600">{{ g.datos_adicionales?.destino_texto || g.localidad_destino?.nombre || g.provincias?.nombre || g.provincia?.nombre || 'Sin destino' }}</td>
                 <td class="px-4 py-2.5 text-center font-bold text-indigo-700">
@@ -3042,7 +3030,7 @@ onMounted(fetchDatosLogistica);
           <div class="rounded-2xl border border-slate-200/80 bg-slate-50/70 p-3.5 space-y-1 sm:col-span-2">
             <span class="text-[10px] font-extrabold uppercase tracking-wider text-slate-400 block">🏢 Proveedor Vinculado</span>
             <span class="text-sm font-bold text-slate-900 block">
-              {{ gastoSeleccionadoDetalle.proveedores?.nombre || 'Sin proveedor' }}
+              {{ getProveedorLabel(gastoSeleccionadoDetalle) }}
             </span>
           </div>
 

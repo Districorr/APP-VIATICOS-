@@ -1,5 +1,6 @@
 import * as XLSX from 'xlsx';
 import { formatDate } from '../utils/formatters';
+import { getProveedorLabel } from '../utils/logisticaHelpers';
 
 const numberValue = (value) => {
   const parsed = Number(value);
@@ -162,7 +163,7 @@ const buildProveedorSheet = (dashboard, context = {}) => {
   const weekHeaders = weeks.map((week) => `Semana ${week.semana_numero}\n${formatDate(week.semana_inicio, { day: '2-digit', month: '2-digit' })}-${formatDate(week.semana_fin, { day: '2-digit', month: '2-digit' })}`);
   const headers = ['Proveedor', ...weekHeaders, 'Total mes', 'Despachos', 'Promedio', 'Cupo mensual', 'Disponible / Diferencia', '% consumido', 'Estado'];
   const rowsProveedor = proveedores.map((item) => [
-    getValue(item, ['proveedor_nombre', 'proveedor', 'nombre_proveedor'], 'Sin proveedor'),
+    getProveedorLabel(item),
     ...weeks.map((week) => weekAmount(item, week)),
     numberValue(item.gasto_total_periodo),
     numberValue(item.despachos_periodo),
@@ -230,7 +231,7 @@ const buildDetalleSheet = (dashboard) => {
     ...detailRows(dashboard).map((item) => [
       formatDate(getValue(item, ['fecha', 'fecha_gasto', 'created_at'])),
       getValue(item, ['responsable', 'responsable_nombre', 'nombre_responsable']),
-      getValue(item, ['proveedor', 'proveedor_nombre', 'nombre_proveedor']),
+      getProveedorLabel(item),
       getValue(item, ['transporte', 'transporte_nombre', 'operador_logistico', 'nombre_transporte']),
       getValue(item, ['tipo_movimiento', 'tipo_movimiento_encomienda']),
       modalidadLabel(getModalidadValue(item)),

@@ -430,11 +430,11 @@ async function saveGasto() {
   saving.value = true;
   try {
     const isCirugia = formState.tipo_logistica === 'cirugia';
-    const provToResolve = isCirugia ? (formState.proveedor_id || 14) : formState.proveedor_id;
+    const provToResolve = isCirugia ? null : formState.proveedor_id;
     const [finalClienteId, finalTransporteId, finalProveedorId] = await Promise.all([
       isCirugia ? resolverClienteId(formState.cliente_id) : Promise.resolve(null),
       resolverTransporteId(formState.transporte_id),
-      resolverProveedorId(provToResolve)
+      provToResolve ? resolverProveedorId(provToResolve) : Promise.resolve(null)
     ]);
 
     const datosAdicionales = {
@@ -454,7 +454,7 @@ async function saveGasto() {
       descripcion_general: formState.descripcion_general?.trim() || `Despacho ${formState.tipo_movimiento_encomienda}`,
       monto_total: Number(formState.monto_total),
       transporte_id: finalTransporteId || null,
-      proveedor_id: finalProveedorId || (isCirugia ? 14 : null),
+      proveedor_id: isCirugia ? null : (finalProveedorId || null),
       cliente_id: formState.tipo_logistica === 'cirugia' ? (finalClienteId || null) : null,
       provincia_id: formState.provincia_id || null,
       localidad_destino_id: formState.localidad_destino_id || null,

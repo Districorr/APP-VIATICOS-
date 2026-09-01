@@ -1,5 +1,6 @@
 import { computed, reactive, ref } from 'vue';
 import { supabase } from '../supabaseClient';
+import { getProveedorLabel, isLogisticaCirugia } from '../utils/logisticaHelpers';
 
 const todayIso = () => new Date().toISOString().split('T')[0];
 
@@ -173,61 +174,19 @@ export function useEncomiendasDashboard() {
 
     if (normalized.detalle && normalized.detalle.length > 0) {
       normalized.detalle = normalized.detalle.map(item => {
-        const isSinProv = item.proveedor_id === null || item.proveedor_id === undefined || item.proveedor_id === sinProveedorId.value;
-        const desc = item.descripcion || item.descripcion_general || item.detalle || '';
-        if (isSinProv && isSurgeryDescription(desc)) {
-          const montoVal = getVal(item, ['monto', 'monto_total', 'total']);
-
-          // Sumar al proveedor LOGISTICA CIRUGIA
-          if (rowCirugia) {
-            rowCirugia.gasto_total += montoVal;
-            rowCirugia.despachos_periodo += 1;
-          }
-          if (weeklyCirugia) {
-            weeklyCirugia.gasto_total_periodo += montoVal;
-            weeklyCirugia.despachos_periodo += 1;
-          }
-
-          // Restar del proveedor SIN PROVEEDOR
-          let rowSinProv = (normalized.por_proveedor || []).find(r => r.proveedor_id === null || r.proveedor_id === undefined || r.proveedor_id === sinProveedorId.value);
-          if (rowSinProv) {
-            rowSinProv.gasto_total = Math.max(0, rowSinProv.gasto_total - montoVal);
-            rowSinProv.despachos_periodo = Math.max(0, rowSinProv.despachos_periodo - 1);
-          }
-          let weeklySinProv = (normalized.control_semanal_por_proveedor || []).find(r => r.proveedor_id === null || r.proveedor_id === undefined || r.proveedor_id === sinProveedorId.value);
-          if (weeklySinProv) {
-            weeklySinProv.gasto_total_periodo = Math.max(0, weeklySinProv.gasto_total_periodo - montoVal);
-            weeklySinProv.despachos_periodo = Math.max(0, weeklySinProv.despachos_periodo - 1);
-          }
-
-          // Buscar semana y transferir
-          const fecha = item.fecha_gasto ? String(item.fecha_gasto).slice(0, 10) : '';
-          if (fecha) {
-            const transferWeek = (weeklyRow, add) => {
-              if (!weeklyRow) return;
-              const week = (weeklyRow.semanas || []).find(w => fecha >= w.semana_inicio && fecha <= w.semana_fin);
-              if (week) {
-                if (add) {
-                  week.gasto_total = (week.gasto_total || 0) + montoVal;
-                  week.despachos = (week.despachos || 0) + 1;
-                } else {
-                  week.gasto_total = Math.max(0, (week.gasto_total || 0) - montoVal);
-                  week.despachos = Math.max(0, (week.despachos || 0) - 1);
-                }
-              }
-            };
-            transferWeek(weeklyCirugia, true);
-            transferWeek(weeklySinProv, false);
-          }
-
-          return {
-            ...item,
-            proveedor_id: LOGISTICA_CIRUGIA_ID,
-            proveedor_nombre: 'LOGISTICA CIRUGIA'
-          };
-        }
-        return item;
+        return {
+          ...item,
+          proveedor_nombre: getProveedorLabel(item)
+        };
       });
+    }
+
+    // Excluir Logística de Cirugía y registros sin proveedor de los consolidados por proveedor externo
+    if (normalized.por_proveedor) {
+      normalized.por_proveedor = normalized.por_proveedor.filter(r => !isLogisticaCirugia(r) && r.proveedor_id !== null && r.proveedor_nombre !== 'SIN PROVEEDOR');
+    }
+    if (normalized.control_semanal_por_proveedor) {
+      normalized.control_semanal_por_proveedor = normalized.control_semanal_por_proveedor.filter(r => !isLogisticaCirugia(r) && r.proveedor_id !== null && r.proveedor_nombre !== 'SIN PROVEEDOR');
     }
 
     // Recalcular métricas de promedios y cupos
