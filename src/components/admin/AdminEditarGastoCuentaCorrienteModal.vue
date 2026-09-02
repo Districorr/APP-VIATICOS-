@@ -5,6 +5,7 @@ import 'vue-select/dist/vue-select.css';
 
 import { supabase } from '../../supabaseClient';
 import { useLogisticaDescriptionParser } from '../../composables/useLogisticaDescriptionParser';
+import DestinoSelect from '../DestinoSelect.vue';
 
 const props = defineProps({
   modelValue: { type: Boolean, default: false },
@@ -314,12 +315,12 @@ function hydrateForm(gasto) {
     const cliId = extractEntityId(gasto?.cliente_id ?? getRowValue(['cliente_id']));
     const pacRef = gasto?.paciente_referido ?? getRowValue(['paciente_referido', 'paciente', 'nombre_paciente']);
     
-    if (provId === 14 || cliId || pacRef) {
+    if (cliId || (pacRef && String(pacRef).trim() !== '')) {
       tipoLogistica = 'cirugia';
-    } else if (provId && provId !== 14) {
+    } else if (provId && Number(provId) !== 14) {
       tipoLogistica = 'proveedor_otros';
     } else {
-      tipoLogistica = 'cirugia';
+      tipoLogistica = 'proveedor_otros';
     }
   }
 
@@ -390,15 +391,17 @@ function validateForm() {
     return false;
   }
   if (formState.tipo_logistica === 'cirugia') {
-    if (!extractEntityId(formState.cliente_id)) {
-      errorMessage.value = 'Para Logística de Cirugía debe seleccionar un Cliente / Obra Social.';
-      return false;
-    }
-    if (!formState.paciente_referido?.trim()) {
-      errorMessage.value = 'Para Logística de Cirugía debe ingresar el Paciente Referido.';
-      return false;
-    }
-    if (!formState.proveedor_id) {
+    const hasCliente = Boolean(extractEntityId(formState.cliente_id));
+    const hasPaciente = Boolean(formState.paciente_referido?.trim());
+    
+    if (!hasCliente || !hasPaciente) {
+      if (formState.proveedor_id && formState.proveedor_id !== 14) {
+        formState.tipo_logistica = 'proveedor_otros';
+      } else {
+        errorMessage.value = 'Para Logística de Cirugía debe seleccionar un Cliente y completar el Paciente Referido (o seleccionar el modo Proveedor / Otros).';
+        return false;
+      }
+    } else if (!formState.proveedor_id) {
       formState.proveedor_id = 14;
     }
   } else {
@@ -430,7 +433,7 @@ async function saveGasto() {
   saving.value = true;
   try {
     const isCirugia = formState.tipo_logistica === 'cirugia';
-    const provToResolve = isCirugia ? null : formState.proveedor_id;
+    const provToResolve = isCirugia ? 14 : formState.proveedor_id;
     const [finalClienteId, finalTransporteId, finalProveedorId] = await Promise.all([
       isCirugia ? resolverClienteId(formState.cliente_id) : Promise.resolve(null),
       resolverTransporteId(formState.transporte_id),
@@ -444,6 +447,9 @@ async function saveGasto() {
       tipo_movimiento_encomienda: formState.tipo_movimiento_encomienda || null,
       cantidad_bultos: Number(formState.cantidad_bultos) || 1,
       sentido_movimiento: formState.sentido_movimiento || null,
+      provincia_id: formState.provincia_id || null,
+      provincia_destino_id: formState.provincia_id || null,
+      localidad_destino_id: formState.localidad_destino_id || null,
       destino_texto: formState.destino_texto?.trim() || null,
       observacion_logistica: formState.observacion_logistica?.trim() || null,
       numero_guia: formState.numero_guia?.trim() || null,
@@ -454,12 +460,12 @@ async function saveGasto() {
       descripcion_general: formState.descripcion_general?.trim() || `Despacho ${formState.tipo_movimiento_encomienda}`,
       monto_total: Number(formState.monto_total),
       transporte_id: finalTransporteId || null,
-      proveedor_id: isCirugia ? null : (finalProveedorId || null),
-      cliente_id: formState.tipo_logistica === 'cirugia' ? (finalClienteId || null) : null,
+      proveedor_id: isCirugia ? 14 : (finalProveedorId || null),
+      cliente_id: isCirugia ? (finalClienteId || null) : null,
       provincia_id: formState.provincia_id || null,
       localidad_destino_id: formState.localidad_destino_id || null,
       numero_factura: formState.numero_guia?.trim() || null,
-      paciente_referido: formState.tipo_logistica === 'cirugia' ? (formState.paciente_referido?.trim() || null) : null,
+      paciente_referido: isCirugia ? (formState.paciente_referido?.trim() || null) : null,
       datos_adicionales: datosAdicionales,
     };
 
@@ -478,6 +484,8 @@ async function saveGasto() {
         p_descripcion_general: payload.descripcion_general,
         p_numero_factura: payload.numero_factura,
         p_paciente_referido: payload.paciente_referido,
+        p_provincia_id: payload.provincia_id,
+        p_localidad_destino_id: payload.localidad_destino_id,
         p_datos_adicionales: datosAdicionales,
       });
 
@@ -684,15 +692,13 @@ watch(() => props.transportes, (items) => {
               </select>
             </label>
 
-            <label class="field-group">
-              <span class="field-label">Provincia Destino</span>
-              <v-select v-model="formState.provincia_id" :options="provinciasOptions" :reduce="o => o.code" placeholder="Provincia" class="v-select-filter bg-white" @update:modelValue="handleProvinciaChange" />
-            </label>
-
-            <label class="field-group">
-              <span class="field-label">Localidad Destino</span>
-              <v-select v-model="formState.localidad_destino_id" :options="localidadOptionsActuales" :reduce="o => o.code" :disabled="!formState.provincia_id" placeholder="Localidad" class="v-select-filter bg-white" />
-            </label>
+            <div class="field-group md:col-span-2">
+              <span class="field-label">Destino (Localidad / Provincia)</span>
+              <DestinoSelect
+                v-model:provinciaId="formState.provincia_id"
+                v-model:localidadId="formState.localidad_destino_id"
+              />
+            </div>
 
             <label class="field-group">
               <span class="field-label">Cantidad de Bultos <span class="text-red-500">*</span></span>
@@ -727,6 +733,10 @@ watch(() => props.transportes, (items) => {
             <div><span class="block text-slate-400">Estado</span>{{ gastoCompleto.estado_delegacion }}</div>
             <div><span class="block text-slate-400">Rendición</span>{{ gastoCompleto.viaje_id || '-' }}</div>
             <div><span class="block text-slate-400">Caja / Vehículo</span>{{ gastoCompleto.caja_id || '-' }} / {{ gastoCompleto.vehiculo_id || '-' }}</div>
+          </div>
+
+          <div v-if="errorMessage" class="rounded-lg border border-red-200 bg-red-50 p-3 text-xs font-semibold text-red-700 shadow-2xs">
+            ⚠️ {{ errorMessage }}
           </div>
 
           <!-- Actions -->

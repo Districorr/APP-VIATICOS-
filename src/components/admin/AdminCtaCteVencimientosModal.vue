@@ -3,22 +3,31 @@ import { computed, ref, watch } from 'vue';
 import { supabase } from '../../supabaseClient';
 import jsPDF from 'jspdf';
 import 'jspdf-autotable';
+import * as XLSX from 'xlsx';
 import { formatCurrency, formatDate } from '../../utils/formatters';
 import { useLogisticaPdfExportVariants } from '../../composables/useLogisticaPdfExportVariants.js';
 import { normalizeProveedor, normalizeTransporte, getDestinoPresentation, getComentarioLimpio, getProveedorBadgeColor, isLogisticaCirugia, getProveedorLabel } from '../../utils/logisticaHelpers.js';
+import DestinoSelect from '../DestinoSelect.vue';
+import { useCostosPorDestino } from '../../composables/useCostosPorDestino.js';
 
 const props = defineProps({
   modelValue: { type: Boolean, default: false },
 });
 
-const emit = defineEmits(['update:modelValue', 'show-notification']);
+const emit = defineEmits(['update:modelValue', 'show-notification', 'ir-a-corregir']);
 
 const selectedMonth = ref(''); // Formato 'YYYY-MM' (Mes de vencimiento)
 const includePagoInmediato = ref(true);
 const includePieCharts = ref(true);
+const activeCategory = ref('ctacte'); // 'ctacte' | 'destino'
 const activeViewTab = ref('encomienda'); // 'encomienda' | 'proveedor' | 'completo' | 'detalle'
 const loading = ref(false);
 const items = ref([]);
+
+// Costos por Destino State
+const costosDestino = useCostosPorDestino();
+const allDestinoItems = ref([]);
+const loadingDestino = ref(false);
 
 // Inicializar con el mes siguiente
 const initMonth = () => {
@@ -68,7 +77,7 @@ const loadCtaCteExpenses = async () => {
       supabase.from('transportes').select('id, nombre'),
       supabase.from('proveedores').select('id, nombre'),
       supabase.from('provincias').select('id, nombre'),
-      supabase.from('localidades').select('id, nombre'),
+      supabase.from('localidades').select('id, nombre, provincia_id'),
       supabase.from('tipos_gasto_config').select('id, nombre_tipo_gasto')
     ]);
 
@@ -274,7 +283,266 @@ const closeModal = () => {
   emit('update:modelValue', false);
 };
 
-const { exportarPdfCtaCteVencimientos } = useLogisticaPdfExportVariants();
+const provinciasMapRef = ref(new Map());
+const localidadesMapRef = ref(new Map());
+
+const {
+  exportarPdfCtaCteVencimientos,
+  exportarPdfCostosPorDestino,
+  exportarPdfConsolidadoProvincias,
+  exportarPdfConsolidadoLocalidades
+} = useLogisticaPdfExportVariants();
+
+const filteredDestinoByDate = computed(() => {
+  return costosDestino.filterGastosPorFecha(allDestinoItems.value);
+});
+
+const showOpsSinDestinoModal = ref(false);
+const showOpsInconsistentesModal = ref(false);
+const auditSearchQuery = ref('');
+
+function irACorregirEnMovimientos(op = null) {
+  showOpsInconsistentesModal.value = false;
+  showOpsSinDestinoModal.value = false;
+  emit('update:modelValue', false);
+  const ids = op?.id ? [op.id] : opsInconsistentesList.value.map(o => o.id);
+  emit('ir-a-corregir', {
+    gastoId: op?.id || null,
+    gastoIds: ids,
+    provinciaNombre: op?.provincia_registrada_nombre || (selectedProvinciaNombre.value !== 'Todas las Provincias' ? selectedProvinciaNombre.value : null),
+    localidadNombre: op?.localidad_registrada_nombre || null,
+    tipo: 'inconsistentes'
+  });
+}
+
+function irACorregirSinDestino(op = null) {
+  showOpsSinDestinoModal.value = false;
+  emit('update:modelValue', false);
+  const ids = op?.id ? [op.id] : opsSinDestinoList.value.map(o => o.id);
+  emit('ir-a-corregir', {
+    gastoId: op?.id || null,
+    gastoIds: ids,
+    tipo: 'sin_destino'
+  });
+}
+
+const auditoriaDestinoData = computed(() => {
+  return costosDestino.calcularAuditoriaDatos(
+    filteredDestinoByDate.value,
+    provinciasMapRef.value,
+    localidadesMapRef.value
+  );
+});
+
+const opsSinDestinoList = computed(() => {
+  return auditoriaDestinoData.value.opsSinDestinoList || [];
+});
+
+const opsInconsistentesList = computed(() => {
+  return auditoriaDestinoData.value.opsInconsistentesList || [];
+});
+
+const opsInconsistentesFiltradas = computed(() => {
+  const query = auditSearchQuery.value.trim().toLowerCase();
+  const list = opsInconsistentesList.value;
+  if (!query) return list;
+  return list.filter(op => {
+    const provReg = (op.provincia_registrada_nombre || '').toLowerCase();
+    const locReg = (op.localidad_registrada_nombre || '').toLowerCase();
+    const provReal = (op.provincia_real_localidad_nombre || '').toLowerCase();
+    const transp = (op.transporte_nombre || '').toLowerCase();
+    const provLabel = (op.proveedor_label || '').toLowerCase();
+    const numFact = (op.numero_factura || '').toLowerCase();
+    const idStr = String(op.id || '');
+    return (
+      provReg.includes(query) ||
+      locReg.includes(query) ||
+      provReal.includes(query) ||
+      transp.includes(query) ||
+      provLabel.includes(query) ||
+      numFact.includes(query) ||
+      idStr.includes(query)
+    );
+  });
+});
+
+const inconsistenciasDeProvinciaSeleccionada = computed(() => {
+  const pId = costosDestino.selectedProvinciaId.value;
+  if (!pId || pId === 'todos') return opsInconsistentesList.value;
+  return opsInconsistentesList.value.filter(op => String(op.provincia_registrada_id) === String(pId));
+});
+
+const consolidadoProvincias = computed(() => {
+  return costosDestino.calcularConsolidadoProvincias(
+    filteredDestinoByDate.value,
+    provinciasMapRef.value,
+    localidadesMapRef.value
+  );
+});
+
+const consolidadoLocalidades = computed(() => {
+  return costosDestino.calcularConsolidadoLocalidades(
+    filteredDestinoByDate.value,
+    costosDestino.selectedProvinciaId.value,
+    localidadesMapRef.value
+  );
+});
+
+const selectedProvinciaNombre = computed(() => {
+  const pId = costosDestino.selectedProvinciaId.value;
+  if (!pId || pId === 'todos') return 'Todas las Provincias';
+  const numId = Number(pId);
+  return provinciasMapRef.value.get(numId)?.nombre || `Provincia ${pId}`;
+});
+
+const selectedLocalidadNombre = computed(() => {
+  const lId = costosDestino.selectedLocalidadId.value;
+  if (!lId || lId === 'todos') return 'Todas las Localidades';
+  const numId = Number(lId);
+  return localidadesMapRef.value.get(numId)?.nombre || `Localidad ${lId}`;
+});
+
+const itemsDestinoLocalidad = computed(() => {
+  return filteredDestinoByDate.value.filter(item => costosDestino.matchesDestino(item));
+});
+
+const statsDestino = computed(() => {
+  return costosDestino.calcularEstadisticasDestino(itemsDestinoLocalidad.value);
+});
+
+const showQuickSearch = ref(false);
+
+const availableProvinciasList = computed(() => {
+  const list = Array.from(provinciasMapRef.value.values());
+  return list.sort((a, b) => a.nombre.localeCompare(b.nombre));
+});
+
+const availableLocalidadesForSelectedProvincia = computed(() => {
+  const pId = costosDestino.selectedProvinciaId.value;
+  if (!pId || pId === 'todos') return [];
+  
+  // Preferir localidades que registraron operaciones en la provincia seleccionada (según consolidado)
+  const activeLocs = consolidadoLocalidades.value.localidades.filter(l => l.localidad_id);
+  if (activeLocs.length > 0) {
+    return activeLocs;
+  }
+
+  // Fallback: todas las localidades registradas para esa provincia en la BD
+  const numPId = Number(pId);
+  const allLocs = Array.from(localidadesMapRef.value.values()).filter(l => l.provincia_id === numPId);
+  return allLocs.map(l => ({
+    localidad_id: l.id,
+    localidad_nombre: l.nombre,
+    envios: 0,
+    bultos: 0,
+    total: 0
+  })).sort((a, b) => a.localidad_nombre.localeCompare(b.localidad_nombre));
+});
+
+const handleProvinciaSelectChange = (e) => {
+  const val = e.target.value;
+  if (val === 'todos') {
+    costosDestino.selectedProvinciaId.value = 'todos';
+    costosDestino.selectedLocalidadId.value = 'todos';
+  } else {
+    costosDestino.selectedProvinciaId.value = Number(val);
+    costosDestino.selectedLocalidadId.value = 'todos';
+  }
+};
+
+const handleLocalidadSelectChange = (e) => {
+  const val = e.target.value;
+  if (val === 'todos') {
+    costosDestino.selectedLocalidadId.value = 'todos';
+  } else {
+    costosDestino.selectedLocalidadId.value = Number(val);
+  }
+};
+
+const selectedDestinoNombre = computed(() => {
+  if (costosDestino.selectedLocalidadId.value && costosDestino.selectedLocalidadId.value !== 'todos') {
+    return selectedLocalidadNombre.value;
+  }
+  if (costosDestino.selectedProvinciaId.value && costosDestino.selectedProvinciaId.value !== 'todos') {
+    return selectedProvinciaNombre.value;
+  }
+  return 'Todas las Localidades (General)';
+});
+
+const exportDestinoPdf = () => {
+  try {
+    const nivel = costosDestino.currentNivel.value;
+    if (nivel === 'provincia') {
+      if (!consolidadoProvincias.value || consolidadoProvincias.value.provincias.length === 0) return;
+      exportarPdfConsolidadoProvincias(consolidadoProvincias.value, {
+        selectedPeriodo: costosDestino.selectedPeriodo.value
+      });
+      emit('show-notification', 'PDF descargado', 'El reporte consolidado de Provincias fue generado y descargado.', 'success');
+    } else if (nivel === 'localidad') {
+      if (!consolidadoLocalidades.value || consolidadoLocalidades.value.localidades.length === 0) return;
+      exportarPdfConsolidadoLocalidades(consolidadoLocalidades.value, {
+        provinciaNombre: selectedProvinciaNombre.value,
+        selectedPeriodo: costosDestino.selectedPeriodo.value
+      });
+      emit('show-notification', 'PDF descargado', `El desglose por localidades de ${selectedProvinciaNombre.value} fue generado y descargado.`, 'success');
+    } else {
+      if (!statsDestino.value || statsDestino.value.cantEnvios === 0) return;
+      exportarPdfCostosPorDestino(statsDestino.value, {
+        destinoNombre: selectedDestinoNombre.value,
+        selectedPeriodo: costosDestino.selectedPeriodo.value
+      });
+      emit('show-notification', 'PDF descargado', `El reporte PDF de costos para ${selectedDestinoNombre.value} fue generado y descargado.`, 'success');
+    }
+  } catch (e) {
+    console.error('Error generando PDF de costos por destino:', e);
+    emit('show-notification', 'Error', 'No se pudo generar el reporte en PDF por destino.', 'error');
+  }
+};
+
+const exportDestinoExcel = () => {
+  const nivel = costosDestino.currentNivel.value;
+  if (nivel === 'provincia') {
+    if (!consolidadoProvincias.value || consolidadoProvincias.value.provincias.length === 0) return;
+    const exportData = consolidadoProvincias.value.provincias.map((p, idx) => ({
+      'N°': idx + 1,
+      'Provincia Destino': p.provincia_nombre,
+      'Envíos / Despachos': p.envios,
+      'Bultos Totales': p.bultos,
+      'Total Acumulado ($)': p.total,
+      'Promedio por Envío ($)': p.promedioEnvio,
+      'Promedio por Bulto ($)': p.promedioBulto
+    }));
+    exportToExcel(exportData, `Consolidado_Provincias_${new Date().toISOString().split('T')[0]}`);
+    emit('show-notification', 'Excel descargado', 'Ficha consolidada de Provincias exportada.', 'success');
+  } else if (nivel === 'localidad') {
+    if (!consolidadoLocalidades.value || consolidadoLocalidades.value.localidades.length === 0) return;
+    const exportData = consolidadoLocalidades.value.localidades.map((l, idx) => ({
+      'N°': idx + 1,
+      'Localidad Destino': l.localidad_nombre,
+      'Envíos / Despachos': l.envios,
+      'Bultos Totales': l.bultos,
+      'Total Acumulado ($)': l.total,
+      'Promedio por Envío ($)': l.promedioEnvio,
+      'Promedio por Bulto ($)': l.promedioBulto
+    }));
+    exportToExcel(exportData, `Costos_Localidades_${selectedProvinciaNombre.value}_${new Date().toISOString().split('T')[0]}`);
+    emit('show-notification', 'Excel descargado', `Desglose de localidades de ${selectedProvinciaNombre.value} exportado.`, 'success');
+  } else {
+    if (!statsDestino.value || statsDestino.value.cantEnvios === 0) return;
+    const exportData = statsDestino.value.detalleOps.map((op, idx) => ({
+      'N°': idx + 1,
+      'Fecha': formatDate(op.fecha_gasto),
+      'Transporte': op.transporte_nombre,
+      'Proveedor / Origen': op.proveedor_label,
+      'Tipo Movimiento': op.tipo_movimiento,
+      'Bultos': op.bultos,
+      'Importe ($)': op.monto_total,
+      'Guía / Remito': op.numero_factura || ''
+    }));
+    exportToExcel(exportData, `Ficha_Destino_${selectedDestinoNombre.value}_${new Date().toISOString().split('T')[0]}`);
+    emit('show-notification', 'Excel descargado', `Ficha operativa de ${selectedDestinoNombre.value} exportada.`, 'success');
+  }
+};
 
 const downloadPDF = (modoOverride = null) => {
   if (items.value.length === 0) return;
@@ -302,10 +570,107 @@ const downloadPDF = (modoOverride = null) => {
   }
 };
 
+const loadAllDestinoExpenses = async (force = false) => {
+  if (!force && allDestinoItems.value.length > 0 && !loadingDestino.value) return;
+  loadingDestino.value = true;
+  try {
+    const [gastosRes, transportesRes, proveedoresRes, provinciasRes, localidadesRes, tiposRes, clientesRes] = await Promise.all([
+      supabase.from('gastos').select('*').order('fecha_gasto', { ascending: false }),
+      supabase.from('transportes').select('id, nombre'),
+      supabase.from('proveedores').select('id, nombre'),
+      supabase.from('provincias').select('id, nombre'),
+      supabase.from('localidades').select('id, nombre'),
+      supabase.from('tipos_gasto_config').select('id, nombre_tipo_gasto'),
+      supabase.from('clientes').select('id, nombre_cliente')
+    ]);
+
+    const data = gastosRes.data || [];
+    const transportesMap = new Map((transportesRes.data || []).map(t => [t.id, t]));
+    const proveedoresMap = new Map((proveedoresRes.data || []).map(p => [p.id, p]));
+    const provinciasMap = new Map((provinciasRes.data || []).map(p => [p.id, p]));
+    const localidadesMap = new Map((localidadesRes.data || []).map(l => [l.id, l]));
+    const tiposMap = new Map((tiposRes.data || []).map(t => [t.id, t.nombre_tipo_gasto]));
+    const clientesMap = new Map((clientesRes.data || []).map(c => [c.id, c]));
+
+    const LOGISTICA_TIPO_GASTO_ID = 22; // Tipo de gasto: Logística | Envíos y Devoluciones
+
+    const filtered = data.filter(item => {
+      const extra = item.datos_adicionales || {};
+      const tipoNombre = (tiposMap.get(item.tipo_gasto_id) || '').toLowerCase();
+
+      // Universo de datos: Exclusivamente tipo de gasto "Logística | Envíos y Devoluciones" (ID 22)
+      return (
+        item.tipo_gasto_id === LOGISTICA_TIPO_GASTO_ID ||
+        extra.modulo === 'logistica' ||
+        extra.tipo_logistica != null ||
+        extra.origen_carga === 'encomiendas_carga_multiple' ||
+        tipoNombre.includes('envio') ||
+        tipoNombre.includes('envío') ||
+        tipoNombre.includes('devolucion') ||
+        tipoNombre.includes('devolución') ||
+        tipoNombre.includes('logistica') ||
+        tipoNombre.includes('logística') ||
+        tipoNombre.includes('encomienda')
+      );
+    });
+
+    provinciasMapRef.value = provinciasMap;
+    localidadesMapRef.value = localidadesMap;
+
+    allDestinoItems.value = filtered.map(item => {
+      let t = item.transporte_id ? transportesMap.get(item.transporte_id) : null;
+      let p = item.proveedor_id ? proveedoresMap.get(item.proveedor_id) : null;
+      let prov = item.provincia_id ? provinciasMap.get(item.provincia_id) : null;
+      let loc = item.localidad_destino_id ? localidadesMap.get(item.localidad_destino_id) : null;
+      let cli = item.cliente_id ? clientesMap.get(item.cliente_id) : null;
+
+      return {
+        ...item,
+        transporte: t ? { id: t.id, nombre: t.nombre } : null,
+        proveedor: p ? { id: p.id, nombre: p.nombre } : null,
+        proveedores: p ? { id: p.id, nombre: p.nombre } : null,
+        provincia: prov ? { id: prov.id, nombre: prov.nombre } : null,
+        localidad_destino: loc ? { id: loc.id, nombre: loc.nombre } : null,
+        cliente: cli ? { id: cli.id, nombre_cliente: cli.nombre_cliente } : null,
+        clientes: cli ? { id: cli.id, nombre_cliente: cli.nombre_cliente } : null,
+      };
+    });
+  } catch (err) {
+    console.error('Error cargando gastos por destino:', err);
+  } finally {
+    loadingDestino.value = false;
+  }
+};
+
+watch(activeCategory, (newCat) => {
+  if (newCat === 'destino') {
+    if (!costosDestino.selectedLocalidadId.value && !costosDestino.selectedProvinciaId.value) {
+      costosDestino.selectedLocalidadId.value = 'todos';
+      costosDestino.selectedProvinciaId.value = 'todos';
+    }
+    loadAllDestinoExpenses(true);
+  }
+});
+
 watch(() => props.modelValue, (isOpen) => {
   if (isOpen) {
     initMonth();
     loadCtaCteExpenses();
+    loadAllDestinoExpenses(true);
+  }
+});
+
+
+
+
+
+watch(() => props.modelValue, (isOpen) => {
+  if (isOpen) {
+    initMonth();
+    loadCtaCteExpenses();
+    if (activeCategory.value === 'destino') {
+      loadAllDestinoExpenses();
+    }
   }
 });
 
@@ -326,10 +691,10 @@ watch([selectedMonth, includePagoInmediato], () => {
               <svg class="w-5 h-5 text-indigo-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 17v-2m3 2v-4m3 4v-6m2 10H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
               </svg>
-              Libro Mayor de Cuenta Corriente — Vencimientos y Consolidación
+              Libro Mayor de Cuenta Corriente y Análisis Logístico
             </h3>
             <p class="mt-1 text-xs font-medium text-slate-500">
-              Visualiza y descarga el detalle de gastos acumulados por encomienda y proveedor.
+              Visualizá el consolidado financiero de cuenta corriente o consultá el reporte de costos logísticos por destino geográfico.
             </p>
           </div>
           <button type="button" class="rounded-lg p-1.5 text-slate-400 hover:bg-slate-200 hover:text-slate-700 transition-colors" @click="closeModal">
@@ -339,8 +704,40 @@ watch([selectedMonth, includePagoInmediato], () => {
           </button>
         </div>
 
+        <!-- Selector de Categoría Escalable de Reporte -->
+        <div class="flex items-center gap-2 border-b border-slate-200 bg-slate-100/70 p-2.5 px-6">
+          <button
+            type="button"
+            @click="activeCategory = 'ctacte'"
+            :class="[
+              'px-4 py-2 text-xs font-bold rounded-lg transition-all flex items-center gap-2',
+              activeCategory === 'ctacte' ? 'bg-white text-indigo-700 shadow-sm border border-slate-200 ring-2 ring-indigo-500/20' : 'text-slate-600 hover:bg-slate-200/60'
+            ]"
+          >
+            <span>📦 Consolidación Financiera / Cta Cte</span>
+          </button>
+
+          <button
+            type="button"
+            @click="activeCategory = 'destino'"
+            :class="[
+              'px-4 py-2 text-xs font-bold rounded-lg transition-all flex items-center gap-2',
+              activeCategory === 'destino' ? 'bg-indigo-600 text-white shadow-sm ring-2 ring-indigo-500/20' : 'text-slate-600 hover:bg-slate-200/60'
+            ]"
+          >
+            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z" />
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 11a3 3 0 11-6 0 3 3 0 016 0z" />
+            </svg>
+            <span>📍 Costos Logísticos por Destino</span>
+          </button>
+        </div>
+
         <!-- Contenido principal -->
         <div class="flex-grow overflow-y-auto p-6 space-y-6">
+
+          <!-- CATEGORÍA 1: CONSOLIDACIÓN FINANCIERA / CTA CTE -->
+          <div v-if="activeCategory === 'ctacte'" class="space-y-6">
           
           <!-- Filtro de mes y Checkbox Consolidación & Gráficos -->
           <div class="grid grid-cols-1 lg:grid-cols-12 gap-4 items-center bg-slate-50/80 p-4 border border-slate-200 rounded-xl">
@@ -741,11 +1138,669 @@ watch([selectedMonth, includePagoInmediato], () => {
             </div>
 
           </div>
+          </div> <!-- Fin div activeCategory === 'ctacte' -->
+
+          <!-- CATEGORÍA 2: COSTOS LOGÍSTICOS POR DESTINO (Estructura Analítica de 3 Niveles) -->
+          <div v-if="activeCategory === 'destino'" class="space-y-4">
+
+            <!-- BARRA DE FILTROS SEPARADOS Y FLUJO DE NAVEGACIÓN (Mes → Provincia → Localidades → Detalle & Transportes) -->
+            <div class="space-y-3 bg-slate-50 p-4 border border-slate-200 rounded-xl shadow-xs">
+              
+              <!-- Fila Superior: Período → Provincia (Principal) → Localidad (Dependiente) → Buscador Rápido -->
+              <div class="grid grid-cols-1 sm:grid-cols-12 gap-3 items-end">
+                
+                <!-- 1. Período de Análisis -->
+                <div class="sm:col-span-4 lg:col-span-3">
+                  <label class="block text-[10px] font-extrabold uppercase tracking-wider text-slate-500 mb-1">
+                    📅 1. Período / Mes
+                  </label>
+                  <div class="flex items-center gap-1.5">
+                    <select v-model="costosDestino.selectedPeriodo.value" class="form-input text-xs font-semibold">
+                      <option value="historico">Histórico Completo</option>
+                      <option value="mes">Mes Específico</option>
+                      <option value="3m">Últimos 3 Meses</option>
+                      <option value="6m">Últimos 6 Meses</option>
+                    </select>
+                    <input 
+                      v-if="costosDestino.selectedPeriodo.value === 'mes'" 
+                      v-model="costosDestino.customMonth.value" 
+                      type="month" 
+                      class="form-input text-xs w-32" 
+                    />
+                  </div>
+                </div>
+
+                <!-- 2. Provincia (Filtro Principal) -->
+                <div class="sm:col-span-4 lg:col-span-4">
+                  <label class="block text-[10px] font-extrabold uppercase tracking-wider text-indigo-700 mb-1">
+                    📍 2. Provincia Destino (Filtro Principal)
+                  </label>
+                  <select 
+                    :value="costosDestino.selectedProvinciaId.value || 'todos'"
+                    @change="handleProvinciaSelectChange"
+                    class="form-input text-xs font-bold text-slate-800 bg-white border-indigo-200 focus:border-indigo-500 focus:ring-indigo-500"
+                  >
+                    <option value="todos">🇦🇷 Todas las Provincias (Consolidado Nacional)</option>
+                    <option v-for="p in availableProvinciasList" :key="p.id" :value="p.id">
+                      📍 {{ p.nombre }}
+                    </option>
+                  </select>
+                </div>
+
+                <!-- 3. Localidad (Filtro Opcional Dependiente) -->
+                <div class="sm:col-span-4 lg:col-span-4">
+                  <label class="block text-[10px] font-extrabold uppercase tracking-wider text-slate-500 mb-1">
+                    🏙️ 3. Localidad (Opcional)
+                  </label>
+                  <select 
+                    :value="costosDestino.selectedLocalidadId.value || 'todos'"
+                    @change="handleLocalidadSelectChange"
+                    :disabled="!costosDestino.selectedProvinciaId.value || costosDestino.selectedProvinciaId.value === 'todos'"
+                    class="form-input text-xs font-semibold text-slate-800 bg-white disabled:bg-slate-100 disabled:text-slate-400 disabled:cursor-not-allowed"
+                  >
+                    <option value="todos">
+                      {{ costosDestino.selectedProvinciaId.value && costosDestino.selectedProvinciaId.value !== 'todos' ? '🏙️ Todas las Localidades de ' + selectedProvinciaNombre : '🏙️ Todas las Localidades' }}
+                    </option>
+                    <option v-for="l in availableLocalidadesForSelectedProvincia" :key="l.localidad_id" :value="l.localidad_id">
+                      🏙️ {{ l.localidad_nombre }} {{ l.envios > 0 ? `(${l.envios} envíos)` : '' }}
+                    </option>
+                  </select>
+                </div>
+
+                <!-- Toggle Buscador Rápido por Texto -->
+                <div class="sm:col-span-12 lg:col-span-1 text-right">
+                  <button 
+                    type="button"
+                    @click="showQuickSearch = !showQuickSearch"
+                    :class="[
+                      'px-2 py-1.5 text-[11px] font-bold rounded-lg border transition-all flex items-center justify-center gap-1 w-full',
+                      showQuickSearch ? 'bg-indigo-50 text-indigo-700 border-indigo-300' : 'bg-white text-slate-600 border-slate-300 hover:bg-slate-100'
+                    ]"
+                    title="Acceso directo por texto"
+                  >
+                    <span>🔍 Búsqueda</span>
+                  </button>
+                </div>
+
+              </div>
+
+              <!-- Buscador Rápido Directo (DestinoSelect) desplegable -->
+              <div v-if="showQuickSearch" class="p-3 bg-white border border-indigo-100 rounded-lg shadow-xs space-y-1">
+                <span class="text-[10px] font-bold uppercase text-indigo-600 block">🔍 Acceso Rápido por Texto (Buscar Provincia o Localidad directamente)</span>
+                <DestinoSelect
+                  v-model:provinciaId="costosDestino.selectedProvinciaId.value"
+                  v-model:localidadId="costosDestino.selectedLocalidadId.value"
+                  :includeAllOption="true"
+                />
+              </div>
+
+              <!-- Fila Inferior: Breadcrumbs de Navegación + Calidad de Datos Discreta -->
+              <div class="pt-2 border-t border-slate-200/60 flex flex-wrap items-center justify-between gap-2 text-xs">
+                <!-- Breadcrumbs -->
+                <div class="flex items-center gap-1.5 font-medium text-slate-600 bg-white px-2.5 py-1 rounded-lg border border-slate-200">
+                  <button 
+                    type="button" 
+                    class="hover:text-indigo-600 flex items-center gap-1 transition-colors"
+                    :class="costosDestino.currentNivel.value === 'provincia' ? 'text-indigo-700 font-extrabold' : 'text-slate-500'"
+                    @click="costosDestino.selectedProvinciaId.value = null; costosDestino.selectedLocalidadId.value = null;"
+                  >
+                    🇦🇷 Todas las Provincias
+                  </button>
+                  
+                  <span v-if="costosDestino.selectedProvinciaId.value" class="text-slate-300">/</span>
+                  
+                  <button 
+                    v-if="costosDestino.selectedProvinciaId.value" 
+                    type="button" 
+                    class="hover:text-indigo-600 flex items-center gap-1 transition-colors"
+                    :class="costosDestino.currentNivel.value === 'localidad' ? 'text-indigo-700 font-extrabold' : 'text-slate-500'"
+                    @click="costosDestino.selectedLocalidadId.value = null;"
+                  >
+                    📍 {{ selectedProvinciaNombre }}
+                  </button>
+                  
+                  <span v-if="costosDestino.selectedLocalidadId.value" class="text-slate-300">/</span>
+                  
+                  <span v-if="costosDestino.selectedLocalidadId.value" class="text-indigo-700 font-extrabold flex items-center gap-1">
+                    🏙️ {{ selectedLocalidadNombre }}
+                  </span>
+                </div>
+
+                <!-- Indicador Discreto de Calidad de Datos Geográficos (4 Estados Reconciliables) -->
+                <div class="text-[11px] text-slate-600 flex flex-wrap items-center gap-2 bg-white/90 px-3 py-1 rounded-lg border border-slate-200 shadow-xs">
+                  <div class="flex items-center gap-1">
+                    <span class="w-2 h-2 rounded-full bg-emerald-500 inline-block"></span>
+                    <span>Calidad de datos: <strong class="text-emerald-700 font-extrabold">{{ auditoriaDestinoData.pctCompleto }}%</strong> válidos</span>
+                    <span class="text-slate-400 font-mono">({{ auditoriaDestinoData.conDestinoCompleto }}/{{ auditoriaDestinoData.totalItems }})</span>
+                  </div>
+                  <span class="text-slate-300">|</span>
+                  <span class="text-slate-500 font-medium" title="Provincia informada sin ciudad">
+                    🏙️ {{ auditoriaDestinoData.soloProvincia }} solo prov.
+                  </span>
+                  <span class="text-slate-300">|</span>
+                  <button 
+                    v-if="auditoriaDestinoData.destinoInconsistente > 0"
+                    type="button" 
+                    class="text-rose-700 font-bold hover:underline cursor-pointer flex items-center gap-1 bg-rose-50 px-2 py-0.5 rounded border border-rose-200"
+                    @click="showOpsInconsistentesModal = true"
+                    title="Localidad pertenece a otra provincia"
+                  >
+                    ⚠️ {{ auditoriaDestinoData.destinoInconsistente }} inconsistentes (ver)
+                  </button>
+                  <span v-else class="text-slate-400">0 inconsistentes</span>
+                  <span class="text-slate-300">|</span>
+                  <button 
+                    v-if="auditoriaDestinoData.sinDestino > 0" 
+                    type="button" 
+                    class="text-amber-700 font-bold hover:underline cursor-pointer flex items-center gap-1 bg-amber-50 px-2 py-0.5 rounded border border-amber-200"
+                    @click="showOpsSinDestinoModal = true"
+                    title="Sin provincia ni localidad registrada"
+                  >
+                    ❓ {{ auditoriaDestinoData.sinDestino }} sin destino (ver)
+                  </button>
+                  <span v-else class="text-slate-400">0 sin destino</span>
+                </div>
+              </div>
+
+            </div>
+
+            <!-- Loader -->
+            <div v-if="loadingDestino" class="flex flex-col items-center justify-center py-12">
+              <svg class="animate-spin h-7 w-7 text-indigo-600" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+              </svg>
+              <span class="mt-2.5 text-xs text-slate-500 font-medium">Analizando datos logísticos por destino...</span>
+            </div>
+
+            <!-- Empty State Compacto -->
+            <div v-else-if="filteredDestinoByDate.length === 0" class="rounded-xl border border-dashed border-slate-300 bg-slate-50/50 p-8 text-center">
+              <svg class="mx-auto h-7 w-7 text-slate-400 mb-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z" />
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 11a3 3 0 11-6 0 3 3 0 016 0z" />
+              </svg>
+              <p class="text-xs font-extrabold text-slate-700">Sin operaciones registradas para el período o provincia seleccionados.</p>
+              <p class="text-[11px] text-slate-500 mt-1">Ajustá el período de análisis en la barra superior o seleccioná otro destino.</p>
+            </div>
+
+            <!-- VISTAS DE LOS 3 NIVELES -->
+            <div v-else class="space-y-4">
+
+              <!-- ========================================================================= -->
+              <!-- NIVEL 1: VISTA GENERAL POR PROVINCIA (Sin provincia ni localidad específica) -->
+              <!-- ========================================================================= -->
+              <div v-if="costosDestino.currentNivel.value === 'provincia'" class="space-y-4">
+                
+                <!-- KPIs Nacionales -->
+                <div class="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
+                  <div class="rounded-xl border border-indigo-200 bg-indigo-50/60 p-3.5 shadow-xs">
+                    <span class="block text-[10px] font-extrabold uppercase tracking-wider text-indigo-700">Total Gastado en Logística</span>
+                    <strong class="mt-1 block text-xl font-extrabold text-indigo-900">{{ formatCurrency(consolidadoProvincias.totalGastadoGeneral) }}</strong>
+                    <span class="text-[10px] text-indigo-600 font-semibold block mt-0.5"><strong class="font-mono">{{ consolidadoProvincias.totalEnviosGeneral }}</strong> envíos totales en el país</span>
+                  </div>
+
+                  <div class="rounded-xl border border-slate-200 bg-white p-3.5 shadow-xs">
+                    <span class="block text-[10px] font-extrabold uppercase tracking-wider text-slate-500">Bultos Movidos</span>
+                    <strong class="mt-1 block text-xl font-extrabold text-slate-800">{{ consolidadoProvincias.totalBultosGeneral }}</strong>
+                    <span class="text-[11px] text-slate-500 block mt-0.5">Acumulado nacional de bultos</span>
+                  </div>
+
+                  <div class="rounded-xl border border-slate-200 bg-white p-3.5 shadow-xs">
+                    <span class="block text-[10px] font-extrabold uppercase tracking-wider text-slate-500">Promedio Nacional / Envío</span>
+                    <strong class="mt-1 block text-xl font-extrabold text-slate-900">{{ formatCurrency(consolidadoProvincias.promedioEnvioGeneral) }}</strong>
+                    <span class="text-[11px] text-slate-500 block mt-0.5">Referencia global por despacho</span>
+                  </div>
+
+                  <div class="rounded-xl border border-slate-200 bg-white p-3.5 shadow-xs">
+                    <span class="block text-[10px] font-extrabold uppercase tracking-wider text-slate-500">Promedio Nacional / Bulto</span>
+                    <strong class="mt-1 block text-xl font-extrabold text-slate-900">{{ formatCurrency(consolidadoProvincias.promedioBultoGeneral) }}</strong>
+                    <span class="text-[11px] text-slate-500 block mt-0.5">Referencia global por bulto</span>
+                  </div>
+                </div>
+
+                <!-- Tabla Nivel 1: Provincias -->
+                <div class="rounded-xl border border-slate-200 overflow-hidden bg-white shadow-xs">
+                  <div class="bg-slate-50 px-4 py-2.5 border-b border-slate-200 flex items-center justify-between">
+                    <h4 class="text-xs font-extrabold uppercase tracking-wider text-slate-700 flex items-center gap-2">
+                      🇦🇷 Consolidado de Costos por Provincia Destino
+                    </h4>
+                    <span class="text-[11px] font-semibold text-slate-500 font-mono">{{ consolidadoProvincias.provincias.length }} provincias con envíos</span>
+                  </div>
+                  <div class="overflow-x-auto">
+                    <table class="min-w-full divide-y divide-slate-200 text-xs">
+                      <thead class="bg-slate-100">
+                        <tr>
+                          <th class="px-3 py-2.5 text-left font-bold text-slate-600">Provincia Destino</th>
+                          <th class="px-3 py-2.5 text-center font-bold text-slate-600">Despachos / Envíos</th>
+                          <th class="px-3 py-2.5 text-center font-bold text-slate-600">Bultos Totales</th>
+                          <th class="px-3 py-2.5 text-right font-bold text-slate-600">Total Acumulado ($)</th>
+                          <th class="px-3 py-2.5 text-right font-bold text-indigo-700 bg-indigo-50/50">Promedio por Envío</th>
+                          <th class="px-3 py-2.5 text-right font-bold text-slate-600">Promedio por Bulto</th>
+                          <th class="px-3 py-2.5 text-center font-bold text-slate-600">Acción</th>
+                        </tr>
+                      </thead>
+                      <tbody class="divide-y divide-slate-100 bg-white">
+                        <tr 
+                          v-for="p in consolidadoProvincias.provincias" 
+                          :key="p.provincia_id" 
+                          class="hover:bg-indigo-50/40 cursor-pointer transition-colors"
+                          @click="costosDestino.selectedProvinciaId.value = p.provincia_id; costosDestino.selectedLocalidadId.value = null;"
+                        >
+                          <td class="px-3 py-2.5 font-extrabold text-slate-800 flex items-center gap-2">
+                            <span>📍</span>
+                            <span>{{ p.provincia_nombre }}</span>
+                          </td>
+                          <td class="px-3 py-2.5 text-center font-mono font-bold text-slate-800">{{ p.envios }}</td>
+                          <td class="px-3 py-2.5 text-center font-mono font-bold text-slate-800">{{ p.bultos }}</td>
+                          <td class="px-3 py-2.5 text-right font-extrabold text-slate-900">{{ formatCurrency(p.total) }}</td>
+                          <td class="px-3 py-2.5 text-right font-extrabold text-indigo-700 bg-indigo-50/30">{{ formatCurrency(p.promedioEnvio) }}</td>
+                          <td class="px-3 py-2.5 text-right text-slate-600 font-medium font-mono">{{ formatCurrency(p.promedioBulto) }}</td>
+                          <td class="px-3 py-2.5 text-center">
+                            <span class="inline-flex items-center text-[11px] font-semibold text-indigo-600 hover:text-indigo-800">
+                              Ver Localidades →
+                            </span>
+                          </td>
+                        </tr>
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+
+              </div>
+
+              <!-- ========================================================================= -->
+              <!-- NIVEL 2: VISTA POR LOCALIDADES (Provincia Seleccionada) -->
+              <!-- ========================================================================= -->
+              <div v-else-if="costosDestino.currentNivel.value === 'localidad'" class="space-y-4">
+                
+                <div class="flex items-center justify-between">
+                  <button 
+                    type="button" 
+                    class="text-xs font-semibold text-indigo-600 hover:text-indigo-800 flex items-center gap-1.5 bg-indigo-50 px-2.5 py-1 rounded-md border border-indigo-200"
+                    @click="costosDestino.selectedProvinciaId.value = null;"
+                  >
+                    ← Volver a Provincias
+                  </button>
+                  <span class="text-xs text-slate-500 font-medium">Hacé clic en una localidad para ver su detalle operativo</span>
+                </div>
+
+                <!-- KPIs Provinciales -->
+                <div class="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
+                  <div class="rounded-xl border border-indigo-200 bg-indigo-50/60 p-3.5 shadow-xs">
+                    <span class="block text-[10px] font-extrabold uppercase tracking-wider text-indigo-700">Total en {{ selectedProvinciaNombre }}</span>
+                    <strong class="mt-1 block text-xl font-extrabold text-indigo-900">{{ formatCurrency(consolidadoLocalidades.totalGastado) }}</strong>
+                    <span class="text-[10px] text-indigo-600 font-semibold block mt-0.5"><strong class="font-mono">{{ consolidadoLocalidades.totalEnvios }}</strong> envíos a esta provincia</span>
+                  </div>
+
+                  <div class="rounded-xl border border-slate-200 bg-white p-3.5 shadow-xs">
+                    <span class="block text-[10px] font-extrabold uppercase tracking-wider text-slate-500">Bultos Recibidos</span>
+                    <strong class="mt-1 block text-xl font-extrabold text-slate-800">{{ consolidadoLocalidades.totalBultos }}</strong>
+                    <span class="text-[11px] text-slate-500 block mt-0.5">Total bultos en la provincia</span>
+                  </div>
+
+                  <div class="rounded-xl border border-slate-200 bg-white p-3.5 shadow-xs">
+                    <span class="block text-[10px] font-extrabold uppercase tracking-wider text-slate-500">Promedio Provincial / Envío</span>
+                    <strong class="mt-1 block text-xl font-extrabold text-slate-900">{{ formatCurrency(consolidadoLocalidades.promedioEnvio) }}</strong>
+                    <span class="text-[11px] text-slate-500 block mt-0.5">Costo medio por despacho</span>
+                  </div>
+
+                  <div class="rounded-xl border border-slate-200 bg-white p-3.5 shadow-xs">
+                    <span class="block text-[10px] font-extrabold uppercase tracking-wider text-slate-500">Promedio Provincial / Bulto</span>
+                    <strong class="mt-1 block text-xl font-extrabold text-slate-900">{{ formatCurrency(consolidadoLocalidades.promedioBulto) }}</strong>
+                    <span class="text-[11px] text-slate-500 block mt-0.5">Costo medio por bulto</span>
+                  </div>
+                </div>
+
+                <!-- Banner Alerta de Inconsistencia Geográfica para la Provincia Seleccionada (ej. Corrientes con localidad BUENOS AIRES) -->
+                <div v-if="inconsistenciasDeProvinciaSeleccionada.length > 0" class="p-3.5 bg-rose-50 border border-rose-200 rounded-xl flex flex-wrap items-center justify-between gap-3 shadow-xs">
+                  <div class="flex items-center gap-2.5">
+                    <div class="p-2 bg-rose-100 rounded-lg text-rose-700 font-extrabold text-base">⚠️</div>
+                    <div>
+                      <h5 class="text-xs font-bold text-rose-900">
+                        Se detectaron {{ inconsistenciasDeProvinciaSeleccionada.length }} operaciones con localidad inconsistente registradas en {{ selectedProvinciaNombre }}
+                      </h5>
+                      <p class="text-[11px] text-rose-700 mt-0.5">
+                        Ejemplo: Registradas como {{ selectedProvinciaNombre }}, pero asignadas a la localidad "{{ inconsistenciasDeProvinciaSeleccionada[0]?.localidad_registrada_nombre }}" (perteneciente a {{ inconsistenciasDeProvinciaSeleccionada[0]?.provincia_real_localidad_nombre }}).
+                      </p>
+                    </div>
+                  </div>
+                  <div class="flex items-center gap-2">
+                    <button 
+                      type="button" 
+                      class="bg-white hover:bg-rose-100 text-rose-800 border border-rose-300 text-xs font-bold px-3 py-1.5 rounded-lg transition-colors flex items-center gap-1 cursor-pointer shadow-xs"
+                      @click="showOpsInconsistentesModal = true; auditSearchQuery = selectedProvinciaNombre;"
+                    >
+                      🔍 Auditar ({{ inconsistenciasDeProvinciaSeleccionada.length }})
+                    </button>
+                    <button 
+                      type="button" 
+                      class="bg-rose-600 hover:bg-rose-700 text-white text-xs font-extrabold px-3.5 py-1.5 rounded-lg transition-colors flex items-center gap-1.5 cursor-pointer shadow-xs"
+                      @click="irACorregirEnMovimientos()"
+                    >
+                      🔗 Ir a Conciliación para Corregir →
+                    </button>
+                  </div>
+                </div>
+
+                <!-- Tabla Nivel 2: Localidades -->
+                <div class="rounded-xl border border-slate-200 overflow-hidden bg-white shadow-xs">
+                  <div class="bg-slate-50 px-4 py-2.5 border-b border-slate-200 flex items-center justify-between">
+                    <h4 class="text-xs font-extrabold uppercase tracking-wider text-slate-700 flex items-center gap-2">
+                      🏙️ Desglose de Costos por Localidad en {{ selectedProvinciaNombre }}
+                    </h4>
+                    <span class="text-[11px] font-semibold text-slate-500 font-mono">{{ consolidadoLocalidades.localidades.length }} localidades con envíos</span>
+                  </div>
+                  <div class="overflow-x-auto">
+                    <table class="min-w-full divide-y divide-slate-200 text-xs">
+                      <thead class="bg-slate-100">
+                        <tr>
+                          <th class="px-3 py-2.5 text-left font-bold text-slate-600">Localidad Destino</th>
+                          <th class="px-3 py-2.5 text-center font-bold text-slate-600">Despachos / Envíos</th>
+                          <th class="px-3 py-2.5 text-center font-bold text-slate-600">Bultos Totales</th>
+                          <th class="px-3 py-2.5 text-center font-bold text-amber-800 bg-amber-50/60">Sentido principal</th>
+                          <th class="px-3 py-2.5 text-left font-bold text-indigo-800 bg-indigo-50/60">Operación principal</th>
+                          <th class="px-3 py-2.5 text-right font-bold text-slate-600">Total Acumulado ($)</th>
+                          <th class="px-3 py-2.5 text-right font-bold text-indigo-700 bg-indigo-50/50">Promedio por Envío</th>
+                          <th class="px-3 py-2.5 text-center font-bold text-slate-600">Acción</th>
+                        </tr>
+                      </thead>
+                      <tbody class="divide-y divide-slate-100 bg-white">
+                        <tr 
+                          v-for="l in consolidadoLocalidades.localidades" 
+                          :key="l.localidad_id || l.localidad_nombre" 
+                          class="hover:bg-indigo-50/40 cursor-pointer transition-colors"
+                          @click="costosDestino.selectedLocalidadId.value = l.localidad_id;"
+                        >
+                          <td class="px-3 py-2.5 font-extrabold text-slate-800 flex items-center gap-2">
+                            <span>🏙️</span>
+                            <span>{{ l.localidad_nombre }}</span>
+                            <span v-if="l.isInconsistent" class="inline-flex items-center gap-1 text-[10px] bg-rose-100 text-rose-800 font-extrabold px-1.5 py-0.5 rounded border border-rose-200" title="Localidad con inconsistencia registrada en la base de datos">
+                              ⚠️ Requiere revisión
+                            </span>
+                          </td>
+                          <td class="px-3 py-2.5 text-center font-mono font-bold text-slate-800">{{ l.envios }}</td>
+                          <td class="px-3 py-2.5 text-center font-mono font-bold text-slate-800">{{ l.bultos }}</td>
+                          <td class="px-3 py-2.5 text-center font-bold">
+                            <span class="inline-block px-2 py-0.5 rounded text-[10px] font-extrabold" :class="l.sentidoPredominante === 'Vuelta' ? 'bg-purple-100 text-purple-800' : l.sentidoPredominante === 'Interno' ? 'bg-slate-100 text-slate-800' : 'bg-blue-100 text-blue-800'">
+                              {{ l.sentidoPredominante || 'Ida' }}
+                            </span>
+                          </td>
+                          <td class="px-3 py-2.5 text-left font-semibold text-slate-700 text-[11px] truncate max-w-[140px]" :title="l.tipoPredominante">
+                            {{ l.tipoPredominante || 'Envío General' }}
+                          </td>
+                          <td class="px-3 py-2.5 text-right font-extrabold text-slate-900">{{ formatCurrency(l.total) }}</td>
+                          <td class="px-3 py-2.5 text-right font-extrabold text-indigo-700 bg-indigo-50/30">{{ formatCurrency(l.promedioEnvio) }}</td>
+                          <td class="px-3 py-2.5 text-center">
+                            <span class="inline-flex items-center text-[11px] font-semibold text-indigo-600 hover:text-indigo-800">
+                              Ver Detalle Operativo →
+                            </span>
+                          </td>
+                        </tr>
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+
+                <!-- Resumen Ejecutivos Nivel 2: Encomiendas, Proveedores y Clientes -->
+                <div class="grid grid-cols-1 gap-4 lg:grid-cols-3">
+                  <!-- Tabla 1: Encomiendas / Transportes -->
+                  <div class="rounded-xl border border-slate-200 overflow-hidden bg-white shadow-xs">
+                    <div class="bg-slate-50 px-4 py-2.5 border-b border-slate-200 flex items-center justify-between">
+                      <h4 class="text-xs font-extrabold uppercase tracking-wider text-slate-700 flex items-center gap-2">
+                        🚚 Empresa de Transporte
+                      </h4>
+                      <span class="text-[11px] font-semibold text-slate-500 font-mono">{{ consolidadoLocalidades.resumenTransportes?.length || 0 }}</span>
+                    </div>
+                    <div class="overflow-x-auto">
+                      <table class="min-w-full divide-y divide-slate-200 text-xs">
+                        <thead class="bg-slate-100">
+                          <tr>
+                            <th class="px-2.5 py-2 text-left font-bold text-slate-600">Transportista</th>
+                            <th class="px-2 py-2 text-center font-bold text-slate-600">Envíos</th>
+                            <th class="px-2 py-2 text-center font-bold text-slate-600">Bultos</th>
+                            <th class="px-2 py-2 text-center font-bold text-amber-800">Sentido principal</th>
+                            <th class="px-2 py-2 text-left font-bold text-indigo-800">Operación principal</th>
+                            <th class="px-2.5 py-2 text-right font-bold text-slate-600">Total ($)</th>
+                            <th class="px-2.5 py-2 text-right font-bold text-indigo-700 bg-indigo-50/50">Prom/Envío</th>
+                          </tr>
+                        </thead>
+                        <tbody class="divide-y divide-slate-100 bg-white">
+                          <tr v-for="t in consolidadoLocalidades.resumenTransportes" :key="t.transporte_nombre" class="hover:bg-slate-50">
+                            <td class="px-2.5 py-2 font-extrabold text-slate-800">{{ t.transporte_nombre }}</td>
+                            <td class="px-2 py-2 text-center font-mono font-bold text-slate-800">{{ t.envios }}</td>
+                            <td class="px-2 py-2 text-center font-mono font-bold text-slate-800">{{ t.bultos }}</td>
+                            <td class="px-2 py-2 text-center text-[10px]">
+                              <span class="px-1.5 py-0.5 rounded font-extrabold" :class="t.sentidoPredominante === 'Vuelta' ? 'bg-purple-100 text-purple-800' : 'bg-blue-100 text-blue-800'">{{ t.sentidoPredominante || 'Ida' }}</span>
+                            </td>
+                            <td class="px-2 py-2 text-left font-medium text-slate-700 text-[10px] truncate max-w-[110px]" :title="t.tipoPredominante">{{ t.tipoPredominante || 'Envío' }}</td>
+                            <td class="px-2.5 py-2 text-right font-extrabold text-slate-900">{{ formatCurrency(t.total) }}</td>
+                            <td class="px-2.5 py-2 text-right font-extrabold text-indigo-700 bg-indigo-50/30">{{ formatCurrency(t.promedioEnvio) }}</td>
+                          </tr>
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+
+                  <!-- Tabla 2: Proveedores Externos (Reales) -->
+                  <div class="rounded-xl border border-slate-200 overflow-hidden bg-white shadow-xs">
+                    <div class="bg-slate-50 px-4 py-2.5 border-b border-slate-200 flex items-center justify-between">
+                      <h4 class="text-xs font-extrabold uppercase tracking-wider text-slate-700 flex items-center gap-2">
+                        🏢 Desglose por Proveedor Externo
+                      </h4>
+                      <span class="text-[11px] font-semibold text-slate-500 font-mono">{{ consolidadoLocalidades.resumenProveedores?.length || 0 }}</span>
+                    </div>
+                    <div class="overflow-x-auto">
+                      <table class="min-w-full divide-y divide-slate-200 text-xs">
+                        <thead class="bg-slate-100">
+                          <tr>
+                            <th class="px-2.5 py-2 text-left font-bold text-slate-600">Proveedor Externo</th>
+                            <th class="px-2 py-2 text-center font-bold text-slate-600">Envíos</th>
+                            <th class="px-2 py-2 text-center font-bold text-slate-600">Bultos</th>
+                            <th class="px-2 py-2 text-center font-bold text-amber-800">Sentido principal</th>
+                            <th class="px-2 py-2 text-left font-bold text-indigo-800">Operación principal</th>
+                            <th class="px-2.5 py-2 text-right font-bold text-slate-600">Total ($)</th>
+                            <th class="px-2.5 py-2 text-right font-bold text-emerald-700 bg-emerald-50/50">Prom/Envío</th>
+                          </tr>
+                        </thead>
+                        <tbody class="divide-y divide-slate-100 bg-white">
+                          <tr v-for="p in consolidadoLocalidades.resumenProveedores" :key="p.proveedor_nombre" class="hover:bg-slate-50">
+                            <td class="px-2.5 py-2 font-extrabold text-slate-800">{{ p.proveedor_nombre }}</td>
+                            <td class="px-2 py-2 text-center font-mono font-bold text-slate-800">{{ p.envios }}</td>
+                            <td class="px-2 py-2 text-center font-mono font-bold text-slate-800">{{ p.bultos }}</td>
+                            <td class="px-2 py-2 text-center text-[10px]">
+                              <span class="px-1.5 py-0.5 rounded font-extrabold" :class="p.sentidoPredominante === 'Vuelta' ? 'bg-purple-100 text-purple-800' : 'bg-blue-100 text-blue-800'">{{ p.sentidoPredominante || 'Ida' }}</span>
+                            </td>
+                            <td class="px-2 py-2 text-left font-medium text-slate-700 text-[10px] truncate max-w-[110px]" :title="p.tipoPredominante">{{ p.tipoPredominante || 'Envío' }}</td>
+                            <td class="px-2.5 py-2 text-right font-extrabold text-slate-900">{{ formatCurrency(p.total) }}</td>
+                            <td class="px-2.5 py-2 text-right font-extrabold text-emerald-700 bg-emerald-50/30">{{ formatCurrency(p.promedioEnvio) }}</td>
+                          </tr>
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+
+                  <!-- Tabla 3: Clientes / Obras Sociales -->
+                  <div class="rounded-xl border border-slate-200 overflow-hidden bg-white shadow-xs">
+                    <div class="bg-slate-50 px-4 py-2.5 border-b border-slate-200 flex items-center justify-between">
+                      <h4 class="text-xs font-extrabold uppercase tracking-wider text-slate-700 flex items-center gap-2">
+                        🏥 Desglose por Cliente / Obra Social
+                      </h4>
+                      <span class="text-[11px] font-semibold text-slate-500 font-mono">{{ consolidadoLocalidades.resumenClientes?.length || 0 }}</span>
+                    </div>
+                    <div class="overflow-x-auto">
+                      <table class="min-w-full divide-y divide-slate-200 text-xs">
+                        <thead class="bg-slate-100">
+                          <tr>
+                            <th class="px-2.5 py-2 text-left font-bold text-slate-600">Cliente / Obra Social</th>
+                            <th class="px-2 py-2 text-center font-bold text-slate-600">Envíos</th>
+                            <th class="px-2 py-2 text-center font-bold text-slate-600">Bultos</th>
+                            <th class="px-2 py-2 text-center font-bold text-amber-800">Sentido principal</th>
+                            <th class="px-2 py-2 text-left font-bold text-indigo-800">Operación principal</th>
+                            <th class="px-2.5 py-2 text-right font-bold text-slate-600">Total ($)</th>
+                            <th class="px-2.5 py-2 text-right font-bold text-sky-700 bg-sky-50/50">Prom/Envío</th>
+                          </tr>
+                        </thead>
+                        <tbody class="divide-y divide-slate-100 bg-white">
+                          <tr v-for="c in consolidadoLocalidades.resumenClientes" :key="c.cliente_nombre" class="hover:bg-slate-50">
+                            <td class="px-2.5 py-2 font-extrabold text-slate-800">{{ c.cliente_nombre }}</td>
+                            <td class="px-2 py-2 text-center font-mono font-bold text-slate-800">{{ c.envios }}</td>
+                            <td class="px-2 py-2 text-center font-mono font-bold text-slate-800">{{ c.bultos }}</td>
+                            <td class="px-2 py-2 text-center text-[10px]">
+                              <span class="px-1.5 py-0.5 rounded font-extrabold" :class="c.sentidoPredominante === 'Vuelta' ? 'bg-purple-100 text-purple-800' : 'bg-blue-100 text-blue-800'">{{ c.sentidoPredominante || 'Ida' }}</span>
+                            </td>
+                            <td class="px-2 py-2 text-left font-medium text-slate-700 text-[10px] truncate max-w-[110px]" :title="c.tipoPredominante">{{ c.tipoPredominante || 'Envío' }}</td>
+                            <td class="px-2.5 py-2 text-right font-extrabold text-slate-900">{{ formatCurrency(c.total) }}</td>
+                            <td class="px-2.5 py-2 text-right font-extrabold text-sky-700 bg-sky-50/30">{{ formatCurrency(c.promedioEnvio) }}</td>
+                          </tr>
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                </div>
+
+              </div>
+
+              <!-- ========================================================================= -->
+              <!-- NIVEL 3: DETALLE OPERATIVO DE LOCALIDAD (Localidad Seleccionada) -->
+              <!-- ========================================================================= -->
+              <div v-else-if="costosDestino.currentNivel.value === 'detalle'" class="space-y-4">
+                
+                <div class="flex items-center justify-between">
+                  <button 
+                    type="button" 
+                    class="text-xs font-semibold text-indigo-600 hover:text-indigo-800 flex items-center gap-1.5 bg-indigo-50 px-2.5 py-1 rounded-md border border-indigo-200"
+                    @click="costosDestino.selectedLocalidadId.value = null;"
+                  >
+                    ← Volver a Localidades de {{ selectedProvinciaNombre }}
+                  </button>
+                  <span class="text-xs text-slate-500 font-medium">Análisis detallado de despachos hacia {{ selectedLocalidadNombre }}</span>
+                </div>
+
+                <!-- TARJETAS KPI Nivel 3 -->
+                <div class="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
+                  <div class="rounded-xl border border-indigo-200 bg-indigo-50/60 p-3.5 shadow-xs">
+                    <span class="block text-[10px] font-extrabold uppercase tracking-wider text-indigo-700">Costo Promedio por Envío</span>
+                    <strong class="mt-1 block text-xl font-extrabold text-indigo-900">{{ formatCurrency(statsDestino.costoPromedioEnvio) }}</strong>
+                    <span class="text-[10px] text-indigo-600 font-semibold block mt-0.5">KPI Principal / Referencia</span>
+                  </div>
+
+                  <div class="rounded-xl border border-slate-200 bg-white p-3.5 shadow-xs">
+                    <span class="block text-[10px] font-extrabold uppercase tracking-wider text-slate-500">Costo Promedio por Bulto</span>
+                    <strong class="mt-1 block text-xl font-extrabold text-slate-800">{{ formatCurrency(statsDestino.costoPromedioBulto) }}</strong>
+                    <span class="text-[11px] text-slate-500 block mt-0.5">Total: <strong class="text-slate-700 font-mono">{{ statsDestino.cantBultos }}</strong> bultos</span>
+                  </div>
+
+                  <div class="rounded-xl border border-slate-200 bg-white p-3.5 shadow-xs">
+                    <span class="block text-[10px] font-extrabold uppercase tracking-wider text-slate-500">Total Acumulado ($)</span>
+                    <strong class="mt-1 block text-xl font-extrabold text-slate-900">{{ formatCurrency(statsDestino.montoTotal) }}</strong>
+                    <span class="text-[11px] text-slate-500 block mt-0.5"><strong class="text-slate-700 font-mono">{{ statsDestino.cantEnvios }}</strong> envíos registrados</span>
+                  </div>
+
+                  <div class="rounded-xl border border-slate-200 bg-white p-3.5 shadow-xs">
+                    <span class="block text-[10px] font-extrabold uppercase tracking-wider text-slate-500">Rango Mín. / Máx.</span>
+                    <div class="mt-1 flex items-baseline justify-between text-xs">
+                      <span>Mín: <strong class="text-emerald-700 font-bold font-mono">{{ formatCurrency(statsDestino.costoMinimo) }}</strong></span>
+                      <span>Máx: <strong class="text-rose-700 font-bold font-mono">{{ formatCurrency(statsDestino.costoMaximo) }}</strong></span>
+                    </div>
+                    <span class="text-[10px] text-slate-400 block mt-0.5">Por despacho individual</span>
+                  </div>
+                </div>
+
+                <!-- 1. TABLA DETALLE OPERATIVO DE ENVÍOS AL DESTINO -->
+                <div class="rounded-xl border border-slate-200 overflow-hidden bg-white shadow-xs">
+                  <div class="bg-slate-50 px-4 py-2.5 border-b border-slate-200 flex items-center justify-between">
+                    <h4 class="text-xs font-extrabold uppercase tracking-wider text-slate-700 flex items-center gap-2">
+                      📋 Detalle Operativo de Envíos a {{ selectedLocalidadNombre }} ({{ selectedProvinciaNombre }})
+                    </h4>
+                    <span class="text-[11px] font-semibold text-slate-500 font-mono">{{ statsDestino.cantEnvios }} registros</span>
+                  </div>
+                  <div class="overflow-x-auto max-h-[35vh]">
+                    <table class="min-w-full divide-y divide-slate-200 text-xs">
+                      <thead class="bg-slate-100 sticky top-0">
+                        <tr>
+                          <th class="px-3 py-2 text-left font-bold text-slate-600">Fecha</th>
+                          <th class="px-3 py-2 text-left font-bold text-slate-600">Transporte</th>
+                          <th class="px-3 py-2 text-left font-bold text-slate-600">Proveedor / Tipo</th>
+                          <th class="px-3 py-2 text-center font-bold text-slate-600">Movimiento</th>
+                          <th class="px-3 py-2 text-center font-bold text-slate-600">Bultos</th>
+                          <th class="px-3 py-2 text-right font-bold text-slate-600">Importe ($)</th>
+                          <th class="px-3 py-2 text-center font-bold text-slate-600">Guía / Remito</th>
+                        </tr>
+                      </thead>
+                      <tbody class="divide-y divide-slate-100 bg-white">
+                        <tr v-for="op in statsDestino.detalleOps" :key="op.id" class="hover:bg-slate-50">
+                          <td class="px-3 py-2 whitespace-nowrap text-slate-600 font-medium">{{ formatDate(op.fecha_gasto) }}</td>
+                          <td class="px-3 py-2 font-bold text-slate-800">
+                            <span class="inline-block px-2 py-0.5 text-[11px] font-bold rounded-md border" :class="getProveedorBadgeColor(op.transporte_nombre)">
+                              {{ op.transporte_nombre }}
+                            </span>
+                          </td>
+                          <td class="px-3 py-2 font-semibold" :class="op.is_cirugia ? 'text-indigo-700' : 'text-slate-700'">
+                            {{ op.proveedor_label }}
+                            <span v-if="op.cliente_nombre" class="text-[10px] text-slate-400 block font-normal">{{ op.cliente_nombre }}</span>
+                          </td>
+                          <td class="px-3 py-2 text-center text-slate-600">{{ op.tipo_movimiento }}</td>
+                          <td class="px-3 py-2 text-center font-mono font-bold text-indigo-700">{{ op.bultos }}</td>
+                          <td class="px-3 py-2 text-right font-extrabold text-slate-900">{{ formatCurrency(op.monto_total) }}</td>
+                          <td class="px-3 py-2 text-center font-mono text-slate-500">{{ op.numero_factura || '—' }}</td>
+                        </tr>
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+
+                <!-- 2. CONSOLIDADO SECUNDARIO: COSTO POR TRANSPORTE -->
+                <div class="rounded-xl border border-slate-200 overflow-hidden bg-white shadow-xs">
+                  <div class="bg-slate-50 px-4 py-2.5 border-b border-slate-200 flex items-center justify-between">
+                    <h4 class="text-xs font-extrabold uppercase tracking-wider text-slate-700 flex items-center gap-2">
+                      🚚 Comparativa por Empresa de Transporte
+                    </h4>
+                    <span v-if="statsDestino.cantOpsSinTransporte > 0" class="text-[11px] font-semibold text-amber-700 bg-amber-50 px-2.5 py-0.5 rounded border border-amber-200">
+                      ⚠️ {{ statsDestino.cantOpsSinTransporte }} {{ statsDestino.cantOpsSinTransporte === 1 ? 'operación sin transporte asignado' : 'operaciones sin transporte asignado' }} (excluidas de esta comparativa)
+                    </span>
+                    <span v-else class="text-[11px] text-slate-500">Evaluación de conveniencia hacia {{ selectedLocalidadNombre }}</span>
+                  </div>
+                  <div class="overflow-x-auto">
+                    <table class="min-w-full divide-y divide-slate-200 text-xs">
+                      <thead class="bg-slate-100">
+                        <tr>
+                          <th class="px-3 py-2 text-left font-bold text-slate-600">Empresa de Transporte</th>
+                          <th class="px-3 py-2 text-center font-bold text-slate-600">Envíos</th>
+                          <th class="px-3 py-2 text-center font-bold text-slate-600">Bultos Totales</th>
+                          <th class="px-3 py-2 text-right font-bold text-slate-600">Total Acumulado ($)</th>
+                          <th class="px-3 py-2 text-right font-bold text-indigo-700 bg-indigo-50/50">Promedio por Envío</th>
+                          <th class="px-3 py-2 text-right font-bold text-slate-600">Promedio por Bulto</th>
+                        </tr>
+                      </thead>
+                      <tbody class="divide-y divide-slate-100 bg-white">
+                        <tr v-for="t in statsDestino.transporteConsolidado" :key="t.transporteNombre" class="hover:bg-slate-50">
+                          <td class="px-3 py-2 font-bold">
+                            <span class="inline-block px-2 py-0.5 text-[11px] font-bold rounded-md border" :class="getProveedorBadgeColor(t.transporteNombre)">
+                              {{ t.transporteNombre }}
+                            </span>
+                          </td>
+                          <td class="px-3 py-2 text-center font-mono font-bold text-slate-800">{{ t.envios }}</td>
+                          <td class="px-3 py-2 text-center font-mono font-bold text-slate-800">{{ t.bultos }}</td>
+                          <td class="px-3 py-2 text-right font-extrabold text-slate-900">{{ formatCurrency(t.total) }}</td>
+                          <td class="px-3 py-2 text-right font-extrabold text-indigo-700 bg-indigo-50/30">{{ formatCurrency(t.promedioEnvio) }}</td>
+                          <td class="px-3 py-2 text-right text-slate-600 font-medium font-mono">{{ formatCurrency(t.promedioBulto) }}</td>
+                        </tr>
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+
+              </div>
+
+            </div>
+
+          </div> <!-- Fin div activeCategory === 'destino' -->
+
         </div>
 
         <!-- Footer con Botones de Exportación Dinámica -->
         <div class="border-t border-slate-200 p-4 bg-slate-50 flex flex-wrap items-center justify-between gap-3">
-          <div class="flex items-center gap-2">
+          <div v-if="activeCategory === 'ctacte'" class="flex items-center gap-2">
             <span class="text-xs font-semibold text-slate-500">Descargas Rápidas:</span>
             <button 
               type="button" 
@@ -772,10 +1827,25 @@ watch([selectedMonth, includePagoInmediato], () => {
               PDF Consolidado Completo (Ambos)
             </button>
           </div>
+          <div v-else class="flex items-center gap-2">
+            <span class="text-xs font-semibold text-slate-500">Exportar Ficha de Destino:</span>
+            <button 
+              type="button" 
+              class="px-2.5 py-1 text-xs font-medium text-emerald-700 bg-emerald-50 border border-emerald-200 rounded-md hover:bg-emerald-100 flex items-center gap-1.5 transition-colors"
+              @click="exportDestinoExcel"
+              :disabled="statsDestino.cantEnvios === 0 || loadingDestino"
+            >
+              <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+              </svg>
+              <span>Excel Destino</span>
+            </button>
+          </div>
 
           <div class="flex items-center gap-3">
             <button type="button" class="btn-secondary" @click="closeModal">Cerrar</button>
             <button 
+              v-if="activeCategory === 'ctacte'"
               type="button" 
               class="btn-primary flex items-center justify-center gap-2" 
               :disabled="items.length === 0 || loading"
@@ -788,8 +1858,220 @@ watch([selectedMonth, includePagoInmediato], () => {
                 {{ activeViewTab === 'encomienda' ? 'Descargar PDF (Solo Encomiendas)' : activeViewTab === 'proveedor' ? 'Descargar PDF (Solo Proveedores)' : activeViewTab === 'completo' ? 'Descargar PDF (Consolidado Completo)' : 'Descargar PDF (Detalle)' }}
               </span>
             </button>
+            <button 
+              v-else
+              type="button" 
+              class="btn-primary flex items-center justify-center gap-2" 
+              :disabled="filteredDestinoByDate.length === 0 || loadingDestino"
+              @click="exportDestinoPdf"
+            >
+              <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+              </svg>
+              <span>
+                {{ costosDestino.currentNivel.value === 'provincia' ? 'Descargar PDF (Consolidado Provincias)' : costosDestino.currentNivel.value === 'localidad' ? 'Descargar PDF (Localidades)' : 'Descargar PDF (Ficha Operativa)' }}
+              </span>
+            </button>
           </div>
         </div>
+      </div>
+    </div>
+  </Transition>
+
+  <!-- MODAL DE OPERACIONES SIN DESTINO NORMALIZADO (AUDITORÍA) -->
+  <Transition name="modal-fade">
+    <div v-if="showOpsSinDestinoModal" class="fixed inset-0 z-[100] flex items-center justify-center bg-slate-900/60 backdrop-blur-xs p-4">
+      <div class="bg-white rounded-2xl shadow-2xl max-w-6xl w-full overflow-hidden border border-slate-200">
+        
+        <!-- Header -->
+        <div class="bg-amber-500 px-5 py-3.5 flex items-center justify-between text-white">
+          <div class="flex items-center gap-2">
+            <span class="text-lg">⚠️</span>
+            <div>
+              <h3 class="text-sm font-extrabold uppercase tracking-wider">Operaciones Logísticas sin ID de Destino</h3>
+              <p class="text-[11px] text-amber-100 font-medium">Registros históricos del circuito logístico que no poseen provincia_id ni localidad_destino_id asignados</p>
+            </div>
+          </div>
+          <button type="button" class="text-amber-100 hover:text-white text-xl font-bold px-2 cursor-pointer" @click="showOpsSinDestinoModal = false">✕</button>
+        </div>
+
+        <!-- Content Table -->
+        <div class="p-4 space-y-3">
+          <div class="overflow-x-auto max-h-[55vh]">
+            <table class="min-w-full divide-y divide-slate-200 text-xs">
+              <thead class="bg-slate-100 sticky top-0">
+                <tr>
+                  <th class="px-3 py-2 text-left font-bold text-slate-600">ID / Fecha</th>
+                  <th class="px-3 py-2 text-left font-bold text-slate-600">Transporte</th>
+                  <th class="px-3 py-2 text-left font-bold text-slate-600">Proveedor / Tipo</th>
+                  <th class="px-3 py-2 text-left font-bold text-slate-600">Descripción / Referencia</th>
+                  <th class="px-3 py-2 text-left font-bold text-slate-600">Texto Lib. Destino</th>
+                  <th class="px-3 py-2 text-right font-bold text-slate-600">Importe ($)</th>
+                  <th class="px-3 py-2 text-center font-bold text-slate-600">Acción</th>
+                </tr>
+              </thead>
+              <tbody class="divide-y divide-slate-100 bg-white">
+                <tr v-for="op in opsSinDestinoList" :key="op.id" class="hover:bg-amber-50/40 transition-colors">
+                  <td class="px-3 py-2 whitespace-nowrap">
+                    <span class="font-mono font-bold text-slate-700 block">#{{ op.id }}</span>
+                    <span class="text-[11px] text-slate-500">{{ formatDate(op.fecha_gasto) }}</span>
+                  </td>
+                  <td class="px-3 py-2 font-bold text-slate-800">{{ op.transporte_nombre }}</td>
+                  <td class="px-3 py-2 font-semibold text-slate-700">{{ op.proveedor_label }}</td>
+                  <td class="px-3 py-2 text-slate-600 max-w-[220px] truncate" :title="op.descripcion || op.descripcion_general">{{ op.descripcion || op.descripcion_general || '—' }}</td>
+                  <td class="px-3 py-2 text-slate-500 font-mono italic">{{ op.datos_adicionales?.destino_texto || op.destino_texto || '—' }}</td>
+                  <td class="px-3 py-2 text-right font-extrabold text-slate-900">{{ formatCurrency(op.monto_total) }}</td>
+                  <td class="px-3 py-2 text-center whitespace-nowrap">
+                    <button 
+                      type="button" 
+                      class="inline-flex items-center gap-1 text-[11px] font-bold text-amber-800 hover:text-amber-950 bg-amber-100 hover:bg-amber-200 border border-amber-300 px-2.5 py-1 rounded-lg transition whitespace-nowrap cursor-pointer shadow-2xs"
+                      @click="irACorregirSinDestino(op)"
+                    >
+                      <span>🔗 Corregir</span>
+                      <span>→</span>
+                    </button>
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        <!-- Footer -->
+        <div class="bg-slate-50 px-5 py-3 border-t border-slate-200 flex items-center justify-between text-xs">
+          <span class="text-slate-600 font-medium">Total: <strong class="text-amber-700">{{ opsSinDestinoList.length }}</strong> operaciones sin vincular</span>
+          <div class="flex items-center gap-2">
+            <button 
+              type="button" 
+              class="btn-primary text-xs bg-amber-600 hover:bg-amber-700 text-white font-bold px-3.5 py-1.5 rounded-lg flex items-center gap-1.5 cursor-pointer shadow-xs"
+              @click="irACorregirSinDestino()"
+            >
+              🚀 Redirigir a Conciliación / Movimientos para Corregir →
+            </button>
+            <button type="button" class="btn-secondary text-xs" @click="showOpsSinDestinoModal = false">Cerrar</button>
+          </div>
+        </div>
+
+      </div>
+    </div>
+  </Transition>
+
+  <!-- MODAL DE OPERACIONES CON DESTINO INCONSISTENTE (AUDITORÍA) -->
+  <Transition name="modal-fade">
+    <div v-if="showOpsInconsistentesModal" class="fixed inset-0 z-[100] flex items-center justify-center bg-slate-900/60 backdrop-blur-xs p-4">
+      <div class="bg-white rounded-2xl shadow-2xl max-w-6xl w-full overflow-hidden border border-slate-200">
+        
+        <!-- Header -->
+        <div class="bg-rose-600 px-5 py-3.5 flex items-center justify-between text-white">
+          <div class="flex items-center gap-2">
+            <span class="text-lg">⚠️</span>
+            <div>
+              <h3 class="text-sm font-extrabold uppercase tracking-wider">Operaciones con Destino Inconsistente</h3>
+              <p class="text-[11px] text-rose-100 font-medium">Registros donde la localidad asignada no pertenece a la provincia registrada (Requiere revisión manual)</p>
+            </div>
+          </div>
+          <button type="button" class="text-rose-100 hover:text-white text-xl font-bold px-2 cursor-pointer" @click="showOpsInconsistentesModal = false">✕</button>
+        </div>
+
+        <!-- Content Table -->
+        <div class="p-4 space-y-3">
+          
+          <!-- Buscador por Texto -->
+          <div class="flex items-center justify-between gap-3 bg-slate-50 p-2.5 rounded-xl border border-slate-200">
+            <div class="flex-1 max-w-md relative">
+              <input 
+                v-model="auditSearchQuery" 
+                type="text" 
+                placeholder="🔍 Buscar por ciudad, provincia, ID o texto (ej. Buenos Aires, Corrientes)..." 
+                class="form-input text-xs w-full pl-3 pr-8 py-1.5 font-medium bg-white"
+              />
+              <button 
+                v-if="auditSearchQuery" 
+                type="button" 
+                class="absolute right-2 top-1.5 text-slate-400 hover:text-slate-600 text-xs font-bold" 
+                @click="auditSearchQuery = ''"
+              >
+                ✕
+              </button>
+            </div>
+
+            <span class="text-xs text-slate-500 font-semibold font-mono">
+              Mostrando {{ opsInconsistentesFiltradas.length }} de {{ opsInconsistentesList.length }} inconsistencias
+            </span>
+          </div>
+
+          <div class="overflow-x-auto max-h-[55vh]">
+            <table class="min-w-full divide-y divide-slate-200 text-xs">
+              <thead class="bg-slate-100 sticky top-0">
+                <tr>
+                  <th class="px-3 py-2 text-left font-bold text-slate-600">ID / Fecha</th>
+                  <th class="px-3 py-2 text-left font-bold text-slate-600">Transporte / Prov.</th>
+                  <th class="px-3 py-2 text-left font-bold text-rose-700 bg-rose-50">Provincia Registrada</th>
+                  <th class="px-3 py-2 text-left font-bold text-amber-800 bg-amber-50">Localidad Registrada</th>
+                  <th class="px-3 py-2 text-left font-bold text-indigo-700 bg-indigo-50">Provincia Real (de la ciudad)</th>
+                  <th class="px-3 py-2 text-center font-bold text-slate-600">Estado</th>
+                  <th class="px-3 py-2 text-right font-bold text-slate-600">Importe ($)</th>
+                  <th class="px-3 py-2 text-center font-bold text-slate-600">Acción</th>
+                </tr>
+              </thead>
+              <tbody class="divide-y divide-slate-100 bg-white">
+                <tr v-for="op in opsInconsistentesFiltradas" :key="op.id" class="hover:bg-rose-50/30 transition-colors">
+                  <td class="px-3 py-2 whitespace-nowrap">
+                    <span class="font-mono font-bold text-slate-700 block">#{{ op.id }}</span>
+                    <span class="text-[11px] text-slate-500">{{ formatDate(op.fecha_gasto) }}</span>
+                  </td>
+                  <td class="px-3 py-2">
+                    <span class="font-bold text-slate-800 block">{{ op.transporte_nombre }}</span>
+                    <span class="text-[11px] text-slate-500">{{ op.proveedor_label }}</span>
+                  </td>
+                  <td class="px-3 py-2 font-bold text-rose-800 bg-rose-50/50">
+                    📍 {{ op.provincia_registrada_nombre }}
+                  </td>
+                  <td class="px-3 py-2 font-bold text-amber-900 bg-amber-50/50">
+                    🏙️ {{ op.localidad_registrada_nombre }}
+                  </td>
+                  <td class="px-3 py-2 font-bold text-indigo-900 bg-indigo-50/50">
+                    🇦🇷 {{ op.provincia_real_localidad_nombre }}
+                  </td>
+                  <td class="px-3 py-2 text-center">
+                    <span class="inline-block px-2 py-0.5 rounded text-[10px] font-extrabold bg-rose-100 text-rose-800 border border-rose-200">
+                      {{ op.estado }}
+                    </span>
+                  </td>
+                  <td class="px-3 py-2 text-right font-extrabold text-slate-900">{{ formatCurrency(op.monto_total) }}</td>
+                  <td class="px-3 py-2 text-center whitespace-nowrap">
+                    <button 
+                      type="button" 
+                      class="inline-flex items-center gap-1 text-[11px] font-bold text-indigo-700 hover:text-indigo-900 bg-indigo-50 hover:bg-indigo-100 border border-indigo-200 px-2.5 py-1 rounded-lg transition whitespace-nowrap cursor-pointer shadow-2xs"
+                      @click="irACorregirEnMovimientos(op)"
+                    >
+                      🔗 Corregir en Movimientos →
+                    </button>
+                  </td>
+                </tr>
+                <tr v-if="opsInconsistentesFiltradas.length === 0" class="text-center py-6 text-slate-400">
+                  <td colspan="8" class="py-6">Sin resultados que coincidan con la búsqueda "{{ auditSearchQuery }}"</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        <!-- Footer -->
+        <div class="bg-slate-50 px-5 py-3 border-t border-slate-200 flex items-center justify-between text-xs">
+          <span class="text-slate-600 font-medium">Total: <strong class="text-rose-700">{{ opsInconsistentesFiltradas.length }}</strong> operaciones halladas</span>
+          <div class="flex items-center gap-2">
+            <button 
+              type="button" 
+              class="btn-primary text-xs bg-rose-600 hover:bg-rose-700 text-white font-bold px-3.5 py-1.5 rounded-lg flex items-center gap-1.5 cursor-pointer shadow-xs"
+              @click="irACorregirEnMovimientos()"
+            >
+              🚀 Redirigir a Conciliación / Movimientos para Corregir →
+            </button>
+            <button type="button" class="btn-secondary text-xs" @click="showOpsInconsistentesModal = false">Cerrar</button>
+          </div>
+        </div>
+
       </div>
     </div>
   </Transition>

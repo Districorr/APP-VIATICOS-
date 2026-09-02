@@ -7,6 +7,18 @@ const loading = ref(false);
 const error = ref(null);
 let loadedOnce = false;
 
+export const OPCION_TODAS_LOCALIDADES = {
+  id: 'todos',
+  code: 'todos',
+  value: 'todos',
+  localidad_id: 'todos',
+  provincia_id: 'todos',
+  localidad_nombre: 'Todas las localidades',
+  provincia_nombre: 'Todas las provincias',
+  label: 'Todas las localidades (Todas las provincias)',
+  is_all: true
+};
+
 export function useDestinosUnificados() {
   async function cargarDestinos(force = false) {
     if (loadedOnce && destinosOptions.value.length > 0 && !force) return;
@@ -124,14 +136,13 @@ export function useDestinosUnificados() {
   }
 
   function findDestinoOption(localidadId, provinciaId) {
+    if (localidadId === 'todos' || provinciaId === 'todos') {
+      return OPCION_TODAS_LOCALIDADES;
+    }
     if (!destinosOptions.value.length) return null;
     if (localidadId) {
       const match = destinosOptions.value.find(d => Number(d.localidad_id) === Number(localidadId));
       if (match) return match;
-    }
-    if (provinciaId) {
-      const matchProv = destinosOptions.value.find(d => Number(d.provincia_id) === Number(provinciaId));
-      if (matchProv) return matchProv;
     }
     return null;
   }
@@ -143,6 +154,7 @@ export function useDestinosUnificados() {
     error,
     cargarDestinos,
     crearLocalidad,
-    findDestinoOption
+    findDestinoOption,
+    OPCION_TODAS_LOCALIDADES
   };
 }

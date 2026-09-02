@@ -283,7 +283,60 @@ const filters = reactive({
   localidadId: null,
   numeroGuia: '',
   conBultos: 'todos', // 'todos' | 'con_bultos' | 'sin_bultos'
+  soloInconsistentes: false,
+  soloSinDestino: false,
+  usuarioId: null, // Filtro por usuario / responsable de carga
 });
+
+const localidadesMapRef = ref(new Map());
+const targetGastoIdsRef = ref(null);
+
+function handleIrACorregir(payload) {
+  isCtaCteModalOpen.value = false;
+  activeTab.value = 'movimientos';
+  filters.fechaDesde = '';
+  filters.fechaHasta = '';
+  filters.searchQuery = '';
+  filters.transporteId = null;
+  filters.tipoMovimiento = null;
+  filters.tipoLogistica = null;
+  filters.sentido = null;
+  filters.clienteId = null;
+  filters.paciente = '';
+  filters.proveedorId = null;
+  filters.provinciaId = null;
+  filters.localidadId = null;
+  filters.numeroGuia = '';
+  filters.conBultos = 'todos';
+  filters.usuarioId = null;
+
+  targetGastoIdsRef.value = payload?.gastoIds && payload.gastoIds.length > 0 ? payload.gastoIds : (payload?.gastoId ? [payload.gastoId] : null);
+
+  if (payload?.tipo === 'sin_destino') {
+    filters.soloInconsistentes = false;
+    filters.soloSinDestino = true;
+  } else {
+    filters.soloSinDestino = false;
+    filters.soloInconsistentes = true;
+    if (payload?.provinciaId && payload.provinciaId !== 'todos') {
+      filters.provinciaId = payload.provinciaId;
+    }
+  }
+
+  if (payload?.gastoId && (!payload?.gastoIds || payload.gastoIds.length === 1)) {
+    filters.searchQuery = String(payload.gastoId);
+  }
+
+  const countStr = targetGastoIdsRef.value ? `(${targetGastoIdsRef.value.length} halladas)` : '';
+
+  showNotification(
+    'Redirección a Movimientos',
+    payload?.tipo === 'sin_destino'
+      ? `Filtrando operaciones sin destino asignado ${countStr}. Hacé clic en "Editar" en la fila para asignar provincia y localidad.`
+      : `Filtrando las inconsistencias geográficas ${payload?.provinciaNombre ? 'de ' + payload.provinciaNombre : ''} ${countStr}. Hacé clic en "Editar" en la fila para corregir.`,
+    'info'
+  );
+}
 
 function verTodoElHistorico() {
   filters.fechaDesde = '';
@@ -297,12 +350,29 @@ function verMesActual() {
   showNotification('Período Ajustado', 'Filtrando por el mes en curso.', 'info');
 }
 
+function verUltimos3Meses() {
+  const d = new Date(todayObj.getFullYear(), todayObj.getMonth() - 2, 1);
+  filters.fechaDesde = d.toISOString().split('T')[0];
+  filters.fechaHasta = todayStr;
+  showNotification('Período Ajustado', 'Filtrando por los últimos 3 meses.', 'info');
+}
+
 // Opciones de Selectores para Filtros
 const clientesOptions = ref([]);
 const transportesOptions = ref([]);
 const proveedoresOptions = ref([]);
 const provinciasOptions = ref([]);
 const localidadesOptions = ref([]);
+
+const usuariosOptions = computed(() => {
+  const set = new Set();
+  gastosLogistica.value.forEach(g => {
+    if (g.cargado_por && g.cargado_por !== '—') {
+      set.add(g.cargado_por);
+    }
+  });
+  return Array.from(set).sort().map(u => ({ id: u, label: u }));
+});
 
 // Paginación en Movimientos
 const currentPage = ref(1);
@@ -337,7 +407,7 @@ function toggleExpandTransporte(key) {
 async function fetchDatosLogistica() {
   loading.value = true;
   try {
-    const [gastosRes, clientesRes, transportesRes, proveedoresRes, provinciasRes, localidadesRes, tiposRes] = await Promise.all([
+    const [gastosRes, clientesRes, transportesRes, proveedoresRes, provinciasRes, localidadesRes, tiposRes, perfilesRes] = await Promise.all([
       supabase.from('gastos').select('*').order('fecha_gasto', { ascending: false }),
       supabase.from('clientes').select('id, nombre_cliente').order('nombre_cliente'),
       supabase.from('transportes').select('id, nombre, created_at').order('nombre'),
@@ -345,6 +415,7 @@ async function fetchDatosLogistica() {
       supabase.from('provincias').select('id, nombre').order('nombre'),
       supabase.from('localidades').select('id, nombre').order('nombre'),
       supabase.from('tipos_gasto_config').select('id, nombre_tipo_gasto'),
+      supabase.from('perfiles').select('id, nombre_completo, email')
     ]);
 
     if (clientesRes.data) clientesOptions.value = clientesRes.data.map(c => ({ id: c.id, label: c.nombre_cliente }));
@@ -365,6 +436,8 @@ async function fetchDatosLogistica() {
     const proveedoresMap = new Map((proveedoresRes.data || []).map(p => [p.id, p]));
     const provinciasMap = new Map((provinciasRes.data || []).map(p => [p.id, p]));
     const localidadesMap = new Map((localidadesRes.data || []).map(l => [l.id, l]));
+    const perfilesMap = new Map((perfilesRes.data || []).map(u => [u.id, u.nombre_completo || u.email]));
+    localidadesMapRef.value = localidadesMap;
     const tiposMap = new Map((tiposRes.data || []).map(t => [t.id, t.nombre_tipo_gasto]));
 
     const logistica = gastosList.map(g => {
@@ -376,6 +449,10 @@ async function fetchDatosLogistica() {
       const tNorm = normalizeTransporte(t?.nombre);
       t = { id: t?.id || 'sin_encomienda', nombre: tNorm };
 
+      const uKey = g.usuario_id || g.responsable_principal_id || g.user_id || g.creado_por;
+      const uName = uKey ? perfilesMap.get(uKey) : null;
+      const cargadoPor = uName || g.datos_adicionales?.usuario_cargo || g.datos_adicionales?.creado_por || g.user_email || '—';
+
       return {
         ...g,
         clientes: g.cliente_id ? clientesMap.get(g.cliente_id) : null,
@@ -383,6 +460,7 @@ async function fetchDatosLogistica() {
         proveedores: p,
         provincias: g.provincia_id ? provinciasMap.get(g.provincia_id) : null,
         localidad_destino: g.localidad_destino_id ? localidadesMap.get(g.localidad_destino_id) : null,
+        cargado_por: cargadoPor
       };
     }).filter(g => {
       const extra = g.datos_adicionales || {};
@@ -559,6 +637,31 @@ watch(
   { deep: true }
 );
 
+// Sincronización automática de Filtros Globales superiores con el Análisis Geográfico
+watch(
+  () => [filters.fechaDesde, filters.fechaHasta, filters.provinciaId, filters.transporteId, filters.localidadId],
+  ([fDesde, fHasta, provId, transpId, locId]) => {
+    if (fDesde) fechaInicioA.value = fDesde;
+    if (fHasta) fechaFinA.value = fHasta;
+    selectedAnalisisProvinciaId.value = provId || null;
+
+    if (transpId) {
+      const foundT = transportesOptions.value.find(t => String(t.id) === String(transpId));
+      selectedAnalisisTransportes.value = foundT ? [foundT] : [];
+    } else {
+      selectedAnalisisTransportes.value = [];
+    }
+
+    if (locId) {
+      const foundL = localidadesOptions.value.find(l => String(l.id) === String(locId));
+      selectedAnalisisLocalidades.value = foundL ? [foundL] : [];
+    } else {
+      selectedAnalisisLocalidades.value = [];
+    }
+  },
+  { immediate: true }
+);
+
 watch(isComparisonMode, (newValue) => {
   if (!newValue) {
     fechaInicioB.value = null;
@@ -567,7 +670,7 @@ watch(isComparisonMode, (newValue) => {
 });
 
 watch(activeTab, (newTab) => {
-  if (newTab === 'analisis' && !analisisData.value) {
+  if (newTab === 'analisis') {
     fetchAnalisisData();
   }
 });
@@ -575,6 +678,116 @@ watch(activeTab, (newTab) => {
 const kpisPeriodoA = computed(() => analisisData.value?.kpis?.periodo_a || {});
 const kpisPeriodoB = computed(() => analisisData.value?.kpis?.periodo_b || {});
 const localidadesComparativa = computed(() => analisisData.value?.localidades || []);
+
+// Diccionario de Coordenadas Geográficas Reales de Argentina (Fallback para Localidades sin Geolocalización en BD)
+const PROVINCIA_COORDINATES = {
+  'CORRIENTES': [-27.4692, -58.8306],
+  'CÓRDOBA': [-31.4201, -64.1888],
+  'CORDOBA': [-31.4201, -64.1888],
+  'BUENOS AIRES': [-34.6037, -58.3816],
+  'CABA': [-34.6037, -58.3816],
+  'SANTA FE': [-31.6333, -60.7000],
+  'CHACO': [-27.4514, -58.9867],
+  'MISIONES': [-27.3621, -55.8969],
+  'ENTRE RÍOS': [-31.7333, -60.5333],
+  'ENTRE RIOS': [-31.7333, -60.5333],
+  'MENDOZA': [-32.8895, -68.8458],
+  'TUCUMÁN': [-26.8241, -65.2226],
+  'TUCUMAN': [-26.8241, -65.2226],
+  'SALTA': [-24.7859, -65.4117],
+  'JUJUY': [-24.1858, -65.2995],
+  'FORMOSA': [-26.1775, -58.1781],
+  'SANTIAGO DEL ESTERO': [-27.7951, -64.2615],
+  'SAN LUIS': [-33.2950, -66.3356],
+  'SAN JUAN': [-31.5375, -68.5364],
+  'LA RIOJA': [-29.4131, -66.8558],
+  'CATAMARCA': [-28.4696, -65.7852],
+  'NEUQUÉN': [-38.9516, -68.0591],
+  'NEUQUEN': [-38.9516, -68.0591],
+  'RÍO NEGRO': [-40.8135, -62.9967],
+  'RIO NEGRO': [-40.8135, -62.9967],
+  'CHUBUT': [-43.3002, -65.1023],
+  'SANTA CRUZ': [-51.6226, -69.2181],
+  'TIERRA DEL FUEGO': [-54.8019, -68.3030]
+};
+
+const LOCALIDAD_COORDINATES = {
+  'CORRIENTES': [-27.4692, -58.8306],
+  'CURUZU CUATIA': [-29.7917, -58.0546],
+  'CURUZÚ CUATIÁ': [-29.7917, -58.0546],
+  'GOYA': [-29.1441, -59.2647],
+  'PASO DE LOS LIBRES': [-29.7125, -57.0866],
+  'MERCEDES': [-29.1842, -58.0754],
+  'BELLA VISTA': [-28.5085, -59.0454],
+  'SANTO TOME': [-28.5494, -56.0428],
+  'SANTO TOMÉ': [-28.5494, -56.0428],
+  'ITUZAINGO': [-27.5925, -56.6825],
+  'ITUZAINGÓ': [-27.5925, -56.6825],
+  'ESQUINA': [-30.0152, -59.6006],
+  'MONTE CASEROS': [-30.2547, -57.5997],
+  'CÓRDOBA': [-31.4201, -64.1888],
+  'CORDOBA': [-31.4201, -64.1888],
+  'VILLA MARÍA': [-32.4075, -63.2403],
+  'VILLA MARIA': [-32.4075, -63.2403],
+  'RÍO CUARTO': [-33.1307, -64.3499],
+  'RIO CUARTO': [-33.1307, -64.3499],
+  'RESISTENCIA': [-27.4514, -58.9867],
+  'SÁENZ PEÑA': [-26.7847, -60.4439],
+  'SAENZ PEÑA': [-26.7847, -60.4439],
+  'POSADAS': [-27.3621, -55.8969],
+  'OBERÁ': [-27.4868, -55.1206],
+  'OBERA': [-27.4868, -55.1206],
+  'ELDORADO': [-26.4069, -54.6292],
+  'ROSARIO': [-32.9442, -60.6505],
+  'SANTA FE': [-31.6333, -60.7000],
+  'PARANÁ': [-31.7333, -60.5333],
+  'PARANA': [-31.7333, -60.5333],
+  'CONCORDIA': [-31.3929, -58.0209],
+  'GUALEGUAYCHÚ': [-33.0094, -58.5172],
+  'GUALEGUAYCHU': [-33.0094, -58.5172]
+};
+
+function getMarkerLatLng(loc) {
+  if (!loc) return [-31.4201, -64.1888];
+  
+  // 1. Probar latitud/longitud directas enviadas por la base de datos o RPC
+  const latNum = Number(loc.lat ?? loc.latitud);
+  const lngNum = Number(loc.lng ?? loc.longitud);
+
+  if (!isNaN(latNum) && !isNaN(lngNum) && latNum !== 0 && lngNum !== 0 && Math.abs(latNum) <= 90 && Math.abs(lngNum) <= 180) {
+    return [latNum, lngNum];
+  }
+
+  // 2. Buscar en diccionario por nombre de localidad
+  const locNameClean = (loc.localidad_nombre || '').toUpperCase().trim();
+  if (LOCALIDAD_COORDINATES[locNameClean]) {
+    return LOCALIDAD_COORDINATES[locNameClean];
+  }
+
+  // 3. Buscar por nombre de provincia
+  const provNameClean = (loc.provincia_nombre || '').toUpperCase().trim();
+  if (PROVINCIA_COORDINATES[provNameClean]) {
+    return PROVINCIA_COORDINATES[provNameClean];
+  }
+
+  // 4. Default: Centro geográfico de Argentina (Córdoba)
+  return [-31.4201, -64.1888];
+}
+
+const mapCenter = computed(() => {
+  if (!localidadesComparativa.value || localidadesComparativa.value.length === 0) {
+    return [-29.5, -60.5];
+  }
+  const validCoords = localidadesComparativa.value
+    .map(getMarkerLatLng)
+    .filter(c => c && c[0] !== 0 && c[1] !== 0);
+
+  if (validCoords.length === 0) return [-29.5, -60.5];
+
+  const avgLat = validCoords.reduce((acc, curr) => acc + curr[0], 0) / validCoords.length;
+  const avgLng = validCoords.reduce((acc, curr) => acc + curr[1], 0) / validCoords.length;
+  return [avgLat, avgLng];
+});
 
 const maxGastoLocalidad = computed(() => {
   if (localidadesComparativa.value.length === 0) return 0;
@@ -724,6 +937,7 @@ const activeFiltersCount = computed(() => {
   if (filters.localidadId) count++;
   if (filters.numeroGuia) count++;
   if (filters.conBultos !== 'todos') count++;
+  if (filters.usuarioId) count++;
   return count;
 });
 
@@ -742,6 +956,7 @@ function limpiarFiltros() {
   filters.localidadId = null;
   filters.numeroGuia = '';
   filters.conBultos = 'todos';
+  filters.usuarioId = null;
   currentPage.value = 1;
 }
 
@@ -764,6 +979,7 @@ const movimientosFiltrados = computed(() => {
 
     // Búsqueda global
     const matchesSearch = !q || (
+      String(g.id).includes(q) ||
       clienteName.toLowerCase().includes(q) ||
       pacienteName.toLowerCase().includes(q) ||
       transporteName.toLowerCase().includes(q) ||
@@ -807,10 +1023,34 @@ const movimientosFiltrados = computed(() => {
       || (filters.conBultos === 'con_bultos' && hasBultosField && cantBultos > 0)
       || (filters.conBultos === 'sin_bultos' && (!hasBultosField || cantBultos === 0));
 
+    const matchesSoloInconsistentes = !filters.soloInconsistentes || (() => {
+      if (targetGastoIdsRef.value && targetGastoIdsRef.value.length > 0) {
+        return targetGastoIdsRef.value.some(id => String(id) === String(g.id));
+      }
+      const provId = g.provincia_id;
+      const locId = g.localidad_destino_id;
+      if (!provId && !locId) return false;
+      if (provId && !locId) return false;
+      if (!provId && locId) return true;
+      const locObj = localidadesMapRef.value.get(Number(locId)) || localidadesMapRef.value.get(String(locId));
+      return !locObj || String(locObj.provincia_id) !== String(provId);
+    })();
+
+    const matchesSoloSinDestino = !filters.soloSinDestino || (() => {
+      if (targetGastoIdsRef.value && targetGastoIdsRef.value.length > 0) {
+        return targetGastoIdsRef.value.some(id => String(id) === String(g.id));
+      }
+      const provId = g.provincia_id || g.provincia_destino_id || g.datos_adicionales?.provincia_destino_id;
+      const locId = g.localidad_destino_id || g.datos_adicionales?.localidad_destino_id;
+      return !provId && !locId;
+    })();
+
+    const matchesUsuario = !filters.usuarioId || g.cargado_por === filters.usuarioId || String(g.usuario_id) === String(filters.usuarioId) || String(g.user_id) === String(filters.usuarioId);
+
     return matchesSearch && matchesFechaDesde && matchesFechaHasta && matchesTransporte
       && matchesTipoMov && matchesTipoLog && matchesSentido && matchesCliente
       && matchesPaciente && matchesProveedor && matchesProvincia && matchesLocalidad
-      && matchesGuia && matchesBultos;
+      && matchesGuia && matchesBultos && matchesSoloInconsistentes && matchesSoloSinDestino && matchesUsuario;
   });
 });
 
@@ -1265,72 +1505,51 @@ onMounted(fetchDatosLogistica);
     <ToastNotification :notification="notification" />
 
     <!-- ENCABEZADO PRINCIPAL CON ACCIONES COMPLETAS -->
-    <div class="flex flex-col gap-4 rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
-      <div class="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+    <div class="flex flex-col gap-3 rounded-2xl border border-slate-200 bg-white p-4 shadow-2xs">
+      <div class="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
         <div>
-          <div class="flex items-center gap-2.5">
-            <TruckIcon class="h-8 w-8 text-indigo-600" />
-            <h1 class="text-2xl font-bold text-slate-900">Transportes y Movimientos</h1>
+          <div class="flex items-center gap-2">
+            <TruckIcon class="h-6 w-6 text-indigo-600" />
+            <h1 class="text-xl font-bold text-slate-900">Transportes y Movimientos</h1>
           </div>
-          <p class="mt-1 text-xs md:text-sm font-medium text-slate-600">
+          <p class="mt-0.5 text-xs font-medium text-slate-500">
             Seguimiento operativo de encomiendas, movimientos y cuentas corrientes.
           </p>
         </div>
 
-        <!-- Indicador/Filtro de Período Inicializado con el 1º del Mes y Fecha Actual -->
-        <div class="flex flex-wrap items-center gap-2 rounded-xl border border-slate-200 bg-slate-50 p-2 text-xs">
-          <CalendarDaysIcon class="h-4 w-4 text-slate-500" />
-          <span class="font-bold text-slate-600">Período:</span>
-          <input v-model="filters.fechaDesde" type="date" class="rounded border border-slate-300 bg-white px-2 py-1 text-xs" />
-          <span class="text-slate-400">a</span>
-          <input v-model="filters.fechaHasta" type="date" class="rounded border border-slate-300 bg-white px-2 py-1 text-xs" />
-
-          <button
-            v-if="filters.fechaDesde || filters.fechaHasta"
-            type="button"
-            @click="verTodoElHistorico"
-            class="rounded-lg bg-indigo-50 border border-indigo-200 px-2.5 py-1 text-xs font-bold text-indigo-700 hover:bg-indigo-100 transition-colors cursor-pointer"
-          >
-            🌐 Ver todo el historial
-          </button>
-          <button
-            v-else
-            type="button"
-            @click="verMesActual"
-            class="rounded-lg bg-slate-200 border border-slate-300 px-2.5 py-1 text-xs font-bold text-slate-700 hover:bg-slate-300 transition-colors cursor-pointer"
-          >
-            📅 Ver mes actual
-          </button>
+        <!-- Indicador/Resumen de Estado y Filtros -->
+        <div class="flex items-center gap-2 text-xs font-semibold text-slate-500 bg-slate-50 px-3 py-1 rounded-lg border border-slate-200">
+          <span>Movimientos activos: <strong class="text-indigo-700 font-extrabold">{{ movimientosFiltrados.length }}</strong></span>
         </div>
       </div>
 
       <!-- Barra de Botones de Acción Alineados -->
-      <div class="flex flex-wrap items-center gap-2.5 border-t border-slate-100 pt-4">
-        <button type="button" class="btn-action-primary" @click="isNuevoMovimientoOpen = true">
+      <div class="flex flex-wrap items-center gap-2 border-t border-slate-100 pt-3">
+        <button type="button" class="btn-action-primary !py-1.5 !px-3 !text-xs" @click="isNuevoMovimientoOpen = true">
           <PlusIcon class="h-4 w-4" />
           <span>+ Registrar movimiento</span>
         </button>
 
-        <button type="button" class="btn-action-primary !bg-indigo-700 hover:!bg-indigo-800" @click="router.push({ name: 'CargaBultos' })">
+        <button type="button" class="btn-action-primary !bg-indigo-700 hover:!bg-indigo-800 !py-1.5 !px-3 !text-xs" @click="router.push({ name: 'CargaBultos' })">
           <span>📦 Cargar bultos</span>
         </button>
 
-        <button type="button" class="btn-action-secondary" @click="abrirCrearEmpresa">
+        <button type="button" class="btn-action-secondary !py-1.5 !px-3 !text-xs" @click="abrirCrearEmpresa">
           <BuildingOffice2Icon class="h-4 w-4 text-indigo-600" />
           <span>+ Nueva empresa</span>
         </button>
 
-        <button type="button" class="btn-action-secondary" @click="isCargaMasivaOpen = true">
+        <button type="button" class="btn-action-secondary !py-1.5 !px-3 !text-xs" @click="isCargaMasivaOpen = true">
           <DocumentDuplicateIcon class="h-4 w-4 text-slate-600" />
           <span>Carga masiva</span>
         </button>
 
-        <button type="button" class="btn-action-secondary" @click="isCtaCteModalOpen = true">
+        <button type="button" class="btn-action-secondary !py-1.5 !px-3 !text-xs" @click="isCtaCteModalOpen = true">
           <BanknotesIcon class="h-4 w-4 text-slate-600" />
           <span>Vencimientos Cta. Cte.</span>
         </button>
 
-        <button type="button" class="btn-action-emerald" @click="exportarExcelActivo">
+        <button type="button" class="btn-action-emerald !py-1.5 !px-3 !text-xs" @click="exportarExcelActivo">
           <ArrowDownTrayIcon class="h-4 w-4" />
           <span>Exportar Excel</span>
         </button>
@@ -1339,7 +1558,7 @@ onMounted(fetchDatosLogistica);
         <div class="relative inline-block text-left">
           <button
             type="button"
-            class="btn-action-rose inline-flex items-center gap-1.5"
+            class="btn-action-rose inline-flex items-center gap-1.5 !py-1.5 !px-3 !text-xs"
             @click="isPdfMenuOpen = !isPdfMenuOpen"
           >
             <PrinterIcon class="h-4 w-4" />
@@ -1409,6 +1628,172 @@ onMounted(fetchDatosLogistica);
                 <span class="text-[11px] text-slate-500">Máximo 2 páginas — 3 grupos operativos</span>
               </div>
             </button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- PANEL DE FILTROS GLOBALES COMPACTO Y ELEGANTE -->
+    <div class="rounded-xl border border-slate-200 bg-white p-3 shadow-2xs space-y-2.5">
+      <!-- Fila Unificada: Período Inline + Selector Usuario + Botón Filtros Avanzados -->
+      <div class="flex flex-wrap items-center justify-between gap-2">
+        <!-- 1. Período Compacto Inline -->
+        <div class="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 bg-slate-50 px-2.5 py-1 text-[11px]">
+          <CalendarDaysIcon class="h-3.5 w-3.5 text-indigo-600 shrink-0" />
+          <span class="font-bold text-slate-700">Período:</span>
+          <input v-model="filters.fechaDesde" type="date" class="rounded border border-slate-300 bg-white px-1.5 py-0.5 text-[11px] font-medium text-slate-800 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 h-6" />
+          <span class="text-slate-400 font-bold">a</span>
+          <input v-model="filters.fechaHasta" type="date" class="rounded border border-slate-300 bg-white px-1.5 py-0.5 text-[11px] font-medium text-slate-800 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 h-6" />
+
+          <div class="inline-flex items-center gap-1 border-l border-slate-200 pl-1.5 ml-1">
+            <button
+              type="button"
+              @click="verMesActual"
+              :class="[
+                'px-2 py-0.5 text-[10px] font-bold rounded transition-colors cursor-pointer',
+                (filters.fechaDesde === firstDayMonthStr && filters.fechaHasta === todayStr) ? 'bg-indigo-600 text-white' : 'bg-white text-slate-700 border border-slate-200 hover:bg-slate-100'
+              ]"
+            >
+              Mes actual
+            </button>
+            <button
+              type="button"
+              @click="verUltimos3Meses"
+              class="px-2 py-0.5 text-[10px] font-bold rounded bg-white text-slate-700 border border-slate-200 hover:bg-slate-100 transition-colors cursor-pointer"
+            >
+              3 Meses
+            </button>
+            <button
+              type="button"
+              @click="verTodoElHistorico"
+              :class="[
+                'px-2 py-0.5 text-[10px] font-bold rounded transition-colors cursor-pointer',
+                (!filters.fechaDesde && !filters.fechaHasta) ? 'bg-indigo-600 text-white' : 'bg-white text-slate-700 border border-slate-200 hover:bg-slate-100'
+              ]"
+            >
+              Historial
+            </button>
+          </div>
+        </div>
+
+        <!-- 2. Controles de Usuario + Filtros Avanzados -->
+        <div class="inline-flex items-center gap-2">
+          <!-- Filtro Rápido de Cargado Por / Usuario -->
+          <div class="w-44 sm:w-52">
+            <v-select
+              v-model="filters.usuarioId"
+              :options="usuariosOptions"
+              :reduce="o => o.id"
+              placeholder="👤 Cargado Por (Todos)..."
+              class="v-select-filter text-[11px]"
+            />
+          </div>
+
+          <button
+            type="button"
+            class="inline-flex items-center gap-1 rounded-lg border border-slate-300 bg-white px-2.5 py-1 text-xs font-bold text-slate-700 shadow-2xs hover:bg-slate-50 transition-colors cursor-pointer"
+            @click="showFilters = !showFilters"
+          >
+            <FunnelIcon class="h-3.5 w-3.5 text-indigo-600" />
+            <span>{{ showFilters ? 'Ocultar filtros' : 'Filtros avanzados' }}</span>
+            <span v-if="activeFiltersCount > 0" class="ml-0.5 rounded-full bg-indigo-600 px-1.5 py-0.2 text-[9px] font-extrabold text-white">
+              {{ activeFiltersCount }}
+            </span>
+          </button>
+
+          <button 
+            v-if="activeFiltersCount > 0" 
+            type="button" 
+            class="text-[11px] font-bold text-rose-600 hover:text-rose-800 hover:underline px-1.5 py-0.5 cursor-pointer" 
+            @click="limpiarFiltros"
+          >
+            Limpiar ({{ activeFiltersCount }})
+          </button>
+        </div>
+      </div>
+
+      <!-- Panel Desplegable Completo de Filtros Avanzados (Compact Grid) -->
+      <div v-if="showFilters" class="pt-2 border-t border-slate-100 space-y-2">
+        <div class="flex items-center justify-between pb-0.5">
+          <h4 class="text-[10px] font-extrabold uppercase tracking-wider text-slate-500">Filtros de Búsqueda Avanzada</h4>
+          <button type="button" class="text-[11px] font-semibold text-slate-500 hover:text-slate-800 cursor-pointer" @click="limpiarFiltros">Limpiar todos</button>
+        </div>
+
+        <div class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-2">
+          <div>
+            <label class="block text-[9px] font-bold uppercase tracking-wider text-slate-500 mb-0.5">Búsqueda General</label>
+            <input v-model="filters.searchQuery" type="text" class="form-input text-xs h-7 py-0.5 px-2 rounded-lg" placeholder="Paciente, Guía..." />
+          </div>
+
+          <div>
+            <label class="block text-[9px] font-bold uppercase tracking-wider text-slate-500 mb-0.5">Cargado Por / Usuario</label>
+            <v-select v-model="filters.usuarioId" :options="usuariosOptions" :reduce="o => o.id" placeholder="Todos los usuarios" class="v-select-filter text-xs" />
+          </div>
+
+          <div>
+            <label class="block text-[9px] font-bold uppercase tracking-wider text-slate-500 mb-0.5">Transporte</label>
+            <v-select v-model="filters.transporteId" :options="transportesOptions" :reduce="o => o.id" placeholder="Todos" class="v-select-filter text-xs" />
+          </div>
+
+          <div>
+            <label class="block text-[9px] font-bold uppercase tracking-wider text-slate-500 mb-0.5">Tipo Movimiento</label>
+            <select v-model="filters.tipoMovimiento" class="form-input text-xs h-7 py-0.5 px-2 rounded-lg">
+              <option :value="null">Todos</option>
+              <option value="Envío">Envío</option>
+              <option value="Recepción">Recepción</option>
+              <option value="Devolución">Devolución</option>
+              <option value="Reposición">Reposición</option>
+              <option value="Retiro">Retiro</option>
+            </select>
+          </div>
+
+          <div>
+            <label class="block text-[9px] font-bold uppercase tracking-wider text-slate-500 mb-0.5">Tipo Logística</label>
+            <select v-model="filters.tipoLogistica" class="form-input text-xs h-7 py-0.5 px-2 rounded-lg">
+              <option :value="null">Todos</option>
+              <option value="cirugia">Cirugía</option>
+              <option value="proveedor_otros">Proveedor / Otros</option>
+            </select>
+          </div>
+
+          <div>
+            <label class="block text-[9px] font-bold uppercase tracking-wider text-slate-500 mb-0.5">Sentido</label>
+            <select v-model="filters.sentido" class="form-input text-xs h-7 py-0.5 px-2 rounded-lg">
+              <option :value="null">Todos</option>
+              <option value="ida">Ida</option>
+              <option value="vuelta">Vuelta</option>
+              <option value="ida_y_vuelta">Ida y Vuelta</option>
+            </select>
+          </div>
+
+          <div>
+            <label class="block text-[9px] font-bold uppercase tracking-wider text-slate-500 mb-0.5">Cliente / Obra Social</label>
+            <v-select v-model="filters.clienteId" :options="clientesOptions" :reduce="o => o.id" placeholder="Todos" class="v-select-filter text-xs" />
+          </div>
+
+          <div>
+            <label class="block text-[9px] font-bold uppercase tracking-wider text-slate-500 mb-0.5">Paciente Referido</label>
+            <input v-model="filters.paciente" type="text" class="form-input text-xs h-7 py-0.5 px-2 rounded-lg" placeholder="Nombre paciente" />
+          </div>
+
+          <div>
+            <label class="block text-[9px] font-bold uppercase tracking-wider text-slate-500 mb-0.5">Proveedor</label>
+            <v-select v-model="filters.proveedorId" :options="proveedoresOptions" :reduce="o => o.id" placeholder="Todos" class="v-select-filter text-xs" />
+          </div>
+
+          <div>
+            <label class="block text-[9px] font-bold uppercase tracking-wider text-slate-500 mb-0.5">Provincia Destino</label>
+            <v-select v-model="filters.provinciaId" :options="provinciasOptions" :reduce="o => o.id" placeholder="Todas" class="v-select-filter text-xs" />
+          </div>
+
+          <div>
+            <label class="block text-[9px] font-bold uppercase tracking-wider text-slate-500 mb-0.5">Localidad Destino</label>
+            <v-select v-model="filters.localidadId" :options="localidadesOptions" :reduce="o => o.id" placeholder="Todas" class="v-select-filter text-xs" />
+          </div>
+
+          <div>
+            <label class="block text-[9px] font-bold uppercase tracking-wider text-slate-500 mb-0.5">N° Guía / Remito</label>
+            <input v-model="filters.numeroGuia" type="text" class="form-input text-xs h-7 py-0.5 px-2 rounded-lg" placeholder="N° Guía" />
           </div>
         </div>
       </div>
@@ -1491,6 +1876,51 @@ onMounted(fetchDatosLogistica);
 
     <!-- PESTAÑA 1: MOVIMIENTOS -->
     <div v-if="activeTab === 'movimientos'" class="space-y-5">
+      
+      <!-- BANNER ALERTA REDIRECCIÓN DE INCONSISTENCIAS GEOGRÁFICAS -->
+      <div v-if="filters.soloInconsistentes" class="p-3.5 bg-rose-50 border border-rose-200 rounded-xl flex flex-wrap items-center justify-between gap-3 shadow-xs">
+        <div class="flex items-center gap-2.5">
+          <div class="p-2 bg-rose-100 rounded-lg text-rose-700 font-extrabold text-base">⚠️</div>
+          <div>
+            <h5 class="text-xs font-bold text-rose-900">
+              Modo Revisión: Filtrando Operaciones con Destino Inconsistente ({{ movimientosFiltrados.length }} halladas)
+            </h5>
+            <p class="text-[11px] text-rose-700 mt-0.5">
+              Hacé clic en el botón <strong>"Editar"</strong> (ícono de lápiz) en la fila correspondiente para corregir la provincia o localidad. Al guardar los cambios, volvé a abrir el reporte para imprimirlo actualizado.
+            </p>
+          </div>
+        </div>
+        <button 
+          type="button" 
+          class="px-3 py-1.5 bg-white border border-rose-300 hover:bg-rose-100 text-rose-800 text-xs font-bold rounded-lg transition-colors cursor-pointer shadow-xs"
+          @click="filters.soloInconsistentes = false; targetGastoIdsRef = null; filters.provinciaId = null; filters.searchQuery = '';"
+        >
+          ✕ Quitar Filtro
+        </button>
+      </div>
+
+      <!-- BANNER ALERTA REDIRECCIÓN DE OPERACIONES SIN DESTINO -->
+      <div v-if="filters.soloSinDestino" class="p-3.5 bg-amber-50 border border-amber-200 rounded-xl flex flex-wrap items-center justify-between gap-3 shadow-xs">
+        <div class="flex items-center gap-2.5">
+          <div class="p-2 bg-amber-100 rounded-lg text-amber-800 font-extrabold text-base">❓</div>
+          <div>
+            <h5 class="text-xs font-bold text-amber-900">
+              Modo Revisión: Filtrando Operaciones Sin Destino Asignado ({{ movimientosFiltrados.length }} halladas)
+            </h5>
+            <p class="text-[11px] text-amber-800 mt-0.5">
+              Hacé clic en el botón <strong>"Editar"</strong> (ícono de lápiz) en la fila para asignar la provincia y localidad correspondientes.
+            </p>
+          </div>
+        </div>
+        <button 
+          type="button" 
+          class="px-3 py-1.5 bg-white border border-amber-300 hover:bg-amber-100 text-amber-900 text-xs font-bold rounded-lg transition-colors cursor-pointer shadow-xs"
+          @click="filters.soloSinDestino = false; targetGastoIdsRef = null; filters.searchQuery = '';"
+        >
+          ✕ Quitar Filtro
+        </button>
+      </div>
+
       <div class="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <p class="text-xs font-medium text-slate-500">Consultá para qué se realizó cada movimiento.</p>
 
@@ -1513,110 +1943,6 @@ onMounted(fetchDatosLogistica);
             >
               🌁 Bloques
             </button>
-          </div>
-
-          <button
-            type="button"
-            class="inline-flex items-center gap-1.5 rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs font-bold text-slate-700 shadow-xs hover:bg-slate-50 cursor-pointer"
-            @click="showFilters = !showFilters"
-          >
-            <FunnelIcon class="h-4 w-4 text-slate-500" />
-            <span>{{ showFilters ? 'Ocultar filtros' : 'Mostrar filtros' }}</span>
-            <span v-if="activeFiltersCount > 0" class="ml-1 rounded-full bg-indigo-600 px-2 py-0.5 text-[10px] font-extrabold text-white">
-              {{ activeFiltersCount }}
-            </span>
-          </button>
-        </div>
-      </div>
-
-      <!-- BANNER DE FILTROS COLAPSABLE COMPLETO -->
-      <div v-if="showFilters" class="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm space-y-4">
-        <div class="flex items-center justify-between border-b border-slate-100 pb-3">
-          <h4 class="text-xs font-bold uppercase tracking-wider text-slate-700">Filtros de Búsqueda Avanzada</h4>
-          <div class="flex gap-2">
-            <button type="button" class="btn-secondary py-1 text-xs" @click="limpiarFiltros">Limpiar filtros</button>
-          </div>
-        </div>
-
-        <div class="grid grid-cols-1 gap-3 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4">
-          <div>
-            <label class="field-label">Búsqueda General</label>
-            <input v-model="filters.searchQuery" type="text" class="form-input text-xs" placeholder="Paciente, Guía, Transporte..." />
-          </div>
-
-          <div>
-            <label class="field-label">Transporte</label>
-            <v-select v-model="filters.transporteId" :options="transportesOptions" :reduce="o => o.id" placeholder="Todos" class="v-select-filter" />
-          </div>
-
-          <div>
-            <label class="field-label">Tipo de Movimiento</label>
-            <select v-model="filters.tipoMovimiento" class="form-input text-xs">
-              <option :value="null">Todos</option>
-              <option value="Envío">Envío</option>
-              <option value="Recepción">Recepción</option>
-              <option value="Devolución">Devolución</option>
-              <option value="Reposición">Reposición</option>
-              <option value="Retiro">Retiro</option>
-            </select>
-          </div>
-
-          <div>
-            <label class="field-label">Tipo de Logística</label>
-            <select v-model="filters.tipoLogistica" class="form-input text-xs">
-              <option :value="null">Todos</option>
-              <option value="cirugia">Cirugía</option>
-              <option value="proveedor_otros">Proveedor / Otros</option>
-            </select>
-          </div>
-
-          <div>
-            <label class="field-label">Sentido</label>
-            <select v-model="filters.sentido" class="form-input text-xs">
-              <option :value="null">Todos</option>
-              <option value="ida">Ida</option>
-              <option value="vuelta">Vuelta</option>
-              <option value="ida_y_vuelta">Ida y Vuelta</option>
-            </select>
-          </div>
-
-          <div>
-            <label class="field-label">Cliente / Obra Social</label>
-            <v-select v-model="filters.clienteId" :options="clientesOptions" :reduce="o => o.id" placeholder="Todos" class="v-select-filter" />
-          </div>
-
-          <div>
-            <label class="field-label">Paciente Referido</label>
-            <input v-model="filters.paciente" type="text" class="form-input text-xs" placeholder="Nombre paciente" />
-          </div>
-
-          <div>
-            <label class="field-label">Proveedor</label>
-            <v-select v-model="filters.proveedorId" :options="proveedoresOptions" :reduce="o => o.id" placeholder="Todos" class="v-select-filter" />
-          </div>
-
-          <div>
-            <label class="field-label">Provincia Destino</label>
-            <v-select v-model="filters.provinciaId" :options="provinciasOptions" :reduce="o => o.id" placeholder="Todas" class="v-select-filter" />
-          </div>
-
-          <div>
-            <label class="field-label">Localidad Destino</label>
-            <v-select v-model="filters.localidadId" :options="localidadesOptions" :reduce="o => o.id" placeholder="Todas" class="v-select-filter" />
-          </div>
-
-          <div>
-            <label class="field-label">N° de Guía / Remito</label>
-            <input v-model="filters.numeroGuia" type="text" class="form-input text-xs" placeholder="N° Guía" />
-          </div>
-
-          <div>
-            <label class="field-label">Filtro Bultos</label>
-            <select v-model="filters.conBultos" class="form-input text-xs">
-              <option value="todos">Todos</option>
-              <option value="con_bultos">Con bultos registrados</option>
-              <option value="sin_bultos">Sin bultos informados</option>
-            </select>
           </div>
         </div>
       </div>
@@ -2267,6 +2593,7 @@ onMounted(fetchDatosLogistica);
     <AdminCtaCteVencimientosModal
       v-model="isCtaCteModalOpen"
       @show-notification="showNotification"
+      @ir-a-corregir="handleIrACorregir"
     />
 
     <!-- PESTAÑA 5: GESTIÓN DE EMPRESAS DE TRANSPORTE (ABM) -->
@@ -2331,74 +2658,42 @@ onMounted(fetchDatosLogistica);
     </div>
 
     <!-- PESTAÑA 6: ANÁLISIS GEOGRÁFICO DE TRANSPORTES -->
-    <div v-if="activeTab === 'analisis'" class="space-y-6">
-      <!-- Panel de Filtros Avanzados -->
-      <div class="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm space-y-4">
-        <div class="flex flex-wrap items-center justify-between gap-4 border-b border-slate-100 pb-3">
+    <div v-if="activeTab === 'analisis'" class="space-y-4">
+      <!-- Barra Superior Estilizada de Control y Comparación -->
+      <div class="rounded-xl border border-slate-200 bg-white p-3 shadow-2xs">
+        <div class="flex flex-wrap items-center justify-between gap-3">
           <div>
-            <h4 class="text-xs font-bold uppercase tracking-wider text-slate-700 flex items-center gap-2">
+            <h4 class="text-xs font-bold uppercase tracking-wider text-slate-800 flex items-center gap-1.5">
               <ChartBarIcon class="h-4 w-4 text-indigo-600" />
-              <span>Análisis Geográfico de Transportes</span>
+              <span>Análisis Geográfico y Mapa de Destinos</span>
             </h4>
-            <p class="text-xs text-slate-500">Visualización en mapa y comparativa de costos por localidad y períodos.</p>
+            <p class="text-[11px] text-slate-500 mt-0.5">
+              Visualización geográfica vinculada automáticamente al Período y Filtros superiores.
+            </p>
           </div>
 
           <div class="flex flex-wrap items-center gap-3">
-            <label class="flex items-center cursor-pointer gap-2 text-xs font-semibold text-slate-700">
-              <span>Modo Comparación</span>
-              <input type="checkbox" v-model="isComparisonMode" class="checkbox-native cursor-pointer" />
-              <span class="w-9 h-5 bg-slate-200 rounded-full flex items-center p-0.5 transition-colors" :class="{ 'bg-indigo-600': isComparisonMode }">
-                <span class="w-4 h-4 bg-white rounded-full transition-transform" :class="{ 'translate-x-4': isComparisonMode }"></span>
+            <!-- Toggle Modo Comparación -->
+            <label class="flex items-center cursor-pointer gap-2 text-xs font-semibold text-slate-700 bg-slate-50 px-2.5 py-1 rounded-lg border border-slate-200">
+              <span>Modo Comparación (B)</span>
+              <input type="checkbox" v-model="isComparisonMode" class="sr-only peer" />
+              <span class="w-8 h-4 bg-slate-300 rounded-full peer peer-checked:bg-indigo-600 flex items-center p-0.5 transition-colors">
+                <span class="w-3 h-3 bg-white rounded-full transition-transform peer-checked:translate-x-4"></span>
               </span>
             </label>
 
-            <button type="button" class="btn-action-emerald" :disabled="isExportingAnalisis" @click="exportarAnalisisExcel">
-              <ArrowDownTrayIcon class="h-4 w-4" />
+            <!-- Inputs Período B (Sólo si Comparación activa) -->
+            <div v-if="isComparisonMode" class="flex items-center gap-1.5 rounded-lg border border-indigo-200 bg-indigo-50/60 px-2.5 py-1 text-xs">
+              <span class="font-bold text-indigo-900 text-[11px]">Período B:</span>
+              <input type="date" v-model="fechaInicioB" class="rounded border border-indigo-200 bg-white px-1.5 py-0.5 text-[11px] font-medium text-slate-800 focus:ring-1 focus:ring-indigo-500 h-6" />
+              <span class="text-indigo-400 font-bold">a</span>
+              <input type="date" v-model="fechaFinB" class="rounded border border-indigo-200 bg-white px-1.5 py-0.5 text-[11px] font-medium text-slate-800 focus:ring-1 focus:ring-indigo-500 h-6" />
+            </div>
+
+            <button type="button" class="btn-action-emerald !py-1 !px-3 !text-xs" :disabled="isExportingAnalisis" @click="exportarAnalisisExcel">
+              <ArrowDownTrayIcon class="h-3.5 w-3.5" />
               <span>{{ isExportingAnalisis ? 'Exportando...' : 'Exportar a Excel' }}</span>
             </button>
-          </div>
-        </div>
-
-        <div class="grid grid-cols-1 gap-4 md:grid-cols-3">
-          <!-- Período A -->
-          <div class="rounded-xl border border-slate-200 bg-slate-50/50 p-3 space-y-2">
-            <h5 class="font-bold text-xs text-indigo-700">Período Principal (A)</h5>
-            <div class="grid grid-cols-2 gap-2">
-              <div>
-                <label class="field-label text-[10px]">Fecha Inicio</label>
-                <input type="date" v-model="fechaInicioA" class="form-input text-xs" />
-              </div>
-              <div>
-                <label class="field-label text-[10px]">Fecha Fin</label>
-                <input type="date" v-model="fechaFinA" class="form-input text-xs" />
-              </div>
-            </div>
-          </div>
-
-          <!-- Período B (Comparación) -->
-          <div class="rounded-xl border border-slate-200 bg-slate-50/50 p-3 space-y-2 transition-opacity" :class="{ 'opacity-40 pointer-events-none': !isComparisonMode }">
-            <h5 class="font-bold text-xs text-indigo-700">Período Comparación (B)</h5>
-            <div class="grid grid-cols-2 gap-2">
-              <div>
-                <label class="field-label text-[10px]">Fecha Inicio</label>
-                <input type="date" v-model="fechaInicioB" :disabled="!isComparisonMode" class="form-input text-xs" />
-              </div>
-              <div>
-                <label class="field-label text-[10px]">Fecha Fin</label>
-                <input type="date" v-model="fechaFinB" :disabled="!isComparisonMode" class="form-input text-xs" />
-              </div>
-            </div>
-          </div>
-
-          <!-- Filtros Generales -->
-          <div class="rounded-xl border border-slate-200 bg-slate-50/50 p-3 space-y-2">
-            <h5 class="font-bold text-xs text-slate-700">Filtros Avanzados</h5>
-            <div class="space-y-1.5">
-              <div>
-                <label class="field-label text-[10px]">Provincia</label>
-                <v-select v-model="selectedAnalisisProvinciaId" :options="provinciasOptions" :reduce="o => o.id" placeholder="Todas" class="v-select-filter text-xs" />
-              </div>
-            </div>
           </div>
         </div>
       </div>
@@ -2413,13 +2708,18 @@ onMounted(fetchDatosLogistica);
         {{ analisisError }}
       </div>
 
-      <div v-else-if="analisisData" class="space-y-6">
-        <!-- KPIs Comparativos -->
-        <div class="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
-          <div class="rounded-2xl border border-slate-200 bg-white p-4 shadow-xs">
-            <span class="text-[10px] font-bold uppercase tracking-wider text-slate-500">Gasto Total (Periodo A)</span>
-            <p class="text-2xl font-bold text-slate-900 mt-1">{{ formatCurrency(kpisPeriodoA.gasto_total) }}</p>
-            <div v-if="isComparisonMode" class="mt-1 text-xs text-slate-500">
+      <div v-else-if="analisisData" class="space-y-4">
+        <!-- KPIs Comparativos Modernos -->
+        <div class="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
+          <div class="rounded-xl border border-slate-200 bg-white p-3.5 shadow-2xs hover:shadow-sm transition-all">
+            <div class="flex items-center justify-between">
+              <span class="text-[10px] font-bold uppercase tracking-wider text-slate-500">Gasto Total</span>
+              <div class="p-1.5 bg-indigo-50 text-indigo-600 rounded-lg">
+                <BanknotesIcon class="h-4 w-4" />
+              </div>
+            </div>
+            <p class="text-xl font-extrabold text-slate-900 mt-1.5">{{ formatCurrency(kpisPeriodoA.gasto_total) }}</p>
+            <div v-if="isComparisonMode" class="mt-1 text-[11px] text-slate-500">
               vs {{ formatCurrency(kpisPeriodoB.gasto_total) }}
               <span :class="(kpisPeriodoA.gasto_total || 0) >= (kpisPeriodoB.gasto_total || 0) ? 'text-emerald-600 font-bold' : 'text-rose-600 font-bold'">
                 ({{ formatPercentage(((kpisPeriodoA.gasto_total || 0) - (kpisPeriodoB.gasto_total || 0)) / (kpisPeriodoB.gasto_total || 1) * 100) }})
@@ -2427,58 +2727,74 @@ onMounted(fetchDatosLogistica);
             </div>
           </div>
 
-          <div class="rounded-2xl border border-slate-200 bg-white p-4 shadow-xs">
-            <span class="text-[10px] font-bold uppercase tracking-wider text-slate-500">Nº de Movimientos</span>
-            <p class="text-2xl font-bold text-indigo-600 mt-1">{{ kpisPeriodoA.total_gastos || 0 }}</p>
-            <div v-if="isComparisonMode" class="mt-1 text-xs text-slate-500">
+          <div class="rounded-xl border border-slate-200 bg-white p-3.5 shadow-2xs hover:shadow-sm transition-all">
+            <div class="flex items-center justify-between">
+              <span class="text-[10px] font-bold uppercase tracking-wider text-slate-500">Nº de Movimientos</span>
+              <div class="p-1.5 bg-blue-50 text-blue-600 rounded-lg">
+                <TruckIcon class="h-4 w-4" />
+              </div>
+            </div>
+            <p class="text-xl font-extrabold text-indigo-600 mt-1.5">{{ kpisPeriodoA.total_gastos || 0 }}</p>
+            <div v-if="isComparisonMode" class="mt-1 text-[11px] text-slate-500">
               vs {{ kpisPeriodoB.total_gastos || 0 }}
             </div>
           </div>
 
-          <div class="rounded-2xl border border-slate-200 bg-white p-4 shadow-xs">
-            <span class="text-[10px] font-bold uppercase tracking-wider text-slate-500">Localidades Únicas</span>
-            <p class="text-2xl font-bold text-slate-900 mt-1">{{ kpisPeriodoA.localidades_unicas || 0 }}</p>
-            <div v-if="isComparisonMode" class="mt-1 text-xs text-slate-500">
+          <div class="rounded-xl border border-slate-200 bg-white p-3.5 shadow-2xs hover:shadow-sm transition-all">
+            <div class="flex items-center justify-between">
+              <span class="text-[10px] font-bold uppercase tracking-wider text-slate-500">Localidades Únicas</span>
+              <div class="p-1.5 bg-rose-50 text-rose-600 rounded-lg">
+                <MapPinIcon class="h-4 w-4" />
+              </div>
+            </div>
+            <p class="text-xl font-extrabold text-slate-900 mt-1.5">{{ kpisPeriodoA.localidades_unicas || 0 }}</p>
+            <div v-if="isComparisonMode" class="mt-1 text-[11px] text-slate-500">
               vs {{ kpisPeriodoB.localidades_unicas || 0 }}
             </div>
           </div>
 
-          <div class="rounded-2xl border border-slate-200 bg-white p-4 shadow-xs">
-            <span class="text-[10px] font-bold uppercase tracking-wider text-slate-500">Costo Promedio / Envío</span>
-            <p class="text-2xl font-bold text-slate-900 mt-1">{{ formatCurrency(kpisPeriodoA.costo_promedio_gasto) }}</p>
-            <div v-if="isComparisonMode" class="mt-1 text-xs text-slate-500">
+          <div class="rounded-xl border border-slate-200 bg-white p-3.5 shadow-2xs hover:shadow-sm transition-all">
+            <div class="flex items-center justify-between">
+              <span class="text-[10px] font-bold uppercase tracking-wider text-slate-500">Costo Promedio / Envío</span>
+              <div class="p-1.5 bg-emerald-50 text-emerald-600 rounded-lg">
+                <ScaleIcon class="h-4 w-4" />
+              </div>
+            </div>
+            <p class="text-xl font-extrabold text-slate-900 mt-1.5">{{ formatCurrency(kpisPeriodoA.costo_promedio_gasto) }}</p>
+            <div v-if="isComparisonMode" class="mt-1 text-[11px] text-slate-500">
               vs {{ formatCurrency(kpisPeriodoB.costo_promedio_gasto) }}
             </div>
           </div>
         </div>
 
         <!-- GRÁFICO Y MAPA EN GRID DE 2 COLUMNAS -->
-        <div class="grid grid-cols-1 lg:grid-cols-5 gap-6">
+        <div class="grid grid-cols-1 lg:grid-cols-5 gap-4">
           <!-- Desglose por Localidad Tabla -->
-          <div class="lg:col-span-2 rounded-2xl border border-slate-200 bg-white shadow-xs overflow-hidden flex flex-col">
-            <div class="border-b border-slate-100 p-4">
-              <h4 class="text-xs font-bold uppercase tracking-wider text-slate-900">Desglose por Localidad</h4>
+          <div class="lg:col-span-2 rounded-xl border border-slate-200 bg-white shadow-2xs overflow-hidden flex flex-col">
+            <div class="border-b border-slate-100 p-3 bg-slate-50/50 flex items-center justify-between">
+              <h4 class="text-xs font-bold uppercase tracking-wider text-slate-800">Desglose por Localidad</h4>
+              <span class="text-[10px] font-bold text-slate-400">{{ localidadesComparativa.length }} Destinos</span>
             </div>
-            <div class="overflow-y-auto max-h-[460px] flex-1">
+            <div class="overflow-y-auto max-h-[440px] flex-1">
               <table class="w-full text-left text-xs">
-                <thead class="bg-slate-50 text-[11px] font-bold uppercase tracking-wider text-slate-600 border-b border-slate-200 sticky top-0">
+                <thead class="bg-slate-50 text-[10px] font-bold uppercase tracking-wider text-slate-500 border-b border-slate-200 sticky top-0">
                   <tr>
-                    <th class="px-4 py-2.5">Localidad</th>
-                    <th class="px-4 py-2.5 text-right">Total (A)</th>
-                    <th v-if="isComparisonMode" class="px-4 py-2.5 text-right">Total (B)</th>
+                    <th class="px-3 py-2">Localidad</th>
+                    <th class="px-3 py-2 text-right">Total (A)</th>
+                    <th v-if="isComparisonMode" class="px-3 py-2 text-right">Total (B)</th>
                   </tr>
                 </thead>
-                <tbody class="divide-y divide-slate-100">
+                <tbody class="divide-y divide-slate-100 font-medium">
                   <tr v-if="localidadesComparativa.length === 0">
-                    <td :colspan="isComparisonMode ? 3 : 2" class="px-4 py-6 text-center text-slate-500">No hay datos para los filtros aplicados.</td>
+                    <td :colspan="isComparisonMode ? 3 : 2" class="px-4 py-6 text-center text-slate-500 text-xs">No hay datos para los filtros aplicados.</td>
                   </tr>
-                  <tr v-for="loc in localidadesComparativa" :key="loc.localidad_nombre" class="hover:bg-slate-50">
-                    <td class="px-4 py-2.5 font-bold text-slate-900">
+                  <tr v-for="loc in localidadesComparativa" :key="loc.localidad_nombre" class="hover:bg-slate-50 transition-colors">
+                    <td class="px-3 py-2 text-slate-900 font-semibold">
                       {{ loc.localidad_nombre }}
                       <span class="block text-[10px] font-normal text-slate-400">{{ loc.provincia_nombre }}</span>
                     </td>
-                    <td class="px-4 py-2.5 text-right font-bold text-indigo-700">{{ formatCurrency(loc.gasto_total_a) }}</td>
-                    <td v-if="isComparisonMode" class="px-4 py-2.5 text-right font-semibold text-slate-600">{{ formatCurrency(loc.gasto_total_b) }}</td>
+                    <td class="px-3 py-2 text-right font-bold text-indigo-700">{{ formatCurrency(loc.gasto_total_a) }}</td>
+                    <td v-if="isComparisonMode" class="px-3 py-2 text-right font-semibold text-slate-600">{{ formatCurrency(loc.gasto_total_b) }}</td>
                   </tr>
                 </tbody>
               </table>
@@ -2486,15 +2802,15 @@ onMounted(fetchDatosLogistica);
           </div>
 
           <!-- Mapa de Puntos por Localidad -->
-          <div class="lg:col-span-3 rounded-2xl border border-slate-200 bg-white p-4 shadow-xs">
-            <h4 class="text-xs font-bold uppercase tracking-wider text-slate-900 mb-3 flex items-center gap-1.5">
+          <div class="lg:col-span-3 rounded-xl border border-slate-200 bg-white p-3 shadow-2xs">
+            <h4 class="text-xs font-bold uppercase tracking-wider text-slate-800 mb-2.5 flex items-center gap-1.5">
               <MapPinIcon class="h-4 w-4 text-rose-500" />
               <span>Mapa Interactivo de Destinos</span>
             </h4>
-            <div class="h-[420px] w-full rounded-xl overflow-hidden z-0 border border-slate-200">
-              <l-map ref="map" :zoom="4" :center="[-40, -64]" :key="mapKey">
+            <div class="h-[400px] w-full rounded-xl overflow-hidden z-0 border border-slate-200">
+              <l-map ref="map" :zoom="5.5" :center="mapCenter" :key="mapKey">
                 <l-tile-layer url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" layer-type="base" name="OpenStreetMap"></l-tile-layer>
-                <l-marker v-for="loc in localidadesComparativa" :key="loc.localidad_nombre" :lat-lng="[loc.lat, loc.lng]" :icon="getMarkerIcon(loc.gasto_total_a)">
+                <l-marker v-for="loc in localidadesComparativa" :key="loc.localidad_nombre" :lat-lng="getMarkerLatLng(loc)" :icon="getMarkerIcon(loc.gasto_total_a)">
                   <l-tooltip :options="{ sticky: true }">
                     <strong class="text-xs font-bold text-slate-900">{{ loc.localidad_nombre }}</strong>
                     <div class="text-[11px] text-slate-500">{{ loc.provincia_nombre }}</div>
@@ -3073,9 +3389,19 @@ onMounted(fetchDatosLogistica);
       </div>
     </div>
 
+    <AdminEditarGastoCuentaCorrienteModal
+      v-model="isEditarModalOpen"
+      :gasto="gastoEnEdicion"
+      :proveedores="proveedoresOptions"
+      :transportes="transportesOptions"
+      @saved="fetchDatosLogistica"
+      @show-notification="showNotification"
+    />
+
     <AdminCtaCteVencimientosModal
       v-model="isCtaCteModalOpen"
       @show-notification="showNotification"
+      @ir-a-corregir="handleIrACorregir"
     />
   </div>
 </template>

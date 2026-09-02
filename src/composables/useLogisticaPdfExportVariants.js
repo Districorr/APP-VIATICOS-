@@ -219,7 +219,7 @@ export function useLogisticaPdfExportVariants() {
     } 
     // 2. MODALIDAD COMPLETA (AUDITORÍA)
     else {
-      const tableHeaders = [['Fecha', 'Transporte', 'Proveedor', 'Cliente / Paciente', 'Tipo', 'Destino', 'Bultos', 'Importe']];
+      const tableHeaders = [['Fecha', 'N° Remito/Guía', 'Transporte', 'Proveedor', 'Cliente / Paciente', 'Tipo', 'Destino', 'Bultos', 'Importe ($)', 'Cargado Por']];
       const tableRows = movimientos.map(g => {
         const extra = g.datos_adicionales || {};
         const bultosStr = (extra.cantidad_bultos !== undefined && extra.cantidad_bultos !== null && extra.cantidad_bultos !== '')
@@ -230,16 +230,20 @@ export function useLogisticaPdfExportVariants() {
         const paciente = (g.paciente_referido || extra.paciente_referido || '').trim();
         const cpStr = cliente && paciente ? `${cliente} (Pte: ${paciente})` : (cliente || (paciente ? `Pte: ${paciente}` : '—'));
         const provStr = normalizeProveedor(g.proveedores?.nombre || g.transportes?.nombre);
+        const guiaRemitoStr = g.numero_factura || extra.numero_guia || extra.numero_factura || '—';
+        const cargadoPorStr = g.cargado_por || extra.usuario_cargo || extra.creado_por || g.user_email || '—';
 
         return [
           formatDate(g.fecha_gasto),
+          guiaRemitoStr,
           normalizeProveedor(g.transportes?.nombre || g.proveedores?.nombre),
           provStr,
           cpStr,
-          extra.tipo_movimiento_encomienda || 'Envio',
+          extra.tipo_movimiento_encomienda || 'Envío',
           getDestinoLimpio(g),
           bultosStr,
-          formatCurrency(g.monto_total)
+          formatCurrency(g.monto_total),
+          cargadoPorStr
         ];
       });
 
@@ -248,17 +252,19 @@ export function useLogisticaPdfExportVariants() {
         head: tableHeaders,
         body: tableRows,
         theme: 'striped',
-        styles: { fontSize: 6.5, cellPadding: 0.9, textColor: [30, 41, 59] },
-        headStyles: { fillColor: [51, 65, 85], textColor: [255, 255, 255], fontStyle: 'bold', fontSize: 7 },
+        styles: { fontSize: 6.2, cellPadding: 0.8, textColor: [30, 41, 59] },
+        headStyles: { fillColor: [51, 65, 85], textColor: [255, 255, 255], fontStyle: 'bold', fontSize: 6.8 },
         columnStyles: {
-          0: { cellWidth: 20 },
-          1: { cellWidth: 42, fontStyle: 'bold' },
-          2: { cellWidth: 45 },
-          3: { cellWidth: 60 },
-          4: { cellWidth: 28 },
-          5: { cellWidth: 40 },
-          6: { cellWidth: 15, halign: 'center' },
-          7: { cellWidth: 27, halign: 'right', fontStyle: 'bold' },
+          0: { cellWidth: 17 },
+          1: { cellWidth: 26, fontStyle: 'bold' },
+          2: { cellWidth: 35, fontStyle: 'bold' },
+          3: { cellWidth: 32 },
+          4: { cellWidth: 42 },
+          5: { cellWidth: 22 },
+          6: { cellWidth: 32 },
+          7: { cellWidth: 13, halign: 'center' },
+          8: { cellWidth: 26, halign: 'right', fontStyle: 'bold' },
+          9: { cellWidth: 32 },
         },
         margin: { left: 10, right: 10 },
       });
@@ -1156,10 +1162,539 @@ export function useLogisticaPdfExportVariants() {
     doc.save(`${filePrefix}_${monthStr}.pdf`);
   }
 
+  /**
+   * Helper para formatear periodo explicativo limpio para encabezados de PDF
+   */
+  function resolvePeriodText(context = {}) {
+    if (context.selectedPeriodoLabel) return context.selectedPeriodoLabel;
+    const p = context.selectedPeriodo;
+    const customM = context.customMonth;
+
+    if (p === 'mes') {
+      if (customM) {
+        const parts = customM.split('-');
+        if (parts.length === 2) {
+          const year = parts[0];
+          const monthNum = Number(parts[1]);
+          const nombresMeses = ['Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio', 'Julio', 'Agosto', 'Septiembre', 'Octubre', 'Noviembre', 'Diciembre'];
+          if (monthNum >= 1 && monthNum <= 12) {
+            return `${nombresMeses[monthNum - 1]} ${year}`;
+          }
+        }
+        return `Mes (${customM})`;
+      }
+      return 'Mes en Curso';
+    }
+    if (p === '3m') return 'Últimos 3 Meses';
+    if (p === '6m') return 'Últimos 6 Meses';
+    if (!p || p === 'historico') return 'Histórico Completo';
+
+    return String(p);
+  }
+
+  // =========================================================================
+  // EXPORTACIÓN 5: REPORTE DE COSTOS LOGÍSTICOS POR DESTINO
+  // =========================================================================
+  function exportarPdfCostosPorDestino(statsDestino, context = {}) {
+    if (!statsDestino || statsDestino.cantEnvios === 0) return;
+
+    const doc = new jsPDF({ orientation: 'landscape', unit: 'mm', format: 'a4' });
+    const destinoNombre = context.destinoNombre || 'General';
+    const periodText = resolvePeriodText(context);
+    
+    let currentY = renderHeaderCompact(
+      doc,
+      `REPORTE DE COSTOS LOGISTICOS POR DESTINO: ${destinoNombre.toUpperCase()}`,
+      periodText,
+      `${statsDestino.cantEnvios} despachos registrados`
+    );
+
+    // 1. KPI Cards Ejecutivos con el mismo diseño de Consolidación Financiera
+    const kpiCards = [
+      { label: 'COSTO PROMEDIO / ENVIO', val: formatCurrency(statsDestino.costoPromedioEnvio), sub: 'KPI Principal / Referencia', color: [79, 70, 229] },
+      { label: 'COSTO PROMEDIO / BULTO', val: formatCurrency(statsDestino.costoPromedioBulto), sub: `Total: ${statsDestino.cantBultos} bultos`, color: [30, 41, 59] },
+      { label: 'TOTAL ACUMULADO', val: formatCurrency(statsDestino.montoTotal), sub: `${statsDestino.cantEnvios} envíos registrados`, color: [16, 185, 129] },
+      { label: 'RANGO MIN. / MAX.', val: `${formatCurrency(statsDestino.costoMinimo)} / ${formatCurrency(statsDestino.costoMaximo)}`, sub: 'Por despacho individual', color: [99, 102, 241] }
+    ];
+
+    const cardMargin = 10;
+    const cardGap = 3;
+    const totalCardWidth = 277;
+    const cardWidth = (totalCardWidth - (kpiCards.length - 1) * cardGap) / kpiCards.length;
+    const cardHeight = 11;
+
+    kpiCards.forEach((c, idx) => {
+      const x = cardMargin + idx * (cardWidth + cardGap);
+      
+      doc.setFillColor(248, 250, 252);
+      doc.setDrawColor(226, 232, 240);
+      doc.setLineWidth(0.3);
+      doc.roundedRect(x, currentY, cardWidth, cardHeight, 1.5, 1.5, 'FD');
+
+      doc.setFillColor(...c.color);
+      doc.rect(x, currentY, 1.2, cardHeight, 'F');
+
+      doc.setFontSize(5.8);
+      doc.setFont('helvetica', 'bold');
+      doc.setTextColor(100, 116, 139);
+      doc.text(c.label, x + 3.5, currentY + 3.8);
+
+      doc.setFontSize(8.5);
+      doc.setFont('helvetica', 'bold');
+      doc.setTextColor(15, 23, 42);
+      doc.text(c.val, x + 3.5, currentY + 7.5);
+
+      doc.setFontSize(5.5);
+      doc.setFont('helvetica', 'normal');
+      doc.setTextColor(148, 163, 184);
+      doc.text(c.sub, x + 3.5, currentY + 10.2);
+    });
+
+    currentY += cardHeight + 4;
+
+    // 2. TABLA PRINCIPAL: DETALLE OPERATIVO DE ENVÍOS AL DESTINO
+    doc.setFontSize(8.5);
+    doc.setFont('helvetica', 'bold');
+    doc.setTextColor(51, 65, 85);
+    doc.text(`1. DETALLE OPERATIVO DE ENVÍOS A ${destinoNombre.toUpperCase()} (${statsDestino.cantEnvios} REGISTROS)`, 10, currentY);
+    currentY += 2;
+
+    const detailHeaders = [['N°', 'FECHA', 'TRANSPORTE', 'PROVEEDOR / CLIENTE', 'MOVIMIENTO', 'BULTOS', 'IMPORTE ($)', 'GUIA / REMITO']];
+    const detailRows = statsDestino.detalleOps.map((op, idx) => [
+      idx + 1,
+      formatDate(op.fecha_gasto),
+      op.transporte_nombre,
+      op.proveedor_label + (op.cliente_nombre ? ` (${op.cliente_nombre})` : ''),
+      op.tipo_movimiento,
+      op.bultos,
+      formatCurrency(op.monto_total),
+      op.numero_factura || '—'
+    ]);
+
+    const detailFoot = [[
+      { content: 'TOTALES ACUMULADOS', colSpan: 5, styles: { halign: 'right', fontStyle: 'bold' } },
+      { content: String(statsDestino.cantBultos), styles: { halign: 'center', fontStyle: 'bold' } },
+      { content: formatCurrency(statsDestino.montoTotal), styles: { halign: 'right', fontStyle: 'bold' } },
+      '—'
+    ]];
+
+    doc.autoTable({
+      startY: currentY,
+      head: detailHeaders,
+      body: detailRows,
+      foot: detailFoot,
+      theme: 'striped',
+      styles: { fontSize: 7, cellPadding: 1, textColor: [30, 41, 59] },
+      headStyles: { fillColor: [79, 70, 229], textColor: [255, 255, 255], fontStyle: 'bold', fontSize: 7.5 },
+      footStyles: { fillColor: [241, 245, 249], textColor: [15, 23, 42], fontStyle: 'bold', fontSize: 7.5, lineWidth: { top: 0.4 }, lineColor: [79, 70, 229] },
+      columnStyles: {
+        0: { cellWidth: 10, halign: 'center' },
+        1: { cellWidth: 20 },
+        2: { cellWidth: 45, fontStyle: 'bold' },
+        3: { cellWidth: 70 },
+        4: { cellWidth: 35, halign: 'center' },
+        5: { cellWidth: 20, halign: 'center', fontStyle: 'bold' },
+        6: { cellWidth: 40, halign: 'right', fontStyle: 'bold' },
+        7: { cellWidth: 37, halign: 'center' }
+      },
+      margin: { left: 10, right: 10 }
+    });
+
+    currentY = doc.lastAutoTable.finalY + 5;
+
+    // 3. SECCIÓN 2: COMPARATIVA POR EMPRESA DE TRANSPORTE
+    if (statsDestino.transporteConsolidado && statsDestino.transporteConsolidado.length > 0) {
+      if (currentY + 30 > doc.internal.pageSize.getHeight() - 15) {
+        doc.addPage();
+        currentY = renderHeaderCompact(doc, `REPORTE DE COSTOS LOGISTICOS POR DESTINO: ${destinoNombre.toUpperCase()}`, periodText, 'Comparativa por Transporte');
+      }
+
+      doc.setFontSize(8.5);
+      doc.setFont('helvetica', 'bold');
+      doc.setTextColor(51, 65, 85);
+      doc.text(`2. COMPARATIVA POR EMPRESA DE TRANSPORTE HACIA ${destinoNombre.toUpperCase()}`, 10, currentY);
+      currentY += 2;
+
+      const transpHeaders = [['EMPRESA DE TRANSPORTE', 'DESPACHOS', 'BULTOS TOTALES', 'TOTAL ACUMULADO ($)', 'PROMEDIO POR ENVÍO ($)', 'PROMEDIO POR BULTO ($)']];
+      const transpRows = statsDestino.transporteConsolidado.map(t => [
+        t.transporteNombre,
+        t.envios,
+        t.bultos,
+        formatCurrency(t.total),
+        formatCurrency(t.promedioEnvio),
+        formatCurrency(t.promedioBulto)
+      ]);
+
+      doc.autoTable({
+        startY: currentY,
+        head: transpHeaders,
+        body: transpRows,
+        theme: 'striped',
+        styles: { fontSize: 7.5, cellPadding: 1.2, textColor: [30, 41, 59] },
+        headStyles: { fillColor: [51, 65, 85], textColor: [255, 255, 255], fontStyle: 'bold', fontSize: 8 },
+        columnStyles: {
+          0: { cellWidth: 70, fontStyle: 'bold' },
+          1: { cellWidth: 30, halign: 'center' },
+          2: { cellWidth: 35, halign: 'center' },
+          3: { cellWidth: 45, halign: 'right', fontStyle: 'bold' },
+          4: { cellWidth: 48, halign: 'right', fontStyle: 'bold' },
+          5: { cellWidth: 49, halign: 'right' }
+        },
+        margin: { left: 10, right: 10 }
+      });
+    }
+
+    applyFootersCompact(doc);
+    const sanitizedDestino = destinoNombre.toLowerCase().replace(/[^a-z0-9]/g, '_');
+    doc.save(`Costos_Destino_${sanitizedDestino}_${new Date().toISOString().split('T')[0]}.pdf`);
+  }
+
+  // =========================================================================
+  // EXPORTACIÓN 6: CONSOLIDADO POR PROVINCIAS (NIVEL 1)
+  // =========================================================================
+  function exportarPdfConsolidadoProvincias(datosProvincias, context = {}) {
+    if (!datosProvincias || !datosProvincias.provincias || datosProvincias.provincias.length === 0) return;
+
+    const doc = new jsPDF({ orientation: 'landscape', unit: 'mm', format: 'a4' });
+    const periodText = resolvePeriodText(context);
+
+    let currentY = renderHeaderCompact(
+      doc,
+      'REPORTE ANALITICO DE COSTOS LOGISTICOS POR PROVINCIA',
+      periodText,
+      `${datosProvincias.provincias.length} provincias analizadas`
+    );
+
+    const kpiCards = [
+      { label: 'TOTAL GASTADO EN LOGÍSTICA', val: formatCurrency(datosProvincias.totalGastadoGeneral), sub: `${datosProvincias.totalEnviosGeneral} envíos totales`, color: [79, 70, 229] },
+      { label: 'BULTOS MOVIDOS', val: String(datosProvincias.totalBultosGeneral), sub: 'Acumulado nacional', color: [30, 41, 59] },
+      { label: 'PROMEDIO NACIONAL / ENVÍO', val: formatCurrency(datosProvincias.promedioEnvioGeneral), sub: 'Referencia global', color: [16, 185, 129] },
+      { label: 'PROMEDIO NACIONAL / BULTO', val: formatCurrency(datosProvincias.promedioBultoGeneral), sub: 'Referencia por bulto', color: [99, 102, 241] }
+    ];
+
+    const cardMargin = 10;
+    const cardGap = 3;
+    const totalCardWidth = 277;
+    const cardWidth = (totalCardWidth - (kpiCards.length - 1) * cardGap) / kpiCards.length;
+    const cardHeight = 11;
+
+    kpiCards.forEach((c, idx) => {
+      const x = cardMargin + idx * (cardWidth + cardGap);
+      doc.setFillColor(248, 250, 252);
+      doc.setDrawColor(226, 232, 240);
+      doc.setLineWidth(0.3);
+      doc.roundedRect(x, currentY, cardWidth, cardHeight, 1.5, 1.5, 'FD');
+      doc.setFillColor(...c.color);
+      doc.rect(x, currentY, 1.2, cardHeight, 'F');
+      doc.setFontSize(5.8); doc.setFont('helvetica', 'bold'); doc.setTextColor(100, 116, 139); doc.text(c.label, x + 3.5, currentY + 3.8);
+      doc.setFontSize(8.5); doc.setFont('helvetica', 'bold'); doc.setTextColor(15, 23, 42); doc.text(c.val, x + 3.5, currentY + 7.5);
+      doc.setFontSize(5.5); doc.setFont('helvetica', 'normal'); doc.setTextColor(148, 163, 184); doc.text(c.sub, x + 3.5, currentY + 10.2);
+    });
+
+    currentY += cardHeight + 4;
+
+    const headers = [['N°', 'PROVINCIA DESTINO', 'DESPACHOS / ENVÍOS', 'BULTOS TOTALES', 'TOTAL ACUMULADO ($)', 'PROMEDIO / ENVÍO ($)', 'PROMEDIO / BULTO ($)']];
+    const rows = datosProvincias.provincias.map((p, idx) => [
+      idx + 1,
+      p.provincia_nombre,
+      p.envios,
+      p.bultos,
+      formatCurrency(p.total),
+      formatCurrency(p.promedioEnvio),
+      formatCurrency(p.promedioBulto)
+    ]);
+
+    const foot = [[
+      { content: 'TOTALES NACIONALES', colSpan: 2, styles: { halign: 'right', fontStyle: 'bold' } },
+      { content: String(datosProvincias.totalEnviosGeneral), styles: { halign: 'center', fontStyle: 'bold' } },
+      { content: String(datosProvincias.totalBultosGeneral), styles: { halign: 'center', fontStyle: 'bold' } },
+      { content: formatCurrency(datosProvincias.totalGastadoGeneral), styles: { halign: 'right', fontStyle: 'bold' } },
+      { content: formatCurrency(datosProvincias.promedioEnvioGeneral), styles: { halign: 'right', fontStyle: 'bold' } },
+      { content: formatCurrency(datosProvincias.promedioBultoGeneral), styles: { halign: 'right', fontStyle: 'bold' } }
+    ]];
+
+    doc.autoTable({
+      startY: currentY,
+      head: headers,
+      body: rows,
+      foot: foot,
+      theme: 'striped',
+      styles: { fontSize: 7.5, cellPadding: 1.2, textColor: [30, 41, 59] },
+      headStyles: { fillColor: [79, 70, 229], textColor: [255, 255, 255], fontStyle: 'bold', fontSize: 8 },
+      footStyles: { fillColor: [241, 245, 249], textColor: [15, 23, 42], fontStyle: 'bold', fontSize: 8, lineWidth: { top: 0.4 }, lineColor: [79, 70, 229] },
+      columnStyles: {
+        0: { cellWidth: 12, halign: 'center' },
+        1: { cellWidth: 75, fontStyle: 'bold' },
+        2: { cellWidth: 35, halign: 'center' },
+        3: { cellWidth: 35, halign: 'center' },
+        4: { cellWidth: 45, halign: 'right', fontStyle: 'bold' },
+        5: { cellWidth: 38, halign: 'right', fontStyle: 'bold' },
+        6: { cellWidth: 37, halign: 'right' }
+      },
+      margin: { left: 10, right: 10 }
+    });
+
+    applyFootersCompact(doc);
+    doc.save(`Consolidado_Provincias_${new Date().toISOString().split('T')[0]}.pdf`);
+  }
+
+  // =========================================================================
+  // EXPORTACIÓN 7: DESGLOSE POR LOCALIDADES EN PROVINCIA (NIVEL 2)
+  // =========================================================================
+  function exportarPdfConsolidadoLocalidades(datosLocalidades, context = {}) {
+    if (!datosLocalidades || !datosLocalidades.localidades || datosLocalidades.localidades.length === 0) return;
+
+    const doc = new jsPDF({ orientation: 'landscape', unit: 'mm', format: 'a4' });
+    const provinciaNombre = context.provinciaNombre || 'Provincia';
+    const periodText = resolvePeriodText(context);
+
+    let currentY = renderHeaderCompact(
+      doc,
+      `DESGLOSE DE COSTOS LOGISTICOS: PROVINCIA DE ${provinciaNombre.toUpperCase()}`,
+      periodText,
+      `${datosLocalidades.localidades.length} localidades con envíos`
+    );
+
+    const kpiCards = [
+      { label: 'TOTAL EN PROVINCIA', val: formatCurrency(datosLocalidades.totalGastado), sub: `${datosLocalidades.totalEnvios} envíos totales`, color: [79, 70, 229] },
+      { label: 'BULTOS RECIBIDOS', val: String(datosLocalidades.totalBultos), sub: `Total en ${provinciaNombre}`, color: [30, 41, 59] },
+      { label: 'PROMEDIO PROVINCIAL / ENVÍO', val: formatCurrency(datosLocalidades.promedioEnvio), sub: 'Costo medio por despacho', color: [16, 185, 129] },
+      { label: 'PROMEDIO PROVINCIAL / BULTO', val: formatCurrency(datosLocalidades.promedioBulto), sub: 'Costo medio por bulto', color: [99, 102, 241] }
+    ];
+
+    const cardMargin = 10;
+    const cardGap = 3;
+    const totalCardWidth = 277;
+    const cardWidth = (totalCardWidth - (kpiCards.length - 1) * cardGap) / kpiCards.length;
+    const cardHeight = 11;
+
+    kpiCards.forEach((c, idx) => {
+      const x = cardMargin + idx * (cardWidth + cardGap);
+      doc.setFillColor(248, 250, 252);
+      doc.setDrawColor(226, 232, 240);
+      doc.setLineWidth(0.3);
+      doc.roundedRect(x, currentY, cardWidth, cardHeight, 1.5, 1.5, 'FD');
+      doc.setFillColor(...c.color);
+      doc.rect(x, currentY, 1.2, cardHeight, 'F');
+      doc.setFontSize(5.8); doc.setFont('helvetica', 'bold'); doc.setTextColor(100, 116, 139); doc.text(c.label, x + 3.5, currentY + 3.8);
+      doc.setFontSize(8.5); doc.setFont('helvetica', 'bold'); doc.setTextColor(15, 23, 42); doc.text(c.val, x + 3.5, currentY + 7.5);
+      doc.setFontSize(5.5); doc.setFont('helvetica', 'normal'); doc.setTextColor(148, 163, 184); doc.text(c.sub, x + 3.5, currentY + 10.2);
+    });
+
+    currentY += cardHeight + 4;
+
+    const headers = [['N°', 'LOCALIDAD DESTINO', 'DESPACHOS', 'BULTOS', 'SENTIDO PRINCIPAL', 'OPERACIÓN PRINCIPAL', 'TOTAL ACUMULADO ($)', 'PROM / ENVÍO ($)']];
+    const rows = datosLocalidades.localidades.map((l, idx) => [
+      idx + 1,
+      l.localidad_nombre,
+      l.envios,
+      l.bultos,
+      l.sentidoPredominante || 'Ida',
+      l.tipoPredominante || 'Envío General',
+      formatCurrency(l.total),
+      formatCurrency(l.promedioEnvio)
+    ]);
+
+    const foot = [[
+      { content: `TOTALES ${provinciaNombre.toUpperCase()}`, colSpan: 2, styles: { halign: 'right', fontStyle: 'bold' } },
+      { content: String(datosLocalidades.totalEnvios), styles: { halign: 'center', fontStyle: 'bold' } },
+      { content: String(datosLocalidades.totalBultos), styles: { halign: 'center', fontStyle: 'bold' } },
+      { content: '—', styles: { halign: 'center' } },
+      { content: '—', styles: { halign: 'center' } },
+      { content: formatCurrency(datosLocalidades.totalGastado), styles: { halign: 'right', fontStyle: 'bold' } },
+      { content: formatCurrency(datosLocalidades.promedioEnvio), styles: { halign: 'right', fontStyle: 'bold' } }
+    ]];
+
+    doc.autoTable({
+      startY: currentY,
+      head: headers,
+      body: rows,
+      foot: foot,
+      theme: 'striped',
+      styles: { fontSize: 7, cellPadding: 1.1, textColor: [30, 41, 59] },
+      headStyles: { fillColor: [79, 70, 229], textColor: [255, 255, 255], fontStyle: 'bold', fontSize: 7.5 },
+      footStyles: { fillColor: [241, 245, 249], textColor: [15, 23, 42], fontStyle: 'bold', fontSize: 7.5, lineWidth: { top: 0.4 }, lineColor: [79, 70, 229] },
+      columnStyles: {
+        0: { cellWidth: 10, halign: 'center' },
+        1: { cellWidth: 65, fontStyle: 'bold' },
+        2: { cellWidth: 24, halign: 'center' },
+        3: { cellWidth: 24, halign: 'center' },
+        4: { cellWidth: 28, halign: 'center', fontStyle: 'bold' },
+        5: { cellWidth: 45, halign: 'left' },
+        6: { cellWidth: 42, halign: 'right', fontStyle: 'bold' },
+        7: { cellWidth: 39, halign: 'right', fontStyle: 'bold' }
+      },
+      margin: { left: 10, right: 10 }
+    });
+
+    let currentY2 = doc.lastAutoTable.finalY + 6;
+
+    // --- GRÁFICO VISUAL DE DISTRIBUCIÓN POR ZONA / LOCALIDAD ---
+    const locChartData = datosLocalidades.localidades.map(l => ({ label: l.localidad_nombre, value: l.total }));
+    if (locChartData.length > 0) {
+      if (currentY2 > 150) {
+        doc.addPage();
+        currentY2 = 15;
+      }
+      const imgLoc = renderPieChartCanvas(locChartData, `Distribución de Costo por Zona / Localidad en ${provinciaNombre}`, 830, 96);
+      doc.addImage(imgLoc, 'PNG', 10, currentY2, 277, 30);
+      currentY2 += 34;
+    }
+
+    // --- TABLA RESUMEN POR EMPRESA DE TRANSPORTE EN LA PROVINCIA ---
+    if (datosLocalidades.resumenTransportes && datosLocalidades.resumenTransportes.length > 0) {
+      if (currentY2 > 155) {
+        doc.addPage();
+        currentY2 = 15;
+      }
+
+      doc.setFontSize(8.5);
+      doc.setFont('helvetica', 'bold');
+      doc.setTextColor(30, 41, 59);
+      doc.text(`DESGLOSE POR EMPRESA DE TRANSPORTE EN ${provinciaNombre.toUpperCase()}`, 10, currentY2);
+      currentY2 += 3;
+
+      const encHeaders = [['N°', 'Empresa Transportista', 'Envíos', 'Bultos', 'Sentido Principal', 'Operación Principal', 'Total Acumulado ($)', 'Promedio / Envío ($)']];
+      const encRows = datosLocalidades.resumenTransportes.map((t, idx) => [
+        idx + 1,
+        t.transporte_nombre,
+        t.envios,
+        t.bultos,
+        t.sentidoPredominante || 'Ida',
+        t.tipoPredominante || 'Envío',
+        formatCurrency(t.total),
+        formatCurrency(t.promedioEnvio)
+      ]);
+
+      doc.autoTable({
+        startY: currentY2,
+        head: encHeaders,
+        body: encRows,
+        theme: 'striped',
+        styles: { fontSize: 7, cellPadding: 1.1, textColor: [30, 41, 59] },
+        headStyles: { fillColor: [51, 65, 85], textColor: [255, 255, 255], fontStyle: 'bold', fontSize: 7.5 },
+        columnStyles: {
+          0: { cellWidth: 10, halign: 'center' },
+          1: { cellWidth: 65, fontStyle: 'bold' },
+          2: { cellWidth: 24, halign: 'center' },
+          3: { cellWidth: 24, halign: 'center' },
+          4: { cellWidth: 28, halign: 'center', fontStyle: 'bold' },
+          5: { cellWidth: 45, halign: 'left' },
+          6: { cellWidth: 42, halign: 'right', fontStyle: 'bold' },
+          7: { cellWidth: 39, halign: 'right', fontStyle: 'bold' }
+        },
+        margin: { left: 10, right: 10 }
+      });
+
+      currentY2 = doc.lastAutoTable.finalY + 6;
+    }
+
+    // --- TABLA RESUMEN POR PROVEEDOR EXTERNO EN LA PROVINCIA ---
+    if (datosLocalidades.resumenProveedores && datosLocalidades.resumenProveedores.length > 0) {
+      if (currentY2 > 155) {
+        doc.addPage();
+        currentY2 = 15;
+      }
+
+      doc.setFontSize(8.5);
+      doc.setFont('helvetica', 'bold');
+      doc.setTextColor(30, 41, 59);
+      doc.text(`DESGLOSE POR PROVEEDOR EXTERNO EN ${provinciaNombre.toUpperCase()}`, 10, currentY2);
+      currentY2 += 3;
+
+      const provHeaders = [['N°', 'Proveedor Externo', 'Envíos', 'Bultos', 'Sentido Principal', 'Operación Principal', 'Total Acumulado ($)', 'Promedio / Envío ($)']];
+      const provRows = datosLocalidades.resumenProveedores.map((p, idx) => [
+        idx + 1,
+        p.proveedor_nombre,
+        p.envios,
+        p.bultos,
+        p.sentidoPredominante || 'Ida',
+        p.tipoPredominante || 'Envío',
+        formatCurrency(p.total),
+        formatCurrency(p.promedioEnvio)
+      ]);
+
+      doc.autoTable({
+        startY: currentY2,
+        head: provHeaders,
+        body: provRows,
+        theme: 'striped',
+        styles: { fontSize: 7, cellPadding: 1.1, textColor: [30, 41, 59] },
+        headStyles: { fillColor: [16, 185, 129], textColor: [255, 255, 255], fontStyle: 'bold', fontSize: 7.5 },
+        columnStyles: {
+          0: { cellWidth: 10, halign: 'center' },
+          1: { cellWidth: 65, fontStyle: 'bold' },
+          2: { cellWidth: 24, halign: 'center' },
+          3: { cellWidth: 24, halign: 'center' },
+          4: { cellWidth: 28, halign: 'center', fontStyle: 'bold' },
+          5: { cellWidth: 45, halign: 'left' },
+          6: { cellWidth: 42, halign: 'right', fontStyle: 'bold' },
+          7: { cellWidth: 39, halign: 'right', fontStyle: 'bold' }
+        },
+        margin: { left: 10, right: 10 }
+      });
+
+      currentY2 = doc.lastAutoTable.finalY + 6;
+    }
+
+    // --- TABLA RESUMEN POR CLIENTE / OBRA SOCIAL EN LA PROVINCIA ---
+    if (datosLocalidades.resumenClientes && datosLocalidades.resumenClientes.length > 0) {
+      if (currentY2 > 155) {
+        doc.addPage();
+        currentY2 = 15;
+      }
+
+      doc.setFontSize(8.5);
+      doc.setFont('helvetica', 'bold');
+      doc.setTextColor(30, 41, 59);
+      doc.text(`DESGLOSE POR CLIENTE / OBRA SOCIAL EN ${provinciaNombre.toUpperCase()}`, 10, currentY2);
+      currentY2 += 3;
+
+      const cliHeaders = [['N°', 'Cliente / Obra Social Imputada', 'Envíos', 'Bultos', 'Sentido Principal', 'Operación Principal', 'Total Acumulado ($)', 'Promedio / Envío ($)']];
+      const cliRows = datosLocalidades.resumenClientes.map((c, idx) => [
+        idx + 1,
+        c.cliente_nombre,
+        c.envios,
+        c.bultos,
+        c.sentidoPredominante || 'Ida',
+        c.tipoPredominante || 'Envío',
+        formatCurrency(c.total),
+        formatCurrency(c.promedioEnvio)
+      ]);
+
+      doc.autoTable({
+        startY: currentY2,
+        head: cliHeaders,
+        body: cliRows,
+        theme: 'striped',
+        styles: { fontSize: 7, cellPadding: 1.1, textColor: [30, 41, 59] },
+        headStyles: { fillColor: [14, 165, 233], textColor: [255, 255, 255], fontStyle: 'bold', fontSize: 7.5 },
+        columnStyles: {
+          0: { cellWidth: 10, halign: 'center' },
+          1: { cellWidth: 65, fontStyle: 'bold' },
+          2: { cellWidth: 24, halign: 'center' },
+          3: { cellWidth: 24, halign: 'center' },
+          4: { cellWidth: 28, halign: 'center', fontStyle: 'bold' },
+          5: { cellWidth: 45, halign: 'left' },
+          6: { cellWidth: 42, halign: 'right', fontStyle: 'bold' },
+          7: { cellWidth: 39, halign: 'right', fontStyle: 'bold' }
+        },
+        margin: { left: 10, right: 10 }
+      });
+    }
+
+    applyFootersCompact(doc);
+    const sanitized = provinciaNombre.toLowerCase().replace(/[^a-z0-9]/g, '_');
+    doc.save(`Costos_Localidades_${sanitized}_${new Date().toISOString().split('T')[0]}.pdf`);
+  }
+
   return {
     exportarPdfMovimientosPeriodo,
     exportarPdfResumenTransportes,
     exportarPdfMovimientosClientePaciente,
-    exportarPdfCtaCteVencimientos
+    exportarPdfCtaCteVencimientos,
+    exportarPdfCostosPorDestino,
+    exportarPdfConsolidadoProvincias,
+    exportarPdfConsolidadoLocalidades
   };
 }

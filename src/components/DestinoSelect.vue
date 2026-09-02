@@ -4,7 +4,7 @@
       <div class="flex-1 min-w-0">
         <v-select
           v-model="selectedDestino"
-          :options="destinosOptions"
+          :options="computedDestinosOptions"
           :loading="loading"
           :disabled="disabled"
           :placeholder="placeholder"
@@ -55,7 +55,7 @@
         type="button"
         @click="abrirModalCrear(currentSearchText)"
         title="Crear nueva localidad vinculada a provincia"
-        class="shrink-0 h-[42px] w-[42px] flex items-center justify-center text-slate-500 hover:text-indigo-600 hover:bg-indigo-50 active:bg-indigo-100 rounded-lg transition border border-slate-300"
+        class="shrink-0 h-[38px] w-[38px] flex items-center justify-center text-slate-500 hover:text-indigo-600 hover:bg-indigo-50 active:bg-indigo-100 rounded-lg transition border border-slate-300"
       >
         <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
           <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4" />
@@ -147,10 +147,10 @@
 </template>
 
 <script setup>
-import { ref, reactive, watch, onMounted } from 'vue';
+import { ref, reactive, computed, watch, onMounted } from 'vue';
 import vSelect from 'vue-select';
 import 'vue-select/dist/vue-select.css';
-import { useDestinosUnificados } from '../composables/useDestinosUnificados.js';
+import { useDestinosUnificados, OPCION_TODAS_LOCALIDADES } from '../composables/useDestinosUnificados.js';
 
 const props = defineProps({
   provinciaId: { type: [Number, String], default: null },
@@ -158,11 +158,19 @@ const props = defineProps({
   placeholder: { type: String, default: 'Buscar localidad o provincia (ej: San Vicente, Misiones)...' },
   required: { type: Boolean, default: false },
   disabled: { type: Boolean, default: false },
+  includeAllOption: { type: Boolean, default: false },
 });
 
 const emit = defineEmits(['update:provinciaId', 'update:localidadId', 'change']);
 
 const { destinosOptions, provinciasOptions, loading, cargarDestinos, crearLocalidad, findDestinoOption } = useDestinosUnificados();
+
+const computedDestinosOptions = computed(() => {
+  if (props.includeAllOption) {
+    return [OPCION_TODAS_LOCALIDADES, ...destinosOptions.value];
+  }
+  return destinosOptions.value;
+});
 
 const selectedDestino = ref(null);
 const currentSearchText = ref('');
@@ -252,12 +260,12 @@ async function guardarNuevaLocalidad() {
 
 <style scoped>
 .v-select-destino :deep(.vs__dropdown-toggle) {
-  border-radius: 0.75rem; /* rounded-xl */
+  border-radius: 0.5rem; /* rounded-lg */
   border-color: #cbd5e1;
-  padding-top: 3px;
-  padding-bottom: 3px;
+  padding-top: 1px;
+  padding-bottom: 1px;
   background-color: #ffffff;
-  min-height: 42px;
+  min-height: 38px;
 }
 
 .v-select-destino :deep(.vs__search) {
