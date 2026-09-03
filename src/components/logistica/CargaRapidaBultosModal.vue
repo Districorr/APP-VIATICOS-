@@ -96,6 +96,10 @@ watch(() => formState.transporte_id, (newTrans) => {
   precioUnitarioPrefijado.value = tarifaCalculada;
 
   if (newTrans) {
+    if (tarifaCalculada === 0) {
+      permitirEdicionPrecioUnitario.value = true;
+    }
+
     let opt = transportesOptions.value.find(t => String(t.code || t.value || t.id) === String(newTrans));
     let nombre = opt ? opt.label : (typeof newTrans === 'object' ? newTrans.label : String(newTrans));
     

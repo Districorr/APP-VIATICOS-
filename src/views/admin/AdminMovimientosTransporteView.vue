@@ -2015,7 +2015,12 @@ onMounted(fetchDatosLogistica);
                 </td>
                 <td class="px-4 py-3 capitalize text-slate-600">{{ g.datos_adicionales?.sentido_movimiento || 'ida' }}</td>
                 <td class="px-4 py-3 text-slate-600">{{ g.datos_adicionales?.destino_texto || g.localidad_destino?.nombre || g.provincias?.nombre || g.provincia?.nombre || 'Sin destino' }}</td>
-                <td class="whitespace-nowrap px-4 py-3 text-right font-bold text-slate-900">{{ formatCurrency(g.monto_total) }}</td>
+                <td class="whitespace-nowrap px-4 py-3 text-right font-bold">
+                  <span v-if="!g.monto_total || Number(g.monto_total) === 0" class="inline-flex items-center gap-1 text-rose-600 bg-rose-50 px-2 py-0.5 rounded-full border border-rose-200 text-xs font-extrabold" title="Movimiento sin importe cargado. Hacé clic en editar para ingresar el monto.">
+                    ⚠️ $ 0,00
+                  </span>
+                  <span v-else class="text-slate-900">{{ formatCurrency(g.monto_total) }}</span>
+                </td>
                 <td class="whitespace-nowrap px-4 py-3 text-center" @click.stop>
                   <div class="flex items-center justify-center gap-1.5">
                     <button type="button" class="rounded p-1 text-slate-500 hover:bg-slate-200 hover:text-slate-900 cursor-pointer" title="Ver detalle completo" @click.stop="verDetalleGasto(g)">
@@ -2091,7 +2096,10 @@ onMounted(fetchDatosLogistica);
           <div class="mt-4 border-t border-slate-100 pt-3 flex items-center justify-between">
             <div>
               <span class="block text-[10px] font-bold uppercase tracking-wider text-slate-400">Importe</span>
-              <strong class="text-base font-bold text-slate-900">{{ formatCurrency(g.monto_total) }}</strong>
+              <span v-if="!g.monto_total || Number(g.monto_total) === 0" class="inline-flex items-center gap-1 text-rose-600 bg-rose-50 px-2 py-0.5 rounded-full border border-rose-200 text-xs font-extrabold">
+                ⚠️ $ 0,00
+              </span>
+              <strong v-else class="text-base font-bold text-slate-900">{{ formatCurrency(g.monto_total) }}</strong>
             </div>
 
             <div class="flex items-center gap-1">

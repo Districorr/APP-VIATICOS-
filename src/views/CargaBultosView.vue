@@ -100,6 +100,11 @@ watch(() => formState.transporte_id, (newTrans) => {
   precioUnitarioPrefijado.value = tarifaCalculada;
 
   if (newTrans) {
+    // Si la empresa de transporte no tiene tarifa prefijada ($0), desplegar automáticamente el campo para ingresar la tarifa
+    if (tarifaCalculada === 0) {
+      permitirEdicionPrecioUnitario.value = true;
+    }
+
     let opt = transportesOptions.value.find(t => String(t.code || t.value || t.id) === String(newTrans));
     let nombre = opt ? opt.label : (typeof newTrans === 'object' ? newTrans.label : String(newTrans));
     
@@ -361,8 +366,9 @@ async function handleGuardar() {
   }
 
   const monto = Number(formState.monto_total);
-  if (!Number.isFinite(monto) || monto < 0) {
-    errorMessage.value = 'Debe ingresar un Importe válido.';
+  if (!Number.isFinite(monto) || monto <= 0) {
+    permitirEdicionPrecioUnitario.value = true;
+    errorMessage.value = 'El Importe Total debe ser mayor a $0. Por favor ingrese la tarifa por bulto o el importe correspondiente.';
     return;
   }
 
