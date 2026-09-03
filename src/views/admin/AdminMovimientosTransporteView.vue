@@ -485,6 +485,9 @@ async function fetchDatosLogistica() {
       if (!provs.some(p => String(p.id) === 'logistica_cirugia')) {
         provs.unshift({ id: 'logistica_cirugia', label: 'Logística de Cirugía' });
       }
+      if (!provs.some(p => String(p.id) === 'sin_proveedor')) {
+        provs.unshift({ id: 'sin_proveedor', label: '⚠️ SIN PROVEEDOR (Sin Asignar)' });
+      }
       proveedoresOptions.value = provs;
     }
     if (provinciasRes.data) provinciasOptions.value = provinciasRes.data.map(p => ({ id: p.id, label: p.nombre }));
@@ -1066,7 +1069,9 @@ const movimientosFiltrados = computed(() => {
 
     let matchesProveedor = true;
     if (filters.proveedorId) {
-      if (isCirugiaFilter) {
+      if (String(filters.proveedorId) === 'sin_proveedor') {
+        matchesProveedor = !g.proveedor_id || String(g.proveedor_id) === 'sin_proveedor' || (proveedorName || '').toUpperCase().includes('SIN PROVEEDOR');
+      } else if (isCirugiaFilter) {
         matchesProveedor = isLogisticaCirugia(g);
       } else {
         matchesProveedor = String(g.proveedor_id) === String(filters.proveedorId);
@@ -1976,6 +1981,28 @@ onMounted(fetchDatosLogistica);
           type="button" 
           class="px-3 py-1.5 bg-white border border-amber-300 hover:bg-amber-100 text-amber-900 text-xs font-bold rounded-lg transition-colors cursor-pointer shadow-xs"
           @click="filters.soloSinDestino = false; targetGastoIdsRef = null; filters.searchQuery = '';"
+        >
+          ✕ Quitar Filtro
+        </button>
+      </div>
+
+      <!-- BANNER ALERTA MODOS DE SANITIZACIÓN: SIN PROVEEDOR -->
+      <div v-if="String(filters.proveedorId) === 'sin_proveedor'" class="p-3.5 bg-rose-50 border border-rose-200 rounded-xl flex flex-wrap items-center justify-between gap-3 shadow-xs">
+        <div class="flex items-center gap-2.5">
+          <div class="p-2 bg-rose-100 rounded-lg text-rose-700 font-extrabold text-base">⚠️</div>
+          <div>
+            <h5 class="text-xs font-bold text-rose-900">
+              Modo Sanitización: Filtrando Operaciones Sin Proveedor Asignado ({{ movimientosFiltrados.length }} halladas)
+            </h5>
+            <p class="text-[11px] text-rose-700 mt-0.5">
+              Hacé clic en el botón <strong>"Editar"</strong> (ícono de lápiz) en la fila para asignarle un proveedor real a cada movimiento.
+            </p>
+          </div>
+        </div>
+        <button 
+          type="button" 
+          class="px-3 py-1.5 bg-white border border-rose-300 hover:bg-rose-100 text-rose-800 text-xs font-bold rounded-lg transition-colors cursor-pointer shadow-xs"
+          @click="filters.proveedorId = null;"
         >
           ✕ Quitar Filtro
         </button>
