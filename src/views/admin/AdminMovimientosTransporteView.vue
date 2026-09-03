@@ -48,6 +48,7 @@ import {
   CheckCircleIcon,
   ClockIcon,
   ExclamationTriangleIcon,
+  AdjustmentsHorizontalIcon,
 } from '@heroicons/vue/24/outline';
 import { useLogisticaPdfExportVariants } from '../../composables/useLogisticaPdfExportVariants.js';
 import { normalizeProveedor, normalizeTransporte, getProveedorBadgeColor } from '../../utils/logisticaHelpers.js';
@@ -373,6 +374,65 @@ const usuariosOptions = computed(() => {
   });
   return Array.from(set).sort().map(u => ({ id: u, label: u }));
 });
+
+// --- COLUMNAS ADICIONALES PERSONALIZABLES EN TABLA MOVIMIENTOS ---
+const COLUMNAS_EXTRA_OPCIONES = [
+  { id: 'guia', label: '🏷️ N° Guía / Remito', desc: 'Número de guía, comprobante o factura' },
+  { id: 'usuario', label: '👤 Cargado Por', desc: 'Usuario que registró el movimiento' },
+  { id: 'paciente', label: '🏥 Paciente Referido', desc: 'Nombre del paciente (Logística Cirugía)' },
+  { id: 'observaciones', label: '📝 Observaciones', desc: 'Observaciones o notas operativas' },
+  { id: 'provincia', label: '🏛️ Provincia Destino', desc: 'Provincia receptora' },
+  { id: 'origen', label: '💳 Origen Imputación', desc: 'Cuenta Corriente, Rendición, etc.' }
+];
+
+const LOCAL_STORAGE_COLUMNAS_KEY = 'tbl_columnas_extra_logistica_v1';
+
+function getInitialColumnasExtra() {
+  try {
+    const saved = localStorage.getItem(LOCAL_STORAGE_COLUMNAS_KEY);
+    if (saved) {
+      const parsed = JSON.parse(saved);
+      if (Array.isArray(parsed)) {
+        return parsed.filter(id => COLUMNAS_EXTRA_OPCIONES.some(opt => opt.id === id)).slice(0, 4);
+      }
+    }
+  } catch (e) {
+    console.error('Error leyendo columnas extra de localStorage:', e);
+  }
+  return ['guia', 'usuario']; // Default 2 columnas adicionales activas
+}
+
+const columnasExtraSeleccionadas = ref(getInitialColumnasExtra());
+const showColumnSelectorModal = ref(false);
+
+watch(columnasExtraSeleccionadas, (newVal) => {
+  try {
+    localStorage.setItem(LOCAL_STORAGE_COLUMNAS_KEY, JSON.stringify(newVal));
+  } catch (e) {
+    console.error('Error guardando columnas extra:', e);
+  }
+}, { deep: true });
+
+function isColumnaExtraActive(id) {
+  return columnasExtraSeleccionadas.value.includes(id);
+}
+
+function toggleColumnaExtra(id) {
+  const index = columnasExtraSeleccionadas.value.indexOf(id);
+  if (index >= 0) {
+    columnasExtraSeleccionadas.value.splice(index, 1);
+  } else {
+    if (columnasExtraSeleccionadas.value.length < 4) {
+      columnasExtraSeleccionadas.value.push(id);
+    } else {
+      showNotification('Límite de Columnas', 'Podés seleccionar hasta 4 columnas adicionales al mismo tiempo.', 'warning');
+    }
+  }
+}
+
+function resetColumnasExtra() {
+  columnasExtraSeleccionadas.value = ['guia', 'usuario'];
+}
 
 // Paginación en Movimientos
 const currentPage = ref(1);
@@ -1925,6 +1985,76 @@ onMounted(fetchDatosLogistica);
         <p class="text-xs font-medium text-slate-500">Consultá para qué se realizó cada movimiento.</p>
 
         <div class="flex items-center gap-2">
+          <!-- Selector de Columnas Adicionales Dropdown (hasta 4) -->
+          <div class="relative">
+            <button
+              type="button"
+              class="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-2.5 py-1 text-xs font-bold text-slate-700 hover:bg-slate-50 hover:text-indigo-700 shadow-2xs transition-all cursor-pointer"
+              @click="showColumnSelectorModal = !showColumnSelectorModal"
+            >
+              <AdjustmentsHorizontalIcon class="h-4 w-4 text-indigo-600" />
+              <span>Columnas (+{{ columnasExtraSeleccionadas.length }}/4)</span>
+              <ChevronDownIcon class="h-3.5 w-3.5 text-slate-400 transition-transform" :class="{ 'rotate-180': showColumnSelectorModal }" />
+            </button>
+
+            <!-- POPOVER DE SELECCIÓN DE COLUMNAS -->
+            <div
+              v-if="showColumnSelectorModal"
+              class="absolute right-0 mt-2 w-72 md:w-80 rounded-2xl border border-slate-200 bg-white p-4 shadow-xl z-50 animate-fade-in"
+            >
+              <div class="flex items-center justify-between border-b border-slate-100 pb-2.5 mb-3">
+                <div>
+                  <h4 class="text-xs font-bold text-slate-900 uppercase tracking-wider">Columnas Adicionales</h4>
+                  <p class="text-[11px] text-slate-500">Agregá hasta 4 columnas extra a la tabla.</p>
+                </div>
+                <span class="inline-block px-2 py-0.5 text-[10px] font-extrabold rounded-full bg-indigo-50 text-indigo-700 border border-indigo-200">
+                  {{ columnasExtraSeleccionadas.length }} / 4
+                </span>
+              </div>
+
+              <div class="space-y-2 max-h-64 overflow-y-auto pr-1">
+                <label
+                  v-for="opt in COLUMNAS_EXTRA_OPCIONES"
+                  :key="opt.id"
+                  class="flex items-start gap-2.5 p-2 rounded-xl border transition-colors cursor-pointer select-none"
+                  :class="isColumnaExtraActive(opt.id) ? 'bg-indigo-50/60 border-indigo-200 text-indigo-900 font-semibold' : 'bg-slate-50/50 border-slate-100 text-slate-700 hover:bg-slate-100'"
+                >
+                  <input
+                    type="checkbox"
+                    :checked="isColumnaExtraActive(opt.id)"
+                    :disabled="!isColumnaExtraActive(opt.id) && columnasExtraSeleccionadas.length >= 4"
+                    class="mt-0.5 h-4 w-4 rounded text-indigo-600 focus:ring-indigo-500 border-slate-300 cursor-pointer"
+                    @change="toggleColumnaExtra(opt.id)"
+                  />
+                  <div class="flex-1 text-xs">
+                    <div class="font-bold flex items-center justify-between">
+                      <span>{{ opt.label }}</span>
+                      <span v-if="isColumnaExtraActive(opt.id)" class="text-[10px] text-indigo-600 font-bold">Activa</span>
+                    </div>
+                    <span class="text-[10px] text-slate-500 font-normal block leading-tight mt-0.5">{{ opt.desc }}</span>
+                  </div>
+                </label>
+              </div>
+
+              <div class="mt-3.5 pt-2.5 border-t border-slate-100 flex items-center justify-between text-xs">
+                <button
+                  type="button"
+                  class="text-[11px] text-slate-500 hover:text-rose-600 font-semibold cursor-pointer"
+                  @click="resetColumnasExtra"
+                >
+                  Restablecer default
+                </button>
+                <button
+                  type="button"
+                  class="px-3 py-1 bg-indigo-700 hover:bg-indigo-800 text-white font-bold rounded-lg text-xs shadow-2xs transition-colors cursor-pointer"
+                  @click="showColumnSelectorModal = false"
+                >
+                  Listo
+                </button>
+              </div>
+            </div>
+          </div>
+
           <!-- Selector de Modo de Vista: Tabla (Default) vs Bloques -->
           <div class="flex items-center gap-1 rounded-lg border border-slate-200 bg-slate-100 p-1">
             <button
@@ -1966,16 +2096,23 @@ onMounted(fetchDatosLogistica);
                 <th class="px-4 py-3 text-center">Bultos</th>
                 <th class="px-4 py-3">Sentido</th>
                 <th class="px-4 py-3">Destino</th>
+                <!-- Columnas Adicionales Dinámicas Opcionales -->
+                <th v-if="isColumnaExtraActive('guia')" class="px-4 py-3">N° Guía / Remito</th>
+                <th v-if="isColumnaExtraActive('usuario')" class="px-4 py-3">Cargado Por</th>
+                <th v-if="isColumnaExtraActive('paciente')" class="px-4 py-3">Paciente</th>
+                <th v-if="isColumnaExtraActive('observaciones')" class="px-4 py-3">Observaciones</th>
+                <th v-if="isColumnaExtraActive('provincia')" class="px-4 py-3">Provincia</th>
+                <th v-if="isColumnaExtraActive('origen')" class="px-4 py-3">Origen</th>
                 <th class="px-4 py-3 text-right">Importe</th>
                 <th class="px-4 py-3 text-center">Acciones</th>
               </tr>
             </thead>
             <tbody class="divide-y divide-slate-100 bg-white font-medium text-slate-700">
               <tr v-if="loading">
-                <td colspan="10" class="px-4 py-8 text-center text-slate-500">Cargando movimientos...</td>
+                <td :colspan="10 + columnasExtraSeleccionadas.length" class="px-4 py-8 text-center text-slate-500">Cargando movimientos...</td>
               </tr>
               <tr v-else-if="movimientosPaginados.length === 0">
-                <td colspan="10" class="px-4 py-8 text-center text-slate-500">No se encontraron movimientos registrados para los criterios seleccionados.</td>
+                <td :colspan="10 + columnasExtraSeleccionadas.length" class="px-4 py-8 text-center text-slate-500">No se encontraron movimientos registrados para los criterios seleccionados.</td>
               </tr>
               <tr
                 v-for="g in movimientosPaginados"
@@ -2015,6 +2152,33 @@ onMounted(fetchDatosLogistica);
                 </td>
                 <td class="px-4 py-3 capitalize text-slate-600">{{ g.datos_adicionales?.sentido_movimiento || 'ida' }}</td>
                 <td class="px-4 py-3 text-slate-600">{{ g.datos_adicionales?.destino_texto || g.localidad_destino?.nombre || g.provincias?.nombre || g.provincia?.nombre || 'Sin destino' }}</td>
+                
+                <!-- Celdas Adicionales Dinámicas Opcionales -->
+                <td v-if="isColumnaExtraActive('guia')" class="px-4 py-3 text-slate-700 font-medium whitespace-nowrap">
+                  <span class="inline-block px-2 py-0.5 rounded-md bg-slate-100 font-mono text-[11px] text-slate-800 border border-slate-200">
+                    {{ g.numero_factura || g.datos_adicionales?.numero_guia || '—' }}
+                  </span>
+                </td>
+                <td v-if="isColumnaExtraActive('usuario')" class="px-4 py-3 text-slate-700 text-xs font-semibold whitespace-nowrap">
+                  <span class="inline-flex items-center gap-1 text-slate-700">
+                    <UserIcon class="h-3.5 w-3.5 text-slate-400 shrink-0" />
+                    <span>{{ g.cargado_por || '—' }}</span>
+                  </span>
+                </td>
+                <td v-if="isColumnaExtraActive('paciente')" class="px-4 py-3 text-slate-700 text-xs font-semibold whitespace-nowrap">
+                  {{ g.paciente_referido || g.datos_adicionales?.paciente_referido || '—' }}
+                </td>
+                <td v-if="isColumnaExtraActive('observaciones')" class="px-4 py-3 text-slate-500 text-[11px] max-w-[180px] truncate" :title="g.datos_adicionales?.observacion_logistica || g.descripcion_general || ''">
+                  {{ g.datos_adicionales?.observacion_logistica || g.descripcion_general || '—' }}
+                </td>
+                <td v-if="isColumnaExtraActive('provincia')" class="px-4 py-3 text-slate-700 text-xs font-semibold whitespace-nowrap">
+                  {{ g.provincias?.nombre || g.provincia?.nombre || '—' }}
+                </td>
+                <td v-if="isColumnaExtraActive('origen')" class="px-4 py-3 text-slate-700 text-xs font-medium whitespace-nowrap">
+                  <span class="px-2 py-0.5 text-[11px] font-bold rounded-full bg-slate-100 text-slate-700 border border-slate-200">
+                    {{ g.origen_gasto === 'cuenta_corriente_empresa' ? 'Cta. Cte.' : (g.origen_gasto === 'rendicion' ? 'Rendición' : (g.origen_gasto || '—')) }}
+                  </span>
+                </td>
                 <td class="whitespace-nowrap px-4 py-3 text-right font-bold">
                   <span v-if="!g.monto_total || Number(g.monto_total) === 0" class="inline-flex items-center gap-1 text-rose-600 bg-rose-50 px-2 py-0.5 rounded-full border border-rose-200 text-xs font-extrabold" title="Movimiento sin importe cargado. Hacé clic en editar para ingresar el monto.">
                     ⚠️ $ 0,00
