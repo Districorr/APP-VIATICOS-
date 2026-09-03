@@ -2012,7 +2012,7 @@ onMounted(fetchDatosLogistica);
                 </span>
               </div>
 
-              <div class="space-y-2 max-h-64 overflow-y-auto pr-1">
+              <div class="space-y-2 max-h-[420px] overflow-y-auto pr-1">
                 <label
                   v-for="opt in COLUMNAS_EXTRA_OPCIONES"
                   :key="opt.id"
