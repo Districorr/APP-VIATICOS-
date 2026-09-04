@@ -772,8 +772,8 @@ export function useLogisticaPdfExportVariants() {
     const provGroups = {};
 
     items.forEach(item => {
-      const encName = normalizeTransporte(item.transporte?.nombre);
-      const provName = normalizeProveedor(item.proveedor?.nombre);
+      const encName = normalizeTransporte(item.transporte?.nombre || item.transportes?.nombre);
+      const provName = normalizeProveedor(item.proveedor?.nombre || item.proveedores?.nombre || item.proveedor_nombre || (typeof item.proveedor === 'string' ? item.proveedor : ''));
       const val = Number(item.monto_total || 0);
       const bCount = getBultosCount(item);
 

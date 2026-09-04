@@ -77,7 +77,8 @@ export function isLogisticaCirugia(item) {
 
   if (Number(item.proveedor_id) === 14) return true;
 
-  const provName = (item.proveedores?.nombre || item.proveedor_nombre || item.proveedor || '').toUpperCase().trim();
+  const provObj = item.proveedores || (typeof item.proveedor === 'object' ? item.proveedor : null);
+  const provName = (provObj?.nombre || item.proveedor_nombre || (typeof item.proveedor === 'string' ? item.proveedor : '') || '').toUpperCase().trim();
   if (provName === 'LOGISTICA CIRUGIA' || provName === 'LOGISTICA CIRUGIAS' || provName === 'LOGISTICA DE CIRUGIAS') {
     return true;
   }
@@ -98,7 +99,8 @@ export function getProveedorLabel(itemOrName) {
     if (isLogisticaCirugia(itemOrName)) {
       return 'Logística de Cirugía';
     }
-    const name = itemOrName.proveedores?.nombre || itemOrName.proveedor_nombre || itemOrName.proveedor || '';
+    const provObj = itemOrName.proveedores || (typeof itemOrName.proveedor === 'object' ? itemOrName.proveedor : null);
+    const name = provObj?.nombre || itemOrName.proveedor_nombre || (typeof itemOrName.proveedor === 'string' ? itemOrName.proveedor : '') || itemOrName.nombre || '';
     if (!name || name === 'SIN PROVEEDOR' || name === 'Sin proveedor') return 'Sin Proveedor';
     return normalizeProveedor(name);
   }
@@ -119,11 +121,17 @@ export function getProveedorLabel(itemOrName) {
  * Mantiene 'SIN PROVEEDOR' para registros nulos, vacíos, institucionales o DISTRICORR.
  * No utiliza el transporte ni la descripción como fallback.
  * 
- * @param {string} name 
+ * @param {string|object} name 
  * @returns {string} Nombre oficial unificado del proveedor
  */
 export function normalizeProveedor(name) {
-  if (!name || typeof name !== 'string') return 'SIN PROVEEDOR';
+  if (!name) return 'SIN PROVEEDOR';
+
+  if (typeof name === 'object') {
+    name = name.nombre || name.proveedor_nombre || (typeof name.proveedor === 'string' ? name.proveedor : '') || '';
+  }
+  
+  if (typeof name !== 'string') return 'SIN PROVEEDOR';
   
   const cleanName = name.trim().toUpperCase();
 
