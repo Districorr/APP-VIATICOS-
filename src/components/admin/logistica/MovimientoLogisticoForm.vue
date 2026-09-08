@@ -70,18 +70,39 @@ function aplicarSugerencia(key, value) {
   }
 }
 
-watch(() => sugerencias.value.numero_guia_sugerido, (newGuia) => {
-  if (newGuia && !formState.numero_guia) {
-    formState.numero_guia = newGuia;
+watch(sugerencias, (newSug) => {
+  if (!newSug || !formState.descripcion_general?.trim()) return;
+
+  if (newSug.tipo_logistica && formState.tipo_logistica !== newSug.tipo_logistica) {
+    formState.tipo_logistica = newSug.tipo_logistica;
   }
-});
+  if (newSug.tipo_movimiento_encomienda && (!formState.tipo_movimiento_encomienda || formState.tipo_movimiento_encomienda === 'Envío')) {
+    formState.tipo_movimiento_encomienda = newSug.tipo_movimiento_encomienda;
+  }
+  if (newSug.paciente_referido && !formState.paciente_referido) {
+    formState.paciente_referido = newSug.paciente_referido;
+  }
+  if (newSug.cliente_sugerido?.id && !formState.cliente_id) {
+    formState.cliente_id = newSug.cliente_sugerido.id;
+  }
+  if (newSug.proveedor_sugerido?.id && !formState.proveedor_id && formState.tipo_logistica !== 'cirugia') {
+    formState.proveedor_id = newSug.proveedor_sugerido.id;
+  }
+  if (newSug.numero_guia_sugerido && !formState.numero_guia) {
+    formState.numero_guia = newSug.numero_guia_sugerido;
+  }
+}, { deep: true });
 
 watch(() => formState.tipo_logistica, (newTipo) => {
   if (newTipo === 'cirugia') {
     const foundCirugia = proveedoresOptions.value.find(p => Number(p.value || p.code || p.id) === 14 || (p.label || '').toLowerCase().includes('cirug'));
     formState.proveedor_id = foundCirugia ? (foundCirugia.value || foundCirugia.code || foundCirugia.id || 14) : 14;
-  } else if (Number(formState.proveedor_id) === 14) {
-    formState.proveedor_id = null;
+  } else if (newTipo === 'proveedor_otros') {
+    formState.cliente_id = null;
+    formState.paciente_referido = '';
+    if (Number(formState.proveedor_id) === 14) {
+      formState.proveedor_id = null;
+    }
   }
 }, { immediate: true });
 
@@ -469,12 +490,12 @@ onUnmounted(() => {
   window.removeEventListener('keydown', handleKeyDown);
 });
 
-watch(() => formState.tipo_logistica, (val) => {
-  if (val === 'cirugia') {
-    formState.proveedor_id = null;
-  } else if (val === 'proveedor_otros') {
-    formState.cliente_id = null;
-    formState.paciente_referido = '';
+watch(() => props.modelValue, async (isOpen) => {
+  if (isOpen && !isEmbeddedMode.value) {
+    if (!props.initialData || Object.keys(props.initialData).length === 0) {
+      resetForm();
+    }
+    await cargarOpciones();
   }
 });
 
