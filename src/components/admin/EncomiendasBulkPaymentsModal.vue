@@ -511,8 +511,8 @@ watch(() => props.seedPayment, (seed) => {
 
 <template>
   <Transition name="modal-fade">
-    <div v-if="modelValue" class="fixed inset-0 z-60 flex items-center justify-center bg-slate-900/60 p-2 md:p-4" @click.self="closeModal">
-      <div class="flex h-[96vh] w-[calc(100vw-1rem)] max-w-[1680px] flex-col overflow-hidden rounded-2xl bg-white shadow-2xl md:w-[calc(100vw-2rem)]">
+    <div v-if="modelValue" class="fixed inset-0 z-60 flex items-center justify-center bg-slate-900/60 p-2 md:p-4 overflow-y-auto">
+      <div class="flex h-[96vh] w-[calc(100vw-1rem)] max-w-[1680px] flex-col overflow-hidden rounded-2xl bg-white shadow-2xl md:w-[calc(100vw-2rem)] my-auto" @click.stop>
         <!-- Encabezado del Modal -->
         <div class="flex items-start justify-between border-b border-slate-200 px-6 py-5">
           <div>

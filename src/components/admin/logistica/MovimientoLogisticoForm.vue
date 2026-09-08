@@ -561,10 +561,9 @@ watch(formState, (newVal) => {
   <!-- Modo Standalone (Modal con backdrop) -->
   <div
     v-if="!isEmbeddedMode && modelValue"
-    class="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 p-3 md:p-6"
-    @click.self="cerrarModal"
+    class="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 p-3 md:p-6 overflow-y-auto"
   >
-    <div class="flex max-h-[90vh] w-full max-w-3xl flex-col rounded-2xl bg-white shadow-2xl overflow-hidden">
+    <div class="flex h-[92vh] max-h-[900px] w-[calc(100vw-1.5rem)] max-w-5xl md:w-[calc(100vw-3rem)] flex-col rounded-2xl bg-white shadow-2xl overflow-hidden my-auto" @click.stop>
       <!-- Encabezado Modal Fijo -->
       <div class="flex items-center justify-between border-b border-slate-200 px-6 py-4 bg-slate-50">
         <div>
