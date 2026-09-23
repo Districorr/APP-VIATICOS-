@@ -1079,8 +1079,22 @@ export function useLogisticaPdfExportVariants() {
       doc.text(`${secNum}. DETALLE AUDITABLE DE OPERACIONES (${modo === 'proveedor' ? 'POR PROVEEDOR' : 'POR ENCOMIENDA'})`, 10, currentY);
       currentY += 3;
 
-      // Ordenar detalle según modo seleccionado
+      // Ordenar detalle por fecha (ascendente) de forma prioritaria
+      const getTime = (dateStr) => {
+        if (!dateStr) return 0;
+        const str = String(dateStr);
+        if (/^\d{4}-\d{2}-\d{2}$/.test(str)) {
+          return new Date(`${str}T00:00:00`).getTime();
+        }
+        const d = new Date(str);
+        return isNaN(d.getTime()) ? 0 : d.getTime();
+      };
+
       const sortedItems = [...items].sort((a, b) => {
+        const timeA = getTime(a.fecha_gasto);
+        const timeB = getTime(b.fecha_gasto);
+        if (timeA !== timeB) return timeA - timeB;
+
         if (modo === 'proveedor') {
           const provA = a.proveedor?.nombre || '';
           const provB = b.proveedor?.nombre || '';
@@ -1090,7 +1104,7 @@ export function useLogisticaPdfExportVariants() {
           const encB = b.transporte?.nombre || '';
           if (encA !== encB) return encA.localeCompare(encB);
         }
-        return new Date(a.fecha_gasto) - new Date(b.fecha_gasto);
+        return 0;
       });
 
       const getOrigenLabel = (item) => {

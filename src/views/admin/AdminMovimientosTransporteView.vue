@@ -18,6 +18,7 @@ import MovimientoLogisticoForm from '../../components/admin/logistica/Movimiento
 import EncomiendasBulkPaymentsModal from '../../components/admin/EncomiendasBulkPaymentsModal.vue';
 import AdminEditarGastoCuentaCorrienteModal from '../../components/admin/AdminEditarGastoCuentaCorrienteModal.vue';
 import AdminCtaCteVencimientosModal from '../../components/admin/AdminCtaCteVencimientosModal.vue';
+import EncomiendaPagoDirectoModal from '../../components/admin/logistica/EncomiendaPagoDirectoModal.vue';
 import ToastNotification from '../../components/ToastNotification.vue';
 
 // Iconos
@@ -247,8 +248,10 @@ const isCargaMasivaOpen = ref(false);
 const isEditarModalOpen = ref(false);
 const isCtaCteModalOpen = ref(false);
 const isDetalleModalOpen = ref(false);
+const isPagoDirectoModalOpen = ref(false);
 const gastoEnEdicion = ref(null);
 const gastoSeleccionadoDetalle = ref(null);
+const gastoSeleccionadoPago = ref(null);
 
 // Nombres de Meses en Español
 const NOMBRES_MESES = [
@@ -287,6 +290,7 @@ const filters = reactive({
   soloInconsistentes: false,
   soloSinDestino: false,
   usuarioId: null, // Filtro por usuario / responsable de carga
+  origenImputacion: 'todos', // 'todos' | 'cuenta_corriente_empresa' | 'pago_directo' | 'rendicion'
 });
 
 const localidadesMapRef = ref(new Map());
@@ -1001,6 +1005,7 @@ const activeFiltersCount = computed(() => {
   if (filters.numeroGuia) count++;
   if (filters.conBultos !== 'todos') count++;
   if (filters.usuarioId) count++;
+  if (filters.origenImputacion !== 'todos') count++;
   return count;
 });
 
@@ -1020,6 +1025,7 @@ function limpiarFiltros() {
   filters.numeroGuia = '';
   filters.conBultos = 'todos';
   filters.usuarioId = null;
+  filters.origenImputacion = 'todos';
   currentPage.value = 1;
 }
 
@@ -1112,10 +1118,15 @@ const movimientosFiltrados = computed(() => {
 
     const matchesUsuario = !filters.usuarioId || g.cargado_por === filters.usuarioId || String(g.usuario_id) === String(filters.usuarioId) || String(g.user_id) === String(filters.usuarioId);
 
+    const matchesOrigenImputacion = filters.origenImputacion === 'todos' ||
+      (filters.origenImputacion === 'cuenta_corriente_empresa' && (!g.origen_gasto || g.origen_gasto === 'cuenta_corriente_empresa')) ||
+      (filters.origenImputacion === 'pago_directo' && g.origen_gasto === 'pago_directo') ||
+      (filters.origenImputacion === 'rendicion' && (g.origen_gasto === 'rendicion' || g.origen_gasto === 'caja_chica'));
+
     return matchesSearch && matchesFechaDesde && matchesFechaHasta && matchesTransporte
       && matchesTipoMov && matchesTipoLog && matchesSentido && matchesCliente
       && matchesPaciente && matchesProveedor && matchesProvincia && matchesLocalidad
-      && matchesGuia && matchesBultos && matchesSoloInconsistentes && matchesSoloSinDestino && matchesUsuario;
+      && matchesGuia && matchesBultos && matchesSoloInconsistentes && matchesSoloSinDestino && matchesUsuario && matchesOrigenImputacion;
   });
 });
 
@@ -1395,6 +1406,15 @@ const controlSemanalData = computed(() => {
 function abrirEdicion(gasto) {
   gastoEnEdicion.value = gasto;
   isEditarModalOpen.value = true;
+}
+
+function abrirPagoDirecto(gasto) {
+  gastoSeleccionadoPago.value = gasto;
+  isPagoDirectoModalOpen.value = true;
+}
+
+function onPagoDirectoSaved(data) {
+  fetchDatosLogistica();
 }
 
 function verDetalleGasto(gasto) {
@@ -1860,6 +1880,16 @@ onMounted(fetchDatosLogistica);
             <label class="block text-[9px] font-bold uppercase tracking-wider text-slate-500 mb-0.5">N° Guía / Remito</label>
             <input v-model="filters.numeroGuia" type="text" class="form-input text-xs h-7 py-0.5 px-2 rounded-lg" placeholder="N° Guía" />
           </div>
+
+          <div>
+            <label class="block text-[9px] font-bold uppercase tracking-wider text-slate-500 mb-0.5">Imputación / Pago</label>
+            <select v-model="filters.origenImputacion" class="form-input text-xs h-7 py-0.5 px-2 rounded-lg">
+              <option value="todos">Todos los orígenes</option>
+              <option value="cuenta_corriente_empresa">Cta. Cte. (Pendiente)</option>
+              <option value="pago_directo">Pago Directo (Abonado)</option>
+              <option value="rendicion">Rendición / Caja</option>
+            </select>
+          </div>
         </div>
       </div>
     </div>
@@ -2202,8 +2232,24 @@ onMounted(fetchDatosLogistica);
                   {{ g.provincias?.nombre || g.provincia?.nombre || '—' }}
                 </td>
                 <td v-if="isColumnaExtraActive('origen')" class="px-4 py-3 text-slate-700 text-xs font-medium whitespace-nowrap">
-                  <span class="px-2 py-0.5 text-[11px] font-bold rounded-full bg-slate-100 text-slate-700 border border-slate-200">
-                    {{ g.origen_gasto === 'cuenta_corriente_empresa' ? 'Cta. Cte.' : (g.origen_gasto === 'rendicion' ? 'Rendición' : (g.origen_gasto || '—')) }}
+                  <span
+                    v-if="g.origen_gasto === 'pago_directo'"
+                    class="px-2 py-0.5 text-[11px] font-bold rounded-full bg-emerald-100 text-emerald-800 border border-emerald-200"
+                    :title="g.datos_adicionales?.metodo_pago ? `Pago Directo: ${g.datos_adicionales.metodo_pago}` : 'Pago Directo'"
+                  >
+                    💳 Pago Directo
+                  </span>
+                  <span
+                    v-else-if="g.origen_gasto === 'cuenta_corriente_empresa'"
+                    class="px-2 py-0.5 text-[11px] font-bold rounded-full bg-amber-50 text-amber-800 border border-amber-200"
+                  >
+                    ⏳ Cta. Cte.
+                  </span>
+                  <span
+                    v-else
+                    class="px-2 py-0.5 text-[11px] font-bold rounded-full bg-slate-100 text-slate-700 border border-slate-200"
+                  >
+                    {{ g.origen_gasto === 'rendicion' ? 'Rendición' : (g.origen_gasto || '—') }}
                   </span>
                 </td>
                 <td class="whitespace-nowrap px-4 py-3 text-right font-bold">
@@ -2214,6 +2260,15 @@ onMounted(fetchDatosLogistica);
                 </td>
                 <td class="whitespace-nowrap px-4 py-3 text-center" @click.stop>
                   <div class="flex items-center justify-center gap-1.5">
+                    <button
+                      type="button"
+                      class="rounded p-1 cursor-pointer transition-colors"
+                      :class="g.origen_gasto === 'pago_directo' ? 'text-emerald-600 hover:bg-emerald-100' : 'text-amber-600 hover:bg-amber-100'"
+                      :title="g.origen_gasto === 'pago_directo' ? 'Ver/Modificar Pago Directo (' + (g.datos_adicionales?.metodo_pago || 'Abonado') + ')' : 'Registrar Pago Directo'"
+                      @click.stop="abrirPagoDirecto(g)"
+                    >
+                      <BanknotesIcon class="h-4 w-4" />
+                    </button>
                     <button type="button" class="rounded p-1 text-slate-500 hover:bg-slate-200 hover:text-slate-900 cursor-pointer" title="Ver detalle completo" @click.stop="verDetalleGasto(g)">
                       <EyeIcon class="h-4 w-4" />
                     </button>
@@ -2248,9 +2303,18 @@ onMounted(fetchDatosLogistica);
           <div>
             <div class="flex items-center justify-between border-b border-slate-100 pb-2.5">
               <span class="text-xs text-slate-500 font-bold">{{ formatDate(g.fecha_gasto) }}</span>
-              <span class="inline-flex items-center rounded-full bg-slate-100 px-2.5 py-0.5 text-[11px] font-bold text-slate-800">
-                {{ g.datos_adicionales?.tipo_movimiento_encomienda || 'Envío' }}
-              </span>
+              <div class="flex items-center gap-1.5">
+                <span
+                  v-if="g.origen_gasto === 'pago_directo'"
+                  class="inline-flex items-center rounded-full bg-emerald-100 px-2 py-0.5 text-[10px] font-bold text-emerald-800"
+                  :title="g.datos_adicionales?.metodo_pago ? `Pago Directo: ${g.datos_adicionales.metodo_pago}` : 'Pago Directo'"
+                >
+                  💳 Pago Directo
+                </span>
+                <span class="inline-flex items-center rounded-full bg-slate-100 px-2.5 py-0.5 text-[11px] font-bold text-slate-800">
+                  {{ g.datos_adicionales?.tipo_movimiento_encomienda || 'Envío' }}
+                </span>
+              </div>
             </div>
 
             <div class="mt-3 space-y-2 text-xs">
@@ -2294,6 +2358,15 @@ onMounted(fetchDatosLogistica);
             </div>
 
             <div class="flex items-center gap-1">
+              <button
+                type="button"
+                class="rounded p-1.5 transition-colors cursor-pointer"
+                :class="g.origen_gasto === 'pago_directo' ? 'text-emerald-600 hover:bg-emerald-50' : 'text-amber-600 hover:bg-amber-50'"
+                :title="g.origen_gasto === 'pago_directo' ? 'Ver/Modificar Pago Directo (' + (g.datos_adicionales?.metodo_pago || 'Abonado') + ')' : 'Registrar Pago Directo'"
+                @click.stop="abrirPagoDirecto(g)"
+              >
+                <BanknotesIcon class="h-4 w-4" />
+              </button>
               <button type="button" class="rounded p-1.5 text-slate-500 hover:bg-slate-100 hover:text-slate-900" title="Ver detalle completo" @click="verDetalleGasto(g)">
                 <EyeIcon class="h-4 w-4" />
               </button>
@@ -2762,6 +2835,20 @@ onMounted(fetchDatosLogistica);
           </div>
           <div><span class="text-slate-500 font-semibold block">Descripción General:</span><p class="text-slate-800 bg-slate-50 p-2 rounded mt-1">{{ gastoSeleccionadoDetalle.descripcion_general || 'Sin descripción' }}</p></div>
           <div v-if="gastoSeleccionadoDetalle.datos_adicionales?.observacion_logistica"><span class="text-slate-500 font-semibold block">Observación Logística:</span><p class="text-slate-800 bg-slate-50 p-2 rounded mt-1">{{ gastoSeleccionadoDetalle.datos_adicionales.observacion_logistica }}</p></div>
+
+          <!-- Información de Pago Directo en Detalle -->
+          <div v-if="gastoSeleccionadoDetalle.origen_gasto === 'pago_directo'" class="rounded-xl bg-emerald-50 border border-emerald-200 p-3 space-y-1.5">
+            <span class="text-emerald-800 font-bold block text-xs">💳 Pago Directo Registrado</span>
+            <div class="text-[11px] text-emerald-900 grid grid-cols-2 gap-2">
+              <div><span class="font-semibold">Método:</span> {{ gastoSeleccionadoDetalle.datos_adicionales?.metodo_pago || 'Pago Directo' }}</div>
+              <div v-if="gastoSeleccionadoDetalle.datos_adicionales?.referencia_pago"><span class="font-semibold">Comprobante:</span> {{ gastoSeleccionadoDetalle.datos_adicionales.referencia_pago }}</div>
+              <div v-if="gastoSeleccionadoDetalle.datos_adicionales?.fecha_pago_directo"><span class="font-semibold">Fecha de Pago:</span> {{ formatDate(gastoSeleccionadoDetalle.datos_adicionales.fecha_pago_directo) }}</div>
+              <div v-if="gastoSeleccionadoDetalle.datos_adicionales?.echeque"><span class="font-semibold">E-Cheque:</span> N° {{ gastoSeleccionadoDetalle.datos_adicionales.echeque.numero }} ({{ gastoSeleccionadoDetalle.datos_adicionales.echeque.banco_nombre || 'Banco' }})</div>
+            </div>
+            <div v-if="gastoSeleccionadoDetalle.datos_adicionales?.observacion_pago" class="text-[11px] text-emerald-800 pt-1 border-t border-emerald-200/60">
+              <span class="font-semibold">Nota de Pago:</span> {{ gastoSeleccionadoDetalle.datos_adicionales.observacion_pago }}
+            </div>
+          </div>
         </div>
         <div class="border-t border-slate-200 px-6 py-3 bg-slate-50 flex justify-end">
           <button type="button" class="btn-secondary text-xs" @click="isDetalleModalOpen = false">Cerrar</button>
@@ -2793,6 +2880,13 @@ onMounted(fetchDatosLogistica);
       v-model="isCtaCteModalOpen"
       @show-notification="showNotification"
       @ir-a-corregir="handleIrACorregir"
+    />
+
+    <EncomiendaPagoDirectoModal
+      v-model="isPagoDirectoModalOpen"
+      :gasto="gastoSeleccionadoPago"
+      @saved="onPagoDirectoSaved"
+      @show-notification="showNotification"
     />
 
     <!-- PESTAÑA 5: GESTIÓN DE EMPRESAS DE TRANSPORTE (ABM) -->

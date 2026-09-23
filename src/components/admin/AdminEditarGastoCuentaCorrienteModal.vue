@@ -87,7 +87,7 @@ const getRowValue = (keys, fallback = null) => {
   return fallback;
 };
 
-const editableLogisticOrigins = new Set(['cuenta_corriente_empresa', 'rendicion', 'caja_chica']);
+const editableLogisticOrigins = new Set(['cuenta_corriente_empresa', 'rendicion', 'caja_chica', 'pago_directo']);
 const normalizeOrigin = (value) => String(value || '').trim().toLowerCase().replaceAll(' ', '_');
 
 const isEditableLogisticExpense = computed(() => {
