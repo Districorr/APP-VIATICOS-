@@ -6,6 +6,7 @@ import DestinoSelect from '../../DestinoSelect.vue';
 import { supabase } from '../../../supabaseClient.js';
 import { useLogisticaDescriptionParser } from '../../../composables/useLogisticaDescriptionParser.js';
 import { normalizeProveedor } from '../../../utils/logisticaHelpers.js';
+import { BanknotesIcon, CreditCardIcon, BuildingLibraryIcon } from '@heroicons/vue/24/outline';
 
 const props = defineProps({
   modelValue: { type: Boolean, default: false },
@@ -20,6 +21,7 @@ const isEmbeddedMode = computed(() => props.mode === 'embedded' || props.isEmbed
 
 const saving = ref(false);
 const loadingOptions = ref(false);
+const loadingBancos = ref(false);
 const errorMessage = ref('');
 const successMessage = ref('');
 
@@ -29,6 +31,15 @@ const proveedoresOptions = ref([]);
 const provinciasOptions = ref([]);
 const localidadesCache = ref({});
 const tiposGastoOptions = ref([]);
+const bancosOptions = ref([]);
+
+const metodosPago = [
+  'Transferencia Banco Galicia',
+  'Transferencia Banco Santander',
+  'Efectivo',
+  'E-Cheque',
+  'Otro'
+];
 
 const defaultDate = () => new Date().toISOString().split('T')[0];
 
@@ -49,6 +60,71 @@ const formState = reactive({
   monto_total: '',
   numero_guia: '',
   observacion_logistica: '',
+  // Modalidad y Pago Directo
+  origen_pago: 'cuenta_corriente_empresa',
+  metodo_pago: 'Transferencia Banco Galicia',
+  referencia_pago: '',
+  fecha_pago_directo: defaultDate(),
+  observacion_pago: '',
+  echeque_banco: null,
+  echeque_numero: '',
+  echeque_emision: '',
+  echeque_vencimiento: '',
+  echeque_acreditacion: '',
+});
+
+async function cargarBancos() {
+  if (bancosOptions.value.length > 0) return;
+  loadingBancos.value = true;
+  try {
+    const { data, error } = await supabase
+      .from('bancos')
+      .select('id, nombre, color_hex')
+      .order('nombre');
+
+    if (error) throw error;
+    bancosOptions.value = (data || []).map(b => ({ label: b.nombre, value: b.id, color: b.color_hex }));
+  } catch (e) {
+    console.error('Error cargando bancos:', e);
+  } finally {
+    loadingBancos.value = false;
+  }
+}
+
+const handleCreateBanco = async (label) => {
+  const nombre = (label || '').trim();
+  if (!nombre) return;
+  try {
+    const { data, error } = await supabase.rpc('crear_banco_al_vuelo', { p_nombre_banco: nombre });
+    if (error) throw error;
+
+    const newOpt = { label: nombre, value: data };
+    bancosOptions.value.push(newOpt);
+    formState.echeque_banco = newOpt;
+  } catch (e) {
+    errorMessage.value = `Error al crear nuevo banco: ${e.message}`;
+  }
+};
+
+watch(() => formState.origen_pago, (newVal) => {
+  if (newVal === 'pago_directo') {
+    if (!formState.fecha_pago_directo) {
+      formState.fecha_pago_directo = formState.fecha_gasto || defaultDate();
+    }
+    cargarBancos();
+  }
+});
+
+watch(() => formState.metodo_pago, (newVal) => {
+  if (newVal === 'E-Cheque') {
+    cargarBancos();
+  }
+});
+
+watch(() => formState.fecha_gasto, (newFecha) => {
+  if (newFecha && formState.origen_pago === 'pago_directo' && !formState.fecha_pago_directo) {
+    formState.fecha_pago_directo = newFecha;
+  }
 });
 
 const descripcionRef = computed(() => formState.descripcion_general);
@@ -331,6 +407,18 @@ function resetForm() {
   formState.monto_total = '';
   formState.numero_guia = '';
   formState.observacion_logistica = '';
+  // Pago Directo
+  formState.origen_pago = 'cuenta_corriente_empresa';
+  formState.metodo_pago = 'Transferencia Banco Galicia';
+  formState.referencia_pago = '';
+  formState.fecha_pago_directo = defaultDate();
+  formState.observacion_pago = '';
+  formState.echeque_banco = null;
+  formState.echeque_numero = '';
+  formState.echeque_emision = '';
+  formState.echeque_vencimiento = '';
+  formState.echeque_acreditacion = '';
+
   errorMessage.value = '';
   successMessage.value = '';
 }
@@ -398,6 +486,18 @@ async function handleGuardar() {
     return;
   }
 
+  const isPagoDirecto = formState.origen_pago === 'pago_directo';
+
+  if (isPagoDirecto) {
+    if (!formState.fecha_pago_directo) {
+      formState.fecha_pago_directo = formState.fecha_gasto || defaultDate();
+    }
+    if (formState.metodo_pago === 'E-Cheque' && !formState.echeque_numero?.trim()) {
+      errorMessage.value = 'Para E-Cheque es obligatorio ingresar el número de cheque.';
+      return;
+    }
+  }
+
   saving.value = true;
   try {
     const { data: authData } = await supabase.auth.getUser();
@@ -429,12 +529,40 @@ async function handleGuardar() {
     });
     if (matchTipo) tipoGastoId = matchTipo.id;
 
+    const datosAdicionales = {
+      modulo: 'logistica',
+      origen_carga: 'formulario_movimientos',
+      tipo_logistica: formState.tipo_logistica,
+      tipo_movimiento_encomienda: formState.tipo_movimiento_encomienda || 'Envío',
+      cantidad_bultos: Number(formState.cantidad_bultos) || 1,
+      sentido_movimiento: formState.sentido_movimiento || 'ida',
+      destino_texto: formState.destino_texto?.trim() || null,
+      observacion_logistica: formState.observacion_logistica?.trim() || null,
+    };
+
+    if (isPagoDirecto) {
+      datosAdicionales.metodo_pago = formState.metodo_pago;
+      datosAdicionales.fecha_pago_directo = formState.fecha_pago_directo || formState.fecha_gasto;
+      datosAdicionales.referencia_pago = formState.referencia_pago?.trim() || null;
+      datosAdicionales.observacion_pago = formState.observacion_pago?.trim() || null;
+      if (formState.metodo_pago === 'E-Cheque') {
+        datosAdicionales.echeque = {
+          banco_id: formState.echeque_banco?.value || null,
+          banco_nombre: formState.echeque_banco?.label || null,
+          numero: formState.echeque_numero?.trim() || null,
+          emision: formState.echeque_emision || null,
+          vencimiento: formState.echeque_vencimiento || null,
+          acreditacion: formState.echeque_acreditacion || null,
+        };
+      }
+    }
+
     const payload = {
       user_id: userId,
       creado_por_id: userId,
       formato_id: 1,
       tipo_gasto_id: tipoGastoId,
-      origen_gasto: 'cuenta_corriente_empresa',
+      origen_gasto: isPagoDirecto ? 'pago_directo' : 'cuenta_corriente_empresa',
       estado_delegacion: 'directo',
       fecha_gasto: `${formState.fecha_gasto}T12:00:00Z`,
       descripcion_general: formState.descripcion_general?.trim() || `Despacho ${formState.tipo_movimiento_encomienda}`,
@@ -446,16 +574,7 @@ async function handleGuardar() {
       localidad_destino_id: formState.localidad_destino_id || null,
       numero_factura: formState.numero_guia?.trim() || null,
       paciente_referido: isCirugia ? (formState.paciente_referido?.trim() || null) : null,
-      datos_adicionales: {
-        modulo: 'logistica',
-        origen_carga: 'formulario_movimientos',
-        tipo_logistica: formState.tipo_logistica,
-        tipo_movimiento_encomienda: formState.tipo_movimiento_encomienda || 'Envío',
-        cantidad_bultos: Number(formState.cantidad_bultos) || 1,
-        sentido_movimiento: formState.sentido_movimiento || 'ida',
-        destino_texto: formState.destino_texto?.trim() || null,
-        observacion_logistica: formState.observacion_logistica?.trim() || null,
-      },
+      datos_adicionales: datosAdicionales,
     };
 
     const { data, error } = await supabase
@@ -466,7 +585,9 @@ async function handleGuardar() {
 
     if (error) throw error;
 
-    successMessage.value = 'Movimiento registrado con éxito.';
+    successMessage.value = isPagoDirecto
+      ? 'Movimiento y Pago Directo registrados con éxito.'
+      : 'Movimiento registrado con éxito.';
     emit('saved', data);
     if (!isEmbeddedMode.value) {
       setTimeout(() => {
@@ -547,6 +668,31 @@ watch(() => props.initialData, (newVal) => {
     }
     if (newVal.monto_total !== undefined && formState.monto_total !== newVal.monto_total) {
       formState.monto_total = newVal.monto_total;
+    }
+
+    // Modalidad de pago
+    if (newVal.origen_gasto) {
+      formState.origen_pago = newVal.origen_gasto === 'pago_directo' ? 'pago_directo' : 'cuenta_corriente_empresa';
+    }
+    if (newVal.datos_adicionales?.metodo_pago) {
+      formState.metodo_pago = newVal.datos_adicionales.metodo_pago;
+    }
+    if (newVal.datos_adicionales?.referencia_pago) {
+      formState.referencia_pago = newVal.datos_adicionales.referencia_pago;
+    }
+    if (newVal.datos_adicionales?.fecha_pago_directo) {
+      formState.fecha_pago_directo = formatFechaISOToInput(newVal.datos_adicionales.fecha_pago_directo);
+    }
+    if (newVal.datos_adicionales?.observacion_pago) {
+      formState.observacion_pago = newVal.datos_adicionales.observacion_pago;
+    }
+    if (newVal.datos_adicionales?.echeque) {
+      const ech = newVal.datos_adicionales.echeque;
+      formState.echeque_banco = ech.banco_id ? { label: ech.banco_nombre || 'Banco', value: ech.banco_id } : null;
+      formState.echeque_numero = ech.numero || '';
+      formState.echeque_emision = ech.emision || '';
+      formState.echeque_vencimiento = ech.vencimiento || '';
+      formState.echeque_acreditacion = ech.acreditacion || '';
     }
   }
 }, { immediate: true, deep: true });
@@ -789,6 +935,130 @@ watch(formState, (newVal) => {
               <span class="field-label">N° de Guía / Remito</span>
               <input v-model="formState.numero_guia" type="text" class="form-input" placeholder="Ej: 123456" />
             </label>
+
+            <!-- SECCIÓN MODALIDAD Y FORMA DE PAGO -->
+            <div class="field-group md:col-span-2 mt-1">
+              <div class="rounded-xl border border-slate-200 bg-slate-50/80 p-3.5 space-y-3 shadow-2xs">
+                <div class="flex items-center justify-between">
+                  <label class="text-[11px] font-bold uppercase tracking-wider text-slate-700 flex items-center gap-1.5">
+                    <span>💳 Forma de Pago / Imputación</span>
+                    <span class="text-red-500">*</span>
+                  </label>
+                  <span class="text-[10px] text-slate-500 font-medium">
+                    {{ formState.origen_pago === 'pago_directo' ? 'Abonado directo con comprobante' : 'Pendiente en Cuenta Corriente' }}
+                  </span>
+                </div>
+
+                <div class="grid grid-cols-1 gap-2.5 sm:grid-cols-2">
+                  <!-- Opción 1: Cuenta Corriente -->
+                  <button
+                    type="button"
+                    class="group flex flex-col justify-between rounded-lg border p-3 text-left transition-all cursor-pointer"
+                    :class="formState.origen_pago === 'cuenta_corriente_empresa'
+                      ? 'border-amber-500 bg-amber-50/80 font-medium text-slate-900 shadow-2xs ring-1 ring-amber-500/30'
+                      : 'border-slate-200 bg-white text-slate-700 hover:border-amber-300 hover:bg-slate-50'"
+                    @click="formState.origen_pago = 'cuenta_corriente_empresa'"
+                  >
+                    <div class="flex items-center justify-between">
+                      <span class="inline-flex items-center gap-1 rounded px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider"
+                            :class="formState.origen_pago === 'cuenta_corriente_empresa' ? 'bg-amber-600 text-white' : 'bg-slate-100 text-slate-600 group-hover:bg-amber-100 group-hover:text-amber-700'">
+                        ⏳ Cta. Cte. Empresa
+                      </span>
+                      <span v-if="formState.origen_pago === 'cuenta_corriente_empresa'" class="h-1.5 w-1.5 rounded-full bg-amber-600"></span>
+                    </div>
+                    <div class="mt-1.5">
+                      <h4 class="text-xs font-bold text-slate-900">Abonar luego / Pendiente</h4>
+                      <p class="text-[11px] text-slate-500 leading-tight">Queda registrado en Cta. Cte. para conciliación periódica.</p>
+                    </div>
+                  </button>
+
+                  <!-- Opción 2: Pago Directo -->
+                  <button
+                    type="button"
+                    class="group flex flex-col justify-between rounded-lg border p-3 text-left transition-all cursor-pointer"
+                    :class="formState.origen_pago === 'pago_directo'
+                      ? 'border-emerald-500 bg-emerald-50/80 font-medium text-slate-900 shadow-2xs ring-1 ring-emerald-500/30'
+                      : 'border-slate-200 bg-white text-slate-700 hover:border-emerald-300 hover:bg-slate-50'"
+                    @click="formState.origen_pago = 'pago_directo'"
+                  >
+                    <div class="flex items-center justify-between">
+                      <span class="inline-flex items-center gap-1 rounded px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider"
+                            :class="formState.origen_pago === 'pago_directo' ? 'bg-emerald-600 text-white' : 'bg-slate-100 text-slate-600 group-hover:bg-emerald-100 group-hover:text-emerald-700'">
+                        💳 Pago Directo
+                      </span>
+                      <span v-if="formState.origen_pago === 'pago_directo'" class="h-1.5 w-1.5 rounded-full bg-emerald-600"></span>
+                    </div>
+                    <div class="mt-1.5">
+                      <h4 class="text-xs font-bold text-slate-900">Abonado en el Momento</h4>
+                      <p class="text-[11px] text-slate-500 leading-tight">Asienta método de pago, comprobante y fecha de pago directo.</p>
+                    </div>
+                  </button>
+                </div>
+
+                <!-- Sub-formulario dinámico de Pago Directo -->
+                <div v-if="formState.origen_pago === 'pago_directo'" class="mt-3 rounded-xl border border-emerald-200 bg-emerald-50/60 p-3.5 space-y-3 transition-all">
+                  <div class="flex items-center gap-2 text-xs font-bold text-emerald-900 pb-1 border-b border-emerald-200/60">
+                    <BanknotesIcon class="h-4 w-4 text-emerald-600" />
+                    <span>Datos del Pago Directo</span>
+                  </div>
+
+                  <div class="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                    <label class="field-group">
+                      <span class="field-label text-emerald-900">Método de Pago <span class="text-red-500">*</span></span>
+                      <select v-model="formState.metodo_pago" class="form-input bg-white">
+                        <option v-for="metodo in metodosPago" :key="metodo" :value="metodo">{{ metodo }}</option>
+                      </select>
+                    </label>
+
+                    <label class="field-group">
+                      <span class="field-label text-emerald-900">Fecha de Pago <span class="text-red-500">*</span></span>
+                      <input v-model="formState.fecha_pago_directo" type="date" class="form-input bg-white" />
+                    </label>
+
+                    <label class="field-group sm:col-span-2">
+                      <span class="field-label text-emerald-900">N° de Comprobante / Referencia</span>
+                      <input v-model="formState.referencia_pago" type="text" class="form-input bg-white" placeholder="Ej: Transf. N° 9874125 o N° de recibo" />
+                    </label>
+
+                    <!-- Campos de E-Cheque -->
+                    <template v-if="formState.metodo_pago === 'E-Cheque'">
+                      <label class="field-group">
+                        <span class="field-label text-emerald-900">Banco del Cheque</span>
+                        <v-select
+                          v-model="formState.echeque_banco"
+                          :options="bancosOptions"
+                          :loading="loadingBancos"
+                          taggable
+                          :create-option="handleCreateBanco"
+                          placeholder="Seleccionar o escribir banco..."
+                          class="v-select-filter bg-white rounded-lg"
+                        />
+                      </label>
+
+                      <label class="field-group">
+                        <span class="field-label text-emerald-900">N° de E-Cheque <span class="text-red-500">*</span></span>
+                        <input v-model="formState.echeque_numero" type="text" class="form-input bg-white" placeholder="Ej: 00045812" />
+                      </label>
+
+                      <label class="field-group">
+                        <span class="field-label text-emerald-900">Fecha de Emisión</span>
+                        <input v-model="formState.echeque_emision" type="date" class="form-input bg-white" />
+                      </label>
+
+                      <label class="field-group">
+                        <span class="field-label text-emerald-900">Fecha de Vencimiento / Cobro</span>
+                        <input v-model="formState.echeque_vencimiento" type="date" class="form-input bg-white" />
+                      </label>
+                    </template>
+
+                    <label class="field-group sm:col-span-2">
+                      <span class="field-label text-emerald-900">Nota u Observación del Pago</span>
+                      <input v-model="formState.observacion_pago" type="text" class="form-input bg-white" placeholder="Nota opcional del pago..." />
+                    </label>
+                  </div>
+                </div>
+              </div>
+            </div>
           </div>
         </div>
       </div>
@@ -967,6 +1237,130 @@ watch(formState, (newVal) => {
         <span class="field-label">N° de Guía / Remito</span>
         <input v-model="formState.numero_guia" type="text" class="form-input" placeholder="Ej: 123456" />
       </label>
+
+      <!-- SECCIÓN MODALIDAD Y FORMA DE PAGO (EMBEDDED) -->
+      <div class="field-group md:col-span-2 mt-1">
+        <div class="rounded-xl border border-slate-200 bg-slate-50/80 p-3.5 space-y-3 shadow-2xs">
+          <div class="flex items-center justify-between">
+            <label class="text-[11px] font-bold uppercase tracking-wider text-slate-700 flex items-center gap-1.5">
+              <span>💳 Forma de Pago / Imputación</span>
+              <span class="text-red-500">*</span>
+            </label>
+            <span class="text-[10px] text-slate-500 font-medium">
+              {{ formState.origen_pago === 'pago_directo' ? 'Abonado directo con comprobante' : 'Pendiente en Cuenta Corriente' }}
+            </span>
+          </div>
+
+          <div class="grid grid-cols-1 gap-2.5 sm:grid-cols-2">
+            <!-- Opción 1: Cuenta Corriente -->
+            <button
+              type="button"
+              class="group flex flex-col justify-between rounded-lg border p-3 text-left transition-all cursor-pointer"
+              :class="formState.origen_pago === 'cuenta_corriente_empresa'
+                ? 'border-amber-500 bg-amber-50/80 font-medium text-slate-900 shadow-2xs ring-1 ring-amber-500/30'
+                : 'border-slate-200 bg-white text-slate-700 hover:border-amber-300 hover:bg-slate-50'"
+              @click="formState.origen_pago = 'cuenta_corriente_empresa'"
+            >
+              <div class="flex items-center justify-between">
+                <span class="inline-flex items-center gap-1 rounded px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider"
+                      :class="formState.origen_pago === 'cuenta_corriente_empresa' ? 'bg-amber-600 text-white' : 'bg-slate-100 text-slate-600 group-hover:bg-amber-100 group-hover:text-amber-700'">
+                  ⏳ Cta. Cte. Empresa
+                </span>
+                <span v-if="formState.origen_pago === 'cuenta_corriente_empresa'" class="h-1.5 w-1.5 rounded-full bg-amber-600"></span>
+              </div>
+              <div class="mt-1.5">
+                <h4 class="text-xs font-bold text-slate-900">Abonar luego / Pendiente</h4>
+                <p class="text-[11px] text-slate-500 leading-tight">Queda registrado en Cta. Cte. para conciliación periódica.</p>
+              </div>
+            </button>
+
+            <!-- Opción 2: Pago Directo -->
+            <button
+              type="button"
+              class="group flex flex-col justify-between rounded-lg border p-3 text-left transition-all cursor-pointer"
+              :class="formState.origen_pago === 'pago_directo'
+                ? 'border-emerald-500 bg-emerald-50/80 font-medium text-slate-900 shadow-2xs ring-1 ring-emerald-500/30'
+                : 'border-slate-200 bg-white text-slate-700 hover:border-emerald-300 hover:bg-slate-50'"
+              @click="formState.origen_pago = 'pago_directo'"
+            >
+              <div class="flex items-center justify-between">
+                <span class="inline-flex items-center gap-1 rounded px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider"
+                      :class="formState.origen_pago === 'pago_directo' ? 'bg-emerald-600 text-white' : 'bg-slate-100 text-slate-600 group-hover:bg-emerald-100 group-hover:text-emerald-700'">
+                  💳 Pago Directo
+                </span>
+                <span v-if="formState.origen_pago === 'pago_directo'" class="h-1.5 w-1.5 rounded-full bg-emerald-600"></span>
+              </div>
+              <div class="mt-1.5">
+                <h4 class="text-xs font-bold text-slate-900">Abonado en el Momento</h4>
+                <p class="text-[11px] text-slate-500 leading-tight">Asienta método de pago, comprobante y fecha de pago directo.</p>
+              </div>
+            </button>
+          </div>
+
+          <!-- Sub-formulario dinámico de Pago Directo -->
+          <div v-if="formState.origen_pago === 'pago_directo'" class="mt-3 rounded-xl border border-emerald-200 bg-emerald-50/60 p-3.5 space-y-3 transition-all">
+            <div class="flex items-center gap-2 text-xs font-bold text-emerald-900 pb-1 border-b border-emerald-200/60">
+              <BanknotesIcon class="h-4 w-4 text-emerald-600" />
+              <span>Datos del Pago Directo</span>
+            </div>
+
+            <div class="grid grid-cols-1 gap-3 sm:grid-cols-2">
+              <label class="field-group">
+                <span class="field-label text-emerald-900">Método de Pago <span class="text-red-500">*</span></span>
+                <select v-model="formState.metodo_pago" class="form-input bg-white">
+                  <option v-for="metodo in metodosPago" :key="metodo" :value="metodo">{{ metodo }}</option>
+                </select>
+              </label>
+
+              <label class="field-group">
+                <span class="field-label text-emerald-900">Fecha de Pago <span class="text-red-500">*</span></span>
+                <input v-model="formState.fecha_pago_directo" type="date" class="form-input bg-white" />
+              </label>
+
+              <label class="field-group sm:col-span-2">
+                <span class="field-label text-emerald-900">N° de Comprobante / Referencia</span>
+                <input v-model="formState.referencia_pago" type="text" class="form-input bg-white" placeholder="Ej: Transf. N° 9874125 o N° de recibo" />
+              </label>
+
+              <!-- Campos de E-Cheque -->
+              <template v-if="formState.metodo_pago === 'E-Cheque'">
+                <label class="field-group">
+                  <span class="field-label text-emerald-900">Banco del Cheque</span>
+                  <v-select
+                    v-model="formState.echeque_banco"
+                    :options="bancosOptions"
+                    :loading="loadingBancos"
+                    taggable
+                    :create-option="handleCreateBanco"
+                    placeholder="Seleccionar o escribir banco..."
+                    class="v-select-filter bg-white rounded-lg"
+                  />
+                </label>
+
+                <label class="field-group">
+                  <span class="field-label text-emerald-900">N° de E-Cheque <span class="text-red-500">*</span></span>
+                  <input v-model="formState.echeque_numero" type="text" class="form-input bg-white" placeholder="Ej: 00045812" />
+                </label>
+
+                <label class="field-group">
+                  <span class="field-label text-emerald-900">Fecha de Emisión</span>
+                  <input v-model="formState.echeque_emision" type="date" class="form-input bg-white" />
+                </label>
+
+                <label class="field-group">
+                  <span class="field-label text-emerald-900">Fecha de Vencimiento / Cobro</span>
+                  <input v-model="formState.echeque_vencimiento" type="date" class="form-input bg-white" />
+                </label>
+              </template>
+
+              <label class="field-group sm:col-span-2">
+                <span class="field-label text-emerald-900">Nota u Observación del Pago</span>
+                <input v-model="formState.observacion_pago" type="text" class="form-input bg-white" placeholder="Nota opcional del pago..." />
+              </label>
+            </div>
+          </div>
+        </div>
+      </div>
     </div>
   </div>
 </template>
